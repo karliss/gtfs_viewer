@@ -125,6 +125,85 @@ input[type="file"] {
   vertical-align: -0.1rem;
 }
 
+.route-row {
+  cursor: pointer;
+}
+
+.route-row:hover,
+.route-row:focus {
+  background: #f5f7fa;
+}
+
+.route-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1554a0;
+  text-align: left;
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+#route-heading {
+  margin-top: 1.25rem;
+}
+
+.route-properties {
+  display: grid;
+  grid-template-columns: minmax(10rem, max-content) minmax(0, 1fr);
+  gap: 0.5rem 1rem;
+  overflow-wrap: anywhere;
+}
+
+.route-properties dt {
+  font-weight: 600;
+}
+
+.route-properties dd {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+#route-variants h4 {
+  margin-bottom: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+#route-variants h5 {
+  margin-bottom: 0.5rem;
+}
+
+#route-variants > section {
+  margin-bottom: 1.5rem;
+}
+
+#variant-stops details {
+  margin-top: 0.5rem;
+}
+
+#variant-stops summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+#all-route-stops {
+  margin-top: 1.5rem;
+}
+
+#all-route-stops ol,
+#variant-stops ol {
+  padding-left: 1.5rem;
+}
+
+.variant-link {
+  margin-right: 1rem;
+}
+
+#back-to-route,
+#clear-filter {
+  margin-top: 0.75rem;
+}
+
 #status:not(:empty),
 #table-summary {
   margin-top: 1rem;

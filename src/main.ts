@@ -1,4 +1,7 @@
-import { loadGtfs, type GtfsFeed, type GtfsTable } from "./gtfs";
+import {
+  decodeRouteType, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, loadGtfs,
+  type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
+} from "./gtfs";
 
 const app = document.querySelector<HTMLElement>("#app");
 
@@ -28,8 +31,11 @@ app.innerHTML = `
     <section id="viewer" class="panel viewer" aria-labelledby="viewer-heading" hidden>
       <h2 id="viewer-heading">Feed tables</h2>
       <p id="feed-summary"></p>
+      <button id="back-to-route" type="button" hidden>Back to route details</button>
       <label for="table-select">Table</label>
       <select id="table-select"></select>
+      <p id="table-filter" hidden></p>
+      <button id="clear-filter" type="button" hidden>Show all rows</button>
       <p id="table-summary" aria-live="polite"></p>
       <div class="table-scroll" tabindex="0" role="region" aria-label="GTFS table">
         <table>
@@ -42,6 +48,19 @@ app.innerHTML = `
         <span id="page-label"></span>
         <button id="next" type="button">Next</button>
       </div>
+    </section>
+    <section id="route-detail" class="panel viewer" aria-labelledby="route-heading" hidden>
+      <button id="back-to-tables" type="button">Back to tables</button>
+      <h2 id="route-heading" tabindex="-1">Route details</h2>
+      <div id="route-properties"></div>
+      <p id="route-summary"></p>
+      <h3>Shapes and route variants</h3>
+      <div id="route-variants"></div>
+      <div id="variant-stops"></div>
+      <section id="all-route-stops">
+        <h3>All route stops</h3>
+        <ol id="route-stop-list"></ol>
+      </section>
     </section>
   </main>
 `;
@@ -65,9 +84,23 @@ const tableBody = element<HTMLTableSectionElement>("#table-body");
 const previous = element<HTMLButtonElement>("#previous");
 const next = element<HTMLButtonElement>("#next");
 const pageLabel = element<HTMLSpanElement>("#page-label");
+const routeDetail = element<HTMLElement>("#route-detail");
+const routeHeading = element<HTMLHeadingElement>("#route-heading");
+const routeProperties = element<HTMLElement>("#route-properties");
+const routeVariants = element<HTMLElement>("#route-variants");
+const routeSummary = element<HTMLParagraphElement>("#route-summary");
+const variantStops = element<HTMLElement>("#variant-stops");
+const routeStopList = element<HTMLOListElement>("#route-stop-list");
+const backToTables = element<HTMLButtonElement>("#back-to-tables");
+const backToRoute = element<HTMLButtonElement>("#back-to-route");
+const tableFilter = element<HTMLParagraphElement>("#table-filter");
+const clearFilter = element<HTMLButtonElement>("#clear-filter");
 const pageSize = 100;
 let feed: GtfsFeed | undefined;
 let page = 0;
+let routesById = new Map<string, GtfsRow<"routes.txt">>();
+let filteredTable: GtfsTable | undefined;
+let currentRoute: GtfsRow<"routes.txt"> | undefined;
 
 type CellRenderer = (column: string, value: string | null) => HTMLTableCellElement;
 
@@ -113,12 +146,174 @@ const tableCellRenderers: Record<string, CellRenderer> = {
   "routes.txt": renderRoutesCell,
 };
 
+function showRoute(route: GtfsRow<"routes.txt">): void {
+  if (!feed) return;
+  currentRoute = route;
+  const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
+  routeHeading.textContent = title ? `Route details: ${title}` : "Route details";
+  const list = document.createElement("dl");
+  list.className = "route-properties";
+  const properties = [...Object.entries(route.fields), ...Object.entries(route.unrecognizedColumns)];
+  for (const [name, value] of properties) {
+    const term = document.createElement("dt");
+    term.textContent = name;
+    const description = document.createElement("dd");
+    if (value === null) {
+      description.textContent = "Not provided";
+    } else if (value === "") {
+      description.textContent = "(empty)";
+    } else if (name === "route_type") {
+      description.textContent = `${decodeRouteType(value)} (${value})`;
+    } else {
+      description.append(...renderRoutesCell(name, value).childNodes);
+    }
+    list.append(term, description);
+  }
+  if (route.extraValues.length > 0) {
+    const term = document.createElement("dt");
+    term.textContent = "Extra values";
+    const description = document.createElement("dd");
+    description.textContent = JSON.stringify(route.extraValues);
+    list.append(term, description);
+  }
+  routeProperties.replaceChildren(list);
+
+  const { variants, tripsCount, tripsWithoutVariant } = route.fields.route_id
+    ? getRouteVariants(feed, route.fields.route_id)
+    : { variants: [], tripsCount: 0, tripsWithoutVariant: 0 };
+  routeSummary.textContent =
+    `${variants.length} ${variants.length === 1 ? "variant" : "variants"} · `
+    + `${tripsCount} ${tripsCount === 1 ? "trip references" : "trips reference"} this route.`;
+  const stopsTable = feed.tables.find((table) => table.kind === "stops.txt");
+  const stopNames = new Map(stopsTable?.rows.map(({ fields }) => [fields.stop_id, fields.stop_name]));
+  routeVariants.replaceChildren();
+  variantStops.replaceChildren();
+  routeStopList.replaceChildren();
+  if (variants.length === 0) {
+    const message = document.createElement("p");
+    message.textContent = "No route variants could be formed from this route's trips.";
+    routeVariants.append(message);
+  }
+  const uniqueStops = new Set<string | null>();
+  for (const [index, variant] of variants.entries()) {
+    const section = document.createElement("section");
+    const heading = document.createElement("h4");
+    heading.textContent = `Variant ${index + 1}`;
+    section.append(heading);
+    const properties = document.createElement("dl");
+    properties.className = "route-properties";
+    for (const [name, value] of [
+      ["Shape ID", variant.shapeId],
+      ["Trip headsign", variant.tripHeadsign],
+      ["Trip short name", variant.tripShortName],
+      ["Direction ID", variant.directionIds.map((id) => id === null ? "Not provided" : id === "" ? "(empty)" : id).join(", ")],
+    ]) {
+      const term = document.createElement("dt");
+      term.textContent = name;
+      const description = document.createElement("dd");
+      description.textContent = value === null ? "Not provided" : value === "" ? "(empty)" : value;
+      properties.append(term, description);
+    }
+    section.append(properties);
+    const tableLinks: (readonly ["shapes.txt" | "trips.txt", string])[] = [
+      ...(variant.shapeId ? [["shapes.txt", "View shape rows"] as const] : []),
+      ["trips.txt", "View variant trips"],
+    ];
+    for (const [kind, label] of tableLinks) {
+      if (!feed.tables.some((table) => table.kind === kind)) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "route-link variant-link";
+      button.textContent = label;
+      button.addEventListener("click", () => showVariantTable(variant, kind));
+      section.append(button);
+    }
+    routeVariants.append(section);
+
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = `Stops for variant ${index + 1} (${variant.stops.length})`;
+    details.append(summary);
+    if (variant.stops.length === 0) {
+      const message = document.createElement("p");
+      message.textContent = "No stop times found for this variant.";
+      details.append(message);
+    } else {
+      const stops = document.createElement("ol");
+      for (const stopId of variant.stops) {
+        const item = document.createElement("li");
+        item.textContent = formatStop(stopId, stopNames);
+        stops.append(item);
+        uniqueStops.add(stopId);
+      }
+      details.append(stops);
+    }
+    variantStops.append(details);
+  }
+  if (tripsWithoutVariant > 0) {
+    const message = document.createElement("p");
+    message.textContent = `${tripsWithoutVariant} ${tripsWithoutVariant === 1 ? "trip lacks" : "trips lack"} all variant grouping data (shape, headsign, short name, and stop sequence).`;
+    routeVariants.append(message);
+  }
+  for (const stopId of uniqueStops) {
+    const item = document.createElement("li");
+    item.textContent = formatStop(stopId, stopNames);
+    routeStopList.append(item);
+  }
+  if (uniqueStops.size === 0) {
+    const item = document.createElement("li");
+    item.textContent = "No stops available.";
+    routeStopList.append(item);
+  }
+  viewer.hidden = true;
+  routeDetail.hidden = false;
+  routeHeading.focus();
+}
+
+function formatStop(stopId: string | null, stopNames: Map<string | null, string | null>): string {
+  const stopName = stopNames.get(stopId);
+  return stopName && stopId ? `${stopName} (${stopId})` : stopId || "Stop ID not provided";
+}
+
+function showVariantTable(variant: RouteVariant, kind: "shapes.txt" | "trips.txt"): void {
+  if (!feed) return;
+  const table = getVariantTableRows(feed, variant, kind);
+  if (!table) return;
+  filteredTable = table;
+  tableSelect.selectedIndex = feed.tables.findIndex((candidate) => candidate.kind === kind);
+  page = 0;
+  tableFilter.textContent = kind === "shapes.txt"
+    ? `Showing rows for shape ${variant.shapeId}.`
+    : "Showing trips for this variant.";
+  tableFilter.hidden = false;
+  clearFilter.hidden = false;
+  backToRoute.hidden = false;
+  routeDetail.hidden = true;
+  viewer.hidden = false;
+  renderSelectedTable();
+  tableSelect.focus();
+}
+
+function resetTableFilter(): void {
+  filteredTable = undefined;
+  tableFilter.hidden = true;
+  clearFilter.hidden = true;
+  backToRoute.hidden = true;
+}
+
 function renderTable(table: GtfsTable): void {
+  const { recognized, additional } = getTableColumns(table);
   const header = document.createElement("tr");
-  for (const column of table.columns) {
+  for (const column of recognized) {
     const cell = document.createElement("th");
     cell.scope = "col";
     cell.textContent = column;
+    header.append(cell);
+  }
+  if (additional.length > 0) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = "Additional fields";
     header.append(cell);
   }
   if (table.hasExtraValues) {
@@ -131,15 +326,45 @@ function renderTable(table: GtfsTable): void {
 
   const start = page * pageSize;
   const rows = document.createDocumentFragment();
-  const renderCell = tableCellRenderers[table.name] ?? renderGenericCell;
+  const renderCell = tableCellRenderers[table.kind] ?? renderGenericCell;
   for (const values of table.rows.slice(start, start + pageSize)) {
     const row = document.createElement("tr");
     const fields: Record<string, string | null> = values.fields;
-    for (const column of table.columns) {
-      const value = Object.prototype.hasOwnProperty.call(fields, column)
-        ? fields[column]
-        : values.unrecognizedColumns[column];
-      row.append(renderCell(column, value));
+    if (table.kind === "routes.txt") {
+      const route = values as GtfsRow<"routes.txt">;
+      row.className = "route-row";
+      row.tabIndex = 0;
+      row.setAttribute("aria-label", `Open route ${route.fields.route_id || "details"}`);
+      row.addEventListener("click", (event) => {
+        if (!(event.target instanceof Element) || !event.target.closest("a, button")) showRoute(route);
+      });
+      row.addEventListener("keydown", (event) => {
+        if (event.target === row && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          showRoute(route);
+        }
+      });
+    }
+    for (const column of recognized) {
+      const value = fields[column];
+      const referencedRoute = getReferencedRoute(routesById, table.kind, column, value);
+      if (referencedRoute) {
+        const cell = document.createElement("td");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "route-link";
+        button.textContent = value;
+        button.addEventListener("click", () => showRoute(referencedRoute));
+        cell.append(button);
+        row.append(cell);
+      } else {
+        row.append(renderCell(column, value));
+      }
+    }
+    if (additional.length > 0) {
+      const cell = document.createElement("td");
+      cell.textContent = JSON.stringify(values.unrecognizedColumns);
+      row.append(cell);
     }
     if (table.hasExtraValues) {
       const cell = document.createElement("td");
@@ -159,7 +384,7 @@ function renderTable(table: GtfsTable): void {
 }
 
 function renderSelectedTable(): void {
-  const table = feed?.tables[tableSelect.selectedIndex];
+  const table = filteredTable ?? feed?.tables[tableSelect.selectedIndex];
   if (table) renderTable(table);
 }
 
@@ -172,10 +397,15 @@ form.addEventListener("submit", async (event) => {
   submit.disabled = true;
   status.textContent = "Loading feed…";
   viewer.hidden = true;
+  routeDetail.hidden = true;
+  resetTableFilter();
+  currentRoute = undefined;
   feed = undefined;
+  routesById.clear();
 
   try {
     feed = loadGtfs(new Uint8Array(await file.arrayBuffer()));
+    routesById = indexRoutes(feed);
     tableSelect.replaceChildren(...feed.tables.map((table) => {
       const option = document.createElement("option");
       option.textContent = table.name;
@@ -194,7 +424,24 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
+backToTables.addEventListener("click", () => {
+  routeDetail.hidden = true;
+  viewer.hidden = false;
+  tableSelect.focus();
+});
+
+backToRoute.addEventListener("click", () => {
+  if (currentRoute) showRoute(currentRoute);
+});
+
+clearFilter.addEventListener("click", () => {
+  resetTableFilter();
+  page = 0;
+  renderSelectedTable();
+});
+
 tableSelect.addEventListener("change", () => {
+  resetTableFilter();
   page = 0;
   renderSelectedTable();
 });
@@ -205,7 +452,7 @@ previous.addEventListener("click", () => {
   }
 });
 next.addEventListener("click", () => {
-  const table = feed?.tables[tableSelect.selectedIndex];
+  const table = filteredTable ?? feed?.tables[tableSelect.selectedIndex];
   if (table && (page + 1) * pageSize < table.rows.length) {
     page++;
     renderSelectedTable();
