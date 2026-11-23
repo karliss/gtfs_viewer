@@ -24,6 +24,7 @@ export class MapView {
   private highlighted: Coordinate | null = null;
   private highlightedVariant: number | null = null;
   private hoveredVariant: number | null = null;
+  private mapHoveredVariant: number | null = null;
   private hoveredStop: string | null = null;
   private routeColorsEnabled = true;
   private popup: Popup;
@@ -36,6 +37,7 @@ export class MapView {
     onStopHover: (stopId: string | null) => void,
     stopDetails?: (stopId: string) => HTMLElement | null,
     routeDetails?: (routeId: string) => HTMLElement | null,
+    onVariantHover?: (index: number | null) => void,
   ) {
     this.map = new LibreMap({
       container,
@@ -112,6 +114,10 @@ export class MapView {
       const stopId = stop?.properties?.stopId || null;
       const variant = !stop && line && typeof line.properties?.variantIndex === "number"
         ? line.properties.variantIndex : null;
+      if (variant !== this.mapHoveredVariant) {
+        this.mapHoveredVariant = variant;
+        onVariantHover?.(variant);
+      }
       this.hoverVariant(variant);
       if (stopId !== this.hoveredStop) {
         this.hoveredStop = stopId;
@@ -127,6 +133,10 @@ export class MapView {
       this.popup.remove();
       this.map.getCanvas().style.cursor = "";
       this.hoveredStop = null;
+      if (this.mapHoveredVariant !== null) {
+        this.mapHoveredVariant = null;
+        onVariantHover?.(null);
+      }
       this.hoverVariant(null);
       onStopHover(null);
     });
@@ -150,6 +160,7 @@ export class MapView {
     this.highlighted = null;
     this.highlightedVariant = null;
     this.hoveredVariant = null;
+    this.mapHoveredVariant = null;
     this.pendingZoom = null;
     this.hoveredStop = null;
     this.popup.remove();

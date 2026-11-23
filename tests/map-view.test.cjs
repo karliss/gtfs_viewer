@@ -97,13 +97,23 @@ test("variant highlighting handles solid and dashed lines and clears on update",
 });
 
 test("map hover temporarily highlights variants without clearing pinned selection", () => {
-  const view = new MapView({}, () => {}, () => {});
+  const hovered = [];
+  const view = new MapView({}, () => {}, () => {}, undefined, undefined, (index) => hovered.push(index));
   map.events.load();
   view.highlightVariant(3);
+  view.hoverVariant(5);
   map.features = [{ layer: { id: "route-hit" }, properties: { label: "Other", variantIndex: 5 } }];
   map.events.mousemove({ point: {}, lngLat: [1, 2] });
+  map.events.mousemove({ point: {}, lngLat: [1, 2] });
+  assert.deepEqual(hovered, [5]);
   assert.deepEqual(map.filters["route-highlight"][2], ["==", ["get", "variantIndex"], 5]);
+  map.features = [{ layer: { id: "stops" }, properties: { stopId: "s" } }];
+  map.events.mousemove({ point: {}, lngLat: [1, 2] });
+  assert.deepEqual(hovered, [5, null]);
+  map.features = [{ layer: { id: "route-hit" }, properties: { variantIndex: 5 } }];
+  map.events.mousemove({ point: {}, lngLat: [1, 2] });
   map.events.mouseout();
+  assert.deepEqual(hovered, [5, null, 5, null]);
   assert.deepEqual(map.filters["route-highlight"][2], ["==", ["get", "variantIndex"], 3]);
   view.highlightVariant(null);
   assert.deepEqual(map.filters["route-highlight"][2], ["==", ["get", "variantIndex"], -1]);
