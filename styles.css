@@ -17,20 +17,11 @@ body {
 
 .page {
   width: 100%;
-  padding: 4rem 1rem;
+  padding: 1rem;
 }
 
 .page__header {
-  margin-bottom: 2rem;
-}
-
-.eyebrow {
-  margin: 0 0 0.5rem;
-  color: #52617a;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  margin-bottom: 1rem;
 }
 
 h1,
@@ -40,15 +31,8 @@ p {
 }
 
 h1 {
-  margin-bottom: 0.75rem;
+  margin-bottom: 0;
   font-size: clamp(2rem, 5vw, 3rem);
-}
-
-.intro {
-  max-width: 36rem;
-  color: #52617a;
-  font-size: 1.1rem;
-  line-height: 1.6;
 }
 
 .panel {
@@ -72,7 +56,26 @@ h1 {
 
 form,
 .viewer {
-  margin-top: 1.5rem;
+  margin-top: 0.75rem;
+}
+
+#load-panel.loaded {
+  padding: 0.75rem 1rem;
+}
+
+#load-panel.loaded h2,
+#load-panel.loaded > p:not(#status),
+#load-panel.loaded #status {
+  display: none;
+}
+
+#load-form {
+  margin: 0;
+}
+
+#load-form label {
+  display: inline;
+  margin: 0 0.5rem 0 0;
 }
 
 label {
@@ -126,15 +129,6 @@ input[type="file"] {
   vertical-align: -0.1rem;
 }
 
-.route-row {
-  cursor: pointer;
-}
-
-.route-row:hover,
-.route-row:focus {
-  background: #f5f7fa;
-}
-
 .route-link {
   padding: 0;
   border: 0;
@@ -145,6 +139,18 @@ input[type="file"] {
   overflow-wrap: anywhere;
 }
 
+#agency-dialog {
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: 80vh;
+  overflow: auto;
+  border: 1px solid #aebbd0;
+  border-radius: 0.5rem;
+}
+
+#agency-dialog::backdrop {
+  background: rgb(0 0 0 / 35%);
+}
+
 .route-map-icon {
   padding: 0;
   border: 0;
@@ -153,7 +159,7 @@ input[type="file"] {
 }
 
 #route-heading {
-  margin-top: 1.25rem;
+  margin-top: 0.5rem;
 }
 
 .route-properties {
@@ -200,6 +206,11 @@ input[type="file"] {
 
 #all-route-stops {
   margin-top: 1.5rem;
+}
+
+#all-route-stops summary {
+  cursor: pointer;
+  font-weight: 600;
 }
 
 #all-route-stops ol,
@@ -277,7 +288,7 @@ tbody tr:last-child td {
 }
 
 #map-heading {
-  margin-top: 1rem;
+  margin-top: 0.5rem;
 }
 
 #map-error:not(:empty) {
@@ -298,9 +309,43 @@ tbody tr:last-child td {
 }
 
 #map-sidebar {
-  width: 20rem;
+  width: 24rem;
   max-height: 65vh;
   overflow: auto;
+}
+
+#map-variant-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem 1rem;
+}
+
+#map-variant-controls label {
+  margin: 0;
+}
+
+#map-variant {
+  min-width: 16rem;
+}
+
+.map-option {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.map-option input {
+  margin: 0;
+}
+
+.stop-routes {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+#map-stop-lists-toggle {
+  margin-top: 0.75rem;
 }
 
 #map-sidebar h3 {
@@ -335,8 +380,14 @@ tbody tr:last-child td {
 }
 
 #map-canvas .maplibregl-popup-content {
-  max-height: 45vh;
+  width: min(32rem, calc(100vw - 3rem));
+  max-width: min(32rem, calc(100vw - 3rem));
+  max-height: 55vh;
   overflow: auto;
+}
+
+#map-canvas .maplibregl-popup-content h3 {
+  margin-bottom: 0.5rem;
 }
 
 #map-canvas .route-properties {

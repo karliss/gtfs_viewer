@@ -11,6 +11,7 @@ class FakeMap {
     this.events = {};
     this.sources = {};
     this.filters = {};
+    this.paint = {};
     this.features = [];
     this.canvas = { style: {} };
   }
@@ -19,6 +20,7 @@ class FakeMap {
   addSource(id, source) { this.sources[id] = { data: source.data, setData(data) { this.data = data; } }; }
   addLayer() {}
   setFilter(id, filter) { this.filters[id] = filter; }
+  setPaintProperty(id, name, value) { this.paint[`${id}:${name}`] = value; }
   getSource(id) { return this.sources[id]; }
   queryRenderedFeatures() { return this.features; }
   getCanvas() { return this.canvas; }
@@ -117,6 +119,31 @@ test("click opens stop details and pre-load zoom is applied after fit", () => {
   assert.deepEqual(map.lastEase.center, [1, 2]);
   assert.equal(map.lastEase.zoom, 16);
   map.features = [{ layer: { id: "stops" }, properties: { stopId: "s" } }];
+  map.events.click({ point: {}, lngLat: [1, 2] });
+  assert.equal(detailPopup.content, content);
+  assert.equal(detailPopup.visible, true);
+});
+
+test("route colors are used by default and can be disabled", () => {
+  const view = new MapView({}, () => {}, () => {});
+  view.update([], [
+    { coordinates: [[1, 2], [3, 4]], approximate: false, variantIndex: 0, label: "Route", routeId: "r", color: "#aabbcc" },
+  ]);
+  map.events.load();
+  assert.equal(map.sources["route-lines"].data.features[0].properties.color, "#aabbcc");
+  assert.deepEqual(map.paint["route-lines:line-color"], ["get", "color"]);
+  view.setRouteColors(false);
+  assert.equal(map.paint["route-lines:line-color"], "#1554a0");
+  assert.equal(map.paint["route-approximations:line-color"], "#1554a0");
+  view.setRouteColors(true);
+  assert.deepEqual(map.paint["route-lines:line-color"], ["get", "color"]);
+});
+
+test("clicking a route line opens compact route details", () => {
+  const content = {};
+  const view = new MapView({}, () => {}, () => {}, undefined, (id) => id === "r" ? content : null);
+  map.events.load();
+  map.features = [{ layer: { id: "route-hit" }, properties: { routeId: "r" } }];
   map.events.click({ point: {}, lngLat: [1, 2] });
   assert.equal(detailPopup.content, content);
   assert.equal(detailPopup.visible, true);

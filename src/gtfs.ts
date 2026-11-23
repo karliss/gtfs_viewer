@@ -84,6 +84,22 @@ export function getReferencedRoute(
   return routes.get(value);
 }
 
+export function summarizeTripField(
+  trips: readonly GtfsRow<"trips.txt">[],
+  field: "wheelchair_accessible" | "bikes_allowed",
+): string {
+  if (!trips.length) return "No trips available";
+  const counts = new Map<string | null, number>();
+  for (const trip of trips) {
+    const value = trip.fields[field];
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  const label = (value: string | null): string => value === null ? "Not provided" : value === "" ? "(empty)" : value;
+  return [...counts].map(([value, count]) => counts.size === 1
+    ? label(value)
+    : `${label(value)} (${Number((count * 100 / trips.length).toFixed(1))}%)`).join(", ");
+}
+
 export interface RouteVariant {
   shapeId: string | null;
   tripHeadsign: string | null;
@@ -194,7 +210,7 @@ function parseTable(name: string, columns: string[], records: string[][]): GtfsT
   const valueAt = (record: string[], column: string, index: number | undefined): string | null => {
     const value = index === undefined ? null : record[index] ?? null;
     return value !== null && (column === "id" || column.endsWith("_id") ||
-      (kind === "routes.txt" && column === "route_type")) ? value.trim() : value;
+      (kind === "routes.txt" && (column === "route_type" || column === "route_short_name"))) ? value.trim() : value;
   };
   const rows = records.map((record) => ({
     fields: Object.fromEntries(fields.map((field) => {

@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
-  decodeRouteType, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, loadGtfs,
+  decodeRouteType, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, loadGtfs, summarizeTripField,
 } = require("../dist/gtfs.cjs");
 
 function archive(files) {
@@ -154,7 +154,7 @@ test("trims headers and ID values in the sample trips", () => {
   assert.equal(variants[0].shapeId, "124085");
 });
 
-test("trims ID values across tables without changing other values", () => {
+test("trims IDs and route short names without changing unrelated values", () => {
   const feed = loadGtfs(archive({
     "routes.txt": "route_id,route_short_name,custom_id,note\n r ,  Name  , ext ,  text  \n",
     "trips.txt": "route_id,trip_id,shape_id\n r , t , s \n r , t2 , s \n",
@@ -163,7 +163,7 @@ test("trims ID values across tables without changing other values", () => {
   }));
   const route = feed.tables.find((table) => table.kind === "routes.txt").rows[0];
   assert.equal(route.fields.route_id, "r");
-  assert.equal(route.fields.route_short_name, "  Name  ");
+  assert.equal(route.fields.route_short_name, "Name");
   assert.deepEqual(route.unrecognizedColumns, { custom_id: "ext", note: "  text  " });
   const extension = feed.tables.find((table) => table.kind === "unknown").rows[0];
   assert.deepEqual(extension.unrecognizedColumns, { id: "x", other_id: "y", description: " value " });
@@ -172,6 +172,17 @@ test("trims ID values across tables without changing other values", () => {
   assert.equal(variants[0].shapeId, "s");
   assert.deepEqual(variants[0].stops, ["a"]);
   assert.deepEqual(variants[0].trips.map(({ fields }) => fields.trip_id), ["t", "t2"]);
+});
+
+test("summarizes all trip accessibility values including missing and empty entries", () => {
+  const [table] = loadGtfs(archive({
+    "trips.txt": "trip_id,wheelchair_accessible,bikes_allowed\n1,1,2\n2,1,2\n3,2,\n4,,2\n5\n",
+  })).tables;
+  assert.equal(summarizeTripField([], "bikes_allowed"), "No trips available");
+  assert.equal(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), "1");
+  assert.equal(summarizeTripField(table.rows, "wheelchair_accessible"), "1 (40%), 2 (20%), (empty) (20%), Not provided (20%)");
+  assert.equal(summarizeTripField(table.rows, "bikes_allowed"), "2 (60%), (empty) (20%), Not provided (20%)");
+  assert.equal(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), "2 (66.7%), (empty) (33.3%)");
 });
 
 test("reports invalid UTF-8 in parsed tables", () => {
