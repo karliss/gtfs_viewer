@@ -82,7 +82,8 @@ label {
 }
 
 .form-controls,
-.pagination {
+.pagination,
+.table-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -164,6 +165,10 @@ input[type="file"] {
   white-space: pre-wrap;
 }
 
+.route-properties .not-provided {
+  color: #a4adbb;
+}
+
 #route-variants h4 {
   margin-bottom: 0.5rem;
   overflow-wrap: anywhere;
@@ -177,11 +182,11 @@ input[type="file"] {
   margin-bottom: 1.5rem;
 }
 
-#variant-stops details {
+#route-variants details {
   margin-top: 0.5rem;
 }
 
-#variant-stops summary {
+#route-variants summary {
   cursor: pointer;
   font-weight: 600;
 }
@@ -191,7 +196,7 @@ input[type="file"] {
 }
 
 #all-route-stops ol,
-#variant-stops ol {
+#route-variants ol {
   padding-left: 1.5rem;
 }
 
@@ -211,6 +216,13 @@ input[type="file"] {
 
 .viewer label {
   margin-top: 1.25rem;
+}
+
+.table-controls input {
+  max-width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #aebbd0;
+  border-radius: 0.35rem;
 }
 
 .table-scroll {

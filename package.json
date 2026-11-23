@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "npm run typecheck && esbuild src/main.ts --bundle --outfile=dist/main.js",
+    "build": "npm run typecheck && esbuild src/gtfs-worker.ts --bundle --outfile=dist/gtfs-worker.txt && esbuild src/main.ts --bundle --loader:.txt=text --outfile=dist/main.js",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "esbuild src/gtfs.ts --bundle --platform=node --format=cjs --outfile=dist/gtfs.cjs && tsc --ignoreConfig --noEmit --target ES2020 --module ES2022 --moduleResolution bundler --strict --skipLibCheck tests/gtfs-types.ts && node --test tests/*.test.cjs"
+    "test": "esbuild src/gtfs.ts --bundle --platform=node --format=cjs --outfile=dist/gtfs.cjs && esbuild src/gtfs-worker.ts --bundle --outfile=dist/gtfs-worker.txt && tsc --ignoreConfig --noEmit --target ES2020 --module ES2022 --moduleResolution bundler --strict --skipLibCheck tests/gtfs-types.ts && node --test tests/*.test.cjs"
   },
   "dependencies": {
     "fflate": "^0.8.2",

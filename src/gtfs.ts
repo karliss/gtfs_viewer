@@ -179,7 +179,8 @@ function parseTable(name: string, columns: string[], records: string[][]): GtfsT
     .filter(({ column }) => !fieldNames.has(column));
   const valueAt = (record: string[], column: string, index: number | undefined): string | null => {
     const value = index === undefined ? null : record[index] ?? null;
-    return value !== null && (column === "id" || column.endsWith("_id")) ? value.trim() : value;
+    return value !== null && (column === "id" || column.endsWith("_id") ||
+      (kind === "routes.txt" && column === "route_type")) ? value.trim() : value;
   };
   const rows = records.map((record) => ({
     fields: Object.fromEntries(fields.map((field) => {
