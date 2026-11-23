@@ -1,5 +1,5 @@
 import {
-  decodeRouteType, getReferencedRoute, getRouteVariants, getVariantTableRows, indexRoutes, loadGtfs,
+  decodeRouteType, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, loadGtfs,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
 
@@ -302,11 +302,18 @@ function resetTableFilter(): void {
 }
 
 function renderTable(table: GtfsTable): void {
+  const { recognized, additional } = getTableColumns(table);
   const header = document.createElement("tr");
-  for (const column of table.columns) {
+  for (const column of recognized) {
     const cell = document.createElement("th");
     cell.scope = "col";
     cell.textContent = column;
+    header.append(cell);
+  }
+  if (additional.length > 0) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = "Additional fields";
     header.append(cell);
   }
   if (table.hasExtraValues) {
@@ -338,10 +345,8 @@ function renderTable(table: GtfsTable): void {
         }
       });
     }
-    for (const column of table.columns) {
-      const value = Object.prototype.hasOwnProperty.call(fields, column)
-        ? fields[column]
-        : values.unrecognizedColumns[column];
+    for (const column of recognized) {
+      const value = fields[column];
       const referencedRoute = getReferencedRoute(routesById, table.kind, column, value);
       if (referencedRoute) {
         const cell = document.createElement("td");
@@ -355,6 +360,11 @@ function renderTable(table: GtfsTable): void {
       } else {
         row.append(renderCell(column, value));
       }
+    }
+    if (additional.length > 0) {
+      const cell = document.createElement("td");
+      cell.textContent = JSON.stringify(values.unrecognizedColumns);
+      row.append(cell);
     }
     if (table.hasExtraValues) {
       const cell = document.createElement("td");

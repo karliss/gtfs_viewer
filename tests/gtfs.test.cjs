@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
-  decodeRouteType, getReferencedRoute, getRouteVariants, getVariantTableRows, indexRoutes, loadGtfs,
+  decodeRouteType, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, loadGtfs,
 } = require("../dist/gtfs.cjs");
 
 function archive(files) {
@@ -87,6 +87,32 @@ test("keeps arbitrary unrecognized column names as own properties", () => {
   assert.equal(table.rows[0].unrecognizedColumns.constructor, "second");
 });
 
+test("separates recognized table columns from additional fields, even without rows", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id, shape_id,trip_id,custom,constructor\nr, s,t,,x\n",
+    "stops.txt": "stop_name,custom,stop_id\n",
+    "extension.txt": "route_id,custom\nr,value\n",
+  }));
+  const trips = feed.tables.find((table) => table.kind === "trips.txt");
+  assert.deepEqual(getTableColumns(trips), {
+    recognized: ["route_id", "shape_id", "trip_id"],
+    additional: ["custom", "constructor"],
+  });
+  assert.deepEqual(trips.rows[0].unrecognizedColumns, {
+    custom: "", constructor: "x",
+  });
+  assert.equal(trips.rows[0].fields.shape_id, "s");
+  const stops = feed.tables.find((table) => table.kind === "stops.txt");
+  assert.deepEqual(getTableColumns(stops), {
+    recognized: ["stop_name", "stop_id"], additional: ["custom"],
+  });
+  const extension = feed.tables.find((table) => table.kind === "unknown");
+  assert.deepEqual(getTableColumns(extension), {
+    recognized: [], additional: ["route_id", "custom"],
+  });
+  assert.deepEqual(extension.rows[0].unrecognizedColumns, { route_id: "r", custom: "value" });
+});
+
 test("loads a header-only table and ignores directory entries", () => {
   const zip = zipSync({ "feed/": new Uint8Array(), "feed/agency.txt": strToU8("agency_id\n") });
   const feed = loadGtfs(zip);
@@ -106,6 +132,46 @@ test("reports malformed CSV, empty headers and duplicate columns", () => {
   assert.throws(() => loadGtfs(archive({ "stops.txt": 'id,name\n1,"unterminated' })), /parse stops.txt/i);
   assert.throws(() => loadGtfs(archive({ "stops.txt": "id,\n1,2\n" })), /non-empty header/i);
   assert.throws(() => loadGtfs(archive({ "stops.txt": "id,id\n1,2\n" })), /duplicate column/i);
+  assert.throws(() => loadGtfs(archive({ "stops.txt": "stop_id, stop_id \n1,2\n" })), /duplicate column/i);
+  assert.throws(() => loadGtfs(archive({ "stops.txt": "stop_id, \t \n1,2\n" })), /non-empty header/i);
+});
+
+test("trims headers and ID values in the sample trips", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id, service_id, trip_id, trip_headsign, trip_short_name, direction_id, block_id, shape_id, wheelchair_accessible, bikes_allowed\n"
+      + "5501720, 210688, 210688, , , , , 124085, , \n"
+      + "2301590, 214392, 214392, , , , , 121670, , \n"
+      + "2200045, 239911, 239911, , , , , 137118, , \n",
+  }));
+  const trips = feed.tables[0];
+  assert.equal(trips.rows[0].fields.shape_id, "124085");
+  assert.equal(trips.rows[0].fields.trip_id, "210688");
+  assert.equal(trips.rows[0].fields.trip_headsign, " ");
+  assert.deepEqual(trips.rows[0].unrecognizedColumns, {});
+  const { variants, tripsCount, tripsWithoutVariant } = getRouteVariants(feed, "5501720");
+  assert.equal(tripsCount, 1);
+  assert.equal(tripsWithoutVariant, 0);
+  assert.equal(variants[0].shapeId, "124085");
+});
+
+test("trims ID values across tables without changing other values", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,route_short_name,custom_id,note\n r ,  Name  , ext ,  text  \n",
+    "trips.txt": "route_id,trip_id,shape_id\n r , t , s \n r , t2 , s \n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\n t , a ,1\n t2 , a ,1\n",
+    "extension.txt": "id,other_id,description\n x , y , value \n",
+  }));
+  const route = feed.tables.find((table) => table.kind === "routes.txt").rows[0];
+  assert.equal(route.fields.route_id, "r");
+  assert.equal(route.fields.route_short_name, "  Name  ");
+  assert.deepEqual(route.unrecognizedColumns, { custom_id: "ext", note: "  text  " });
+  const extension = feed.tables.find((table) => table.kind === "unknown").rows[0];
+  assert.deepEqual(extension.unrecognizedColumns, { id: "x", other_id: "y", description: " value " });
+  const { variants } = getRouteVariants(feed, route.fields.route_id);
+  assert.equal(variants.length, 1);
+  assert.equal(variants[0].shapeId, "s");
+  assert.deepEqual(variants[0].stops, ["a"]);
+  assert.deepEqual(variants[0].trips.map(({ fields }) => fields.trip_id), ["t", "t2"]);
 });
 
 test("reports invalid UTF-8 in parsed tables", () => {
@@ -225,6 +291,69 @@ test("forms shape-less variants from any available grouping property", () => {
     { shapeId: null, tripHeadsign: "North", tripShortName: "", stops: [], trips: ["t1", "t2"] },
     { shapeId: null, tripHeadsign: "", tripShortName: "X", stops: [], trips: ["t3"] },
     { shapeId: null, tripHeadsign: "", tripShortName: "", stops: ["a", "b"], trips: ["t4", "t5"] },
+  ]);
+});
+
+test("forms variants from shape IDs in a loaded feed without optional tables or trip IDs", () => {
+  const feed = loadGtfs(archive({
+    "feed/ROUTES.TXT": "\ufeffroute_short_name,route_id\r\nBus,001\r\n",
+    "feed/TRIPS.TXT": "\ufeffshape_id,route_id,trip_id,service_id\r\n"
+      + "shape-a,001,trip-1,weekday\r\n"
+      + "shape-a,001,trip-2,weekend\r\n"
+      + "shape-b,001,,weekday\r\n"
+      + "shape-c,01,trip-3,weekday\r\n",
+  }));
+  const routeId = indexRoutes(feed).get("001").fields.route_id;
+  const { variants, tripsCount, tripsWithoutVariant } = getRouteVariants(feed, routeId);
+  assert.equal(tripsCount, 3);
+  assert.equal(tripsWithoutVariant, 0);
+  assert.deepEqual(variants.map(({ shapeId, stops, trips }) => ({
+    shapeId, stops, trips: trips.map(({ fields }) => fields.trip_id),
+  })), [
+    { shapeId: "shape-a", stops: [], trips: ["trip-1", "trip-2"] },
+    { shapeId: "shape-b", stops: [], trips: [""] },
+  ]);
+  assert.deepEqual(getRouteVariants(feed, "1"), {
+    variants: [], tripsCount: 0, tripsWithoutVariant: 0,
+  });
+});
+
+test("matches stop times by trip ID and groups by the complete numeric stop sequence", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,shape_id\n"
+      + "r,one,s\nr,two,s\nr,three,s\nr,four,s\nother,ignored,s\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\n"
+      + "one,c,10\none,a,1\none,b,2\n"
+      + "two,b,20\ntwo,c,30\ntwo,a,10\n"
+      + "three,a,1\nthree,b,2\n"
+      + "four,a,1\nfour,b,2\nfour,b,3\nfour,c,4\n"
+      + "ignored,z,1\n",
+  }));
+  const { variants, tripsCount, tripsWithoutVariant } = getRouteVariants(feed, "r");
+  assert.equal(tripsCount, 4);
+  assert.equal(tripsWithoutVariant, 0);
+  assert.deepEqual(variants.map(({ stops, trips }) => ({
+    stops, trips: trips.map(({ fields }) => fields.trip_id),
+  })), [
+    { stops: ["a", "b", "c"], trips: ["one", "two"] },
+    { stops: ["a", "b"], trips: ["three"] },
+    { stops: ["a", "b", "b", "c"], trips: ["four"] },
+  ]);
+});
+
+test("keeps shape IDs and trip text distinct even when they contain delimiters", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,shape_id,trip_headsign,trip_short_name\n"
+      + 'r,t1,"s,1",A,B\nr,t2,s,"1,A",B\nr,t3,"s,1",A,C\n'
+      + 'r,t4,"s,1",A,B\n',
+  }));
+  const { variants } = getRouteVariants(feed, "r");
+  assert.deepEqual(variants.map(({ shapeId, tripHeadsign, tripShortName, trips }) => ({
+    shapeId, tripHeadsign, tripShortName, trips: trips.map(({ fields }) => fields.trip_id),
+  })), [
+    { shapeId: "s,1", tripHeadsign: "A", tripShortName: "B", trips: ["t1", "t4"] },
+    { shapeId: "s", tripHeadsign: "1,A", tripShortName: "B", trips: ["t2"] },
+    { shapeId: "s,1", tripHeadsign: "A", tripShortName: "C", trips: ["t3"] },
   ]);
 });
 

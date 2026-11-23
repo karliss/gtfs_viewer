@@ -34,6 +34,18 @@ export interface GtfsFeed {
   unrecognizedFiles: string[];
 }
 
+export function getTableColumns(table: GtfsTable): {
+  recognized: string[];
+  additional: string[];
+} {
+  const knownFields: readonly string[] = table.kind === "unknown" ? [] : gtfsFields[table.kind];
+  const known = new Set(knownFields);
+  return {
+    recognized: table.columns.filter((column) => known.has(column)),
+    additional: table.columns.filter((column) => !known.has(column)),
+  };
+}
+
 export function indexRoutes(feed: GtfsFeed): Map<string, GtfsRow<"routes.txt">> {
   const routes = feed.tables.find((table) => table.kind === "routes.txt");
   const byId = new Map<string, GtfsRow<"routes.txt">>();
@@ -165,13 +177,17 @@ function parseTable(name: string, columns: string[], records: string[][]): GtfsT
   const unknownColumns = columns
     .map((column, index) => ({ column, index }))
     .filter(({ column }) => !fieldNames.has(column));
+  const valueAt = (record: string[], column: string, index: number | undefined): string | null => {
+    const value = index === undefined ? null : record[index] ?? null;
+    return value !== null && (column === "id" || column.endsWith("_id")) ? value.trim() : value;
+  };
   const rows = records.map((record) => ({
     fields: Object.fromEntries(fields.map((field) => {
       const index = columnIndexes.get(field);
-      return [field, index === undefined ? null : record[index] ?? null];
+      return [field, valueAt(record, field, index)];
     })),
     unrecognizedColumns: Object.fromEntries(
-      unknownColumns.map(({ column, index }) => [column, record[index] ?? null]),
+      unknownColumns.map(({ column, index }) => [column, valueAt(record, column, index)]),
     ),
     extraValues: record.slice(columns.length),
   }));
@@ -226,8 +242,12 @@ export function loadGtfs(data: Uint8Array): GtfsFeed {
       throw new Error(`Could not parse ${name}: ${parsed.errors[0].message}`);
     }
 
-    const [columns, ...rows] = parsed.data;
-    if (!columns || columns.some((column) => column.trim() === "")) {
+    const [header, ...rows] = parsed.data;
+    if (!header) {
+      throw new Error(`${name} must have a non-empty header row.`);
+    }
+    const columns = header.map((column) => column.trim());
+    if (columns.some((column) => column === "")) {
       throw new Error(`${name} must have a non-empty header row.`);
     }
     if (new Set(columns).size !== columns.length) {
