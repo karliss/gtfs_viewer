@@ -34,6 +34,18 @@ export const gtfsFields = {
   "attributions.txt": ["attribution_id", "agency_id", "route_id", "trip_id", "organization_name", "is_producer", "is_operator", "is_authority", "attribution_url", "attribution_email", "attribution_phone"],
 } as const;
 
+export const gtfsZeroDefaultEnumFields: Partial<Record<keyof typeof gtfsFields, readonly string[]>> = {
+  "agency.txt": ["cemv_support"],
+  "stops.txt": ["location_type", "wheelchair_boarding"],
+  "routes.txt": ["cemv_support"],
+  "trips.txt": ["wheelchair_accessible", "bikes_allowed", "cars_allowed"],
+  "stop_times.txt": ["pickup_type", "drop_off_type"],
+  "rider_categories.txt": ["is_default_fare_category"],
+  "frequencies.txt": ["exact_times"],
+  "transfers.txt": ["transfer_type"],
+  "attributions.txt": ["is_producer", "is_operator", "is_authority"],
+};
+
 export type GtfsTableName = keyof typeof gtfsFields;
 export type GtfsFields<Name extends GtfsTableName> = {
   [Field in (typeof gtfsFields)[Name][number]]: string | null;

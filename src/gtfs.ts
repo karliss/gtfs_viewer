@@ -1,6 +1,6 @@
 import { unzipSync } from "fflate";
 import Papa from "papaparse";
-import { gtfsFields, type GtfsFields, type GtfsTableName } from "./gtfs-schema";
+import { gtfsZeroDefaultEnumFields, gtfsFields, type GtfsFields, type GtfsTableName } from "./gtfs-schema";
 
 export type { GtfsFields, GtfsTableName } from "./gtfs-schema";
 
@@ -91,7 +91,7 @@ export function summarizeTripField(
   if (!trips.length) return "No trips available";
   const counts = new Map<string | null, number>();
   for (const trip of trips) {
-    const value = trip.fields[field];
+    const value = trip.fields[field]?.trim() ? trip.fields[field] : "0";
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
   const label = (value: string | null): string => value === null ? "Not provided" : value === "" ? "(empty)" : value;
@@ -202,6 +202,7 @@ function parseTable(name: string, columns: string[], records: string[][]): GtfsT
   const key = name.toLowerCase();
   const kind = isGtfsTableName(key) ? key : "unknown";
   const fields: readonly string[] = kind === "unknown" ? [] : gtfsFields[kind];
+  const enumFields = new Set(kind === "unknown" ? [] : gtfsZeroDefaultEnumFields[kind] ?? []);
   const fieldNames = new Set(fields);
   const columnIndexes = new Map(columns.map((column, index) => [column, index]));
   const unknownColumns = columns
@@ -209,6 +210,7 @@ function parseTable(name: string, columns: string[], records: string[][]): GtfsT
     .filter(({ column }) => !fieldNames.has(column));
   const valueAt = (record: string[], column: string, index: number | undefined): string | null => {
     const value = index === undefined ? null : record[index] ?? null;
+    if (enumFields.has(column) && !value?.trim()) return "0";
     return value !== null && (column === "id" || column.endsWith("_id") ||
       (kind === "routes.txt" && (column === "route_type" || column === "route_short_name"))) ? value.trim() : value;
   };
