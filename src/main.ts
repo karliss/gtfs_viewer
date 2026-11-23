@@ -77,15 +77,29 @@ function renderTable(table: GtfsTable): void {
     cell.textContent = column;
     header.append(cell);
   }
+  if (table.hasExtraValues) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = "Extra values";
+    header.append(cell);
+  }
   tableHead.replaceChildren(header);
 
   const start = page * pageSize;
   const rows = document.createDocumentFragment();
   for (const values of table.rows.slice(start, start + pageSize)) {
     const row = document.createElement("tr");
-    for (const value of values) {
+    const fields: Record<string, string | null> = values.fields;
+    for (const column of table.columns) {
       const cell = document.createElement("td");
-      cell.textContent = value;
+      cell.textContent = Object.prototype.hasOwnProperty.call(fields, column)
+        ? fields[column]
+        : values.unrecognizedColumns[column];
+      row.append(cell);
+    }
+    if (table.hasExtraValues) {
+      const cell = document.createElement("td");
+      cell.textContent = values.extraValues.length > 0 ? JSON.stringify(values.extraValues) : "";
       row.append(cell);
     }
     rows.append(row);
