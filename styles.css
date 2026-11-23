@@ -344,8 +344,22 @@ tbody tr:last-child td {
   padding-left: 1rem;
 }
 
+.stop-routes--compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.map-variant-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 #map-stop-lists-toggle {
-  margin-top: 0.75rem;
+  padding: 0.1rem 0.4rem;
 }
 
 #map-sidebar h3 {

@@ -96,14 +96,16 @@ app.innerHTML = `
       <p id="map-summary" role="status"></p>
       <button id="map-clear-filter" type="button" hidden>Clear stop filter</button>
       <div id="map-variant-controls" hidden>
-        <label for="map-variant">Route variant</label>
+        <div class="map-variant-heading">
+          <label for="map-variant">Route variant</label>
+          <button id="map-stop-lists-toggle" type="button" hidden aria-expanded="true" aria-label="Collapse all stop lists" title="Collapse all stop lists">V</button>
+        </div>
         <select id="map-variant"></select>
         <label class="map-option" for="map-route-colors">
           <input id="map-route-colors" type="checkbox" checked />
           Use route colors
         </label>
       </div>
-      <button id="map-stop-lists-toggle" type="button" hidden aria-expanded="true">Collapse all stop lists</button>
       <div class="map-layout">
         <div id="map-canvas" aria-label="Map of transit stops and routes"></div>
         <aside id="map-sidebar" aria-label="Route stops" hidden></aside>
@@ -181,7 +183,9 @@ let filteredTable: GtfsTable | undefined;
 let currentRoute: GtfsRow<"routes.txt"> | undefined;
 let stopsById = new Map<string, GtfsRow<"stops.txt">>();
 let routesByStop = new Map<string, string[]>();
-let stopReturn: "table" | "map" = "table";
+let stopReturn: "table" | "map" | "route" = "table";
+let stopReturnRoute: GtfsRow<"routes.txt"> | undefined;
+let stopReturnRouteOrigin: "table" | "stop" = "table";
 let mapView: MapView | undefined;
 let mapReturn: "table" | "route" = "table";
 let mapRouteVariants: RouteVariant[] = [];
@@ -341,6 +345,14 @@ function routeCompactContent(route: GtfsRow<"routes.txt">): HTMLElement {
   button.textContent = "Open full route details";
   button.addEventListener("click", () => showRoute(route));
   content.append(button);
+  const mapButton = document.createElement("button");
+  mapButton.type = "button";
+  mapButton.className = "route-map-icon";
+  mapButton.textContent = "🗺️";
+  mapButton.title = "Show route on map";
+  mapButton.setAttribute("aria-label", "Show route on map");
+  mapButton.addEventListener("click", () => showRouteMap(route, mapReturn, "all"));
+  content.append(" ", mapButton);
   return content;
 }
 
@@ -365,6 +377,10 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
     }
     list.append(term, description);
   };
+  for (const [name, value] of [...Object.entries(stop.fields), ...Object.entries(stop.unrecognizedColumns)]) {
+    addProperty(name, value);
+  }
+  if (stop.extraValues.length) addProperty("Extra values", JSON.stringify(stop.extraValues));
   const ids = stop.fields.stop_id ? routesByStop.get(stop.fields.stop_id) ?? [] : [];
   const term = document.createElement("dt");
   term.textContent = "Routes";
@@ -373,17 +389,28 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
     description.textContent = "None found";
   } else {
     const routeList = document.createElement("ul");
-    routeList.className = "stop-routes";
+    routeList.className = popup ? "stop-routes stop-routes--compact" : "stop-routes";
     for (const id of ids) {
       const item = document.createElement("li");
       const route = routesById.get(id);
-      if (route && !popup) {
+      if (route) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "route-link";
-        button.textContent = routeListLabel(route);
-        button.setAttribute("aria-label", `Open route ${route.fields.route_id || routeListLabel(route)}`);
-        button.addEventListener("click", () => showRoute(route, "stop"));
+        const color = routeColor(route);
+        if (popup && color) {
+          const swatch = document.createElement("span");
+          swatch.className = "route-color-swatch";
+          swatch.style.backgroundColor = color;
+          swatch.setAttribute("aria-hidden", "true");
+          button.append(swatch);
+        }
+        const shortName = routeListLabel(route);
+        const longName = route.fields.route_long_name;
+        const label = !popup && longName && longName !== shortName ? `${shortName} — ${longName}` : shortName;
+        button.append(document.createTextNode(label));
+        button.setAttribute("aria-label", popup ? `Show route ${label} on map` : `Open route ${label}`);
+        button.addEventListener("click", () => popup ? showRouteMap(route, mapReturn, "all") : showRoute(route, "stop"));
         item.append(button);
       } else {
         item.textContent = route ? routeListLabel(route) : id;
@@ -393,10 +420,6 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
     description.append(routeList);
   }
   list.append(term, description);
-  for (const [name, value] of [...Object.entries(stop.fields), ...Object.entries(stop.unrecognizedColumns)]) {
-    addProperty(name, value);
-  }
-  if (stop.extraValues.length) addProperty("Extra values", JSON.stringify(stop.extraValues));
   content.append(list);
   if (popup) {
     const button = document.createElement("button");
@@ -408,12 +431,17 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
   return content;
 }
 
-function showStop(stop: GtfsRow<"stops.txt">, returnTo: "table" | "map"): void {
+function showStop(stop: GtfsRow<"stops.txt">, returnTo: "table" | "map" | "route"): void {
   stopReturn = returnTo;
+  if (returnTo === "route") {
+    stopReturnRoute = currentRoute;
+    stopReturnRouteOrigin = routeReturn;
+  }
   stopHeading.textContent = `Stop details: ${stop.fields.stop_name || stop.fields.stop_id || "Stop"}`;
   stopProperties.replaceChildren(stopContent(stop));
   viewer.hidden = true;
   mapPanel.hidden = true;
+  routeDetail.hidden = true;
   stopDetail.hidden = false;
   stopHeading.focus();
 }
@@ -483,7 +511,6 @@ function showRoute(route: GtfsRow<"routes.txt">, returnTo: "table" | "stop" = "t
   routeTrips.hidden = !route.fields.route_id || !feed.tables.some((table) => table.kind === "trips.txt");
   const stopsTable = feed.tables.find((table) => table.kind === "stops.txt");
   const stopNames = new Map(stopsTable?.rows.map(({ fields }) => [fields.stop_id, fields.stop_name]));
-  const stopUrls = new Map(stopsTable?.rows.map(({ fields }) => [fields.stop_id, fields.stop_url]));
   routeVariants.replaceChildren();
   routeStopList.replaceChildren();
   if (variants.length === 0) {
@@ -556,7 +583,7 @@ function showRoute(route: GtfsRow<"routes.txt">, returnTo: "table" | "stop" = "t
       const stops = document.createElement("ol");
       for (const stopId of variant.stops) {
         const item = document.createElement("li");
-        item.append(renderLink(stopId ? stopUrls.get(stopId) ?? null : null, formatStop(stopId, stopNames)));
+        item.append(routeStopLink(stopId, stopNames));
         stops.append(item);
         uniqueStops.add(stopId);
       }
@@ -572,7 +599,7 @@ function showRoute(route: GtfsRow<"routes.txt">, returnTo: "table" | "stop" = "t
   }
   for (const stopId of uniqueStops) {
     const item = document.createElement("li");
-    item.append(renderLink(stopId ? stopUrls.get(stopId) ?? null : null, formatStop(stopId, stopNames)));
+    item.append(routeStopLink(stopId, stopNames));
     routeStopList.append(item);
   }
   if (uniqueStops.size === 0) {
@@ -596,6 +623,18 @@ function showRoute(route: GtfsRow<"routes.txt">, returnTo: "table" | "stop" = "t
 function formatStop(stopId: string | null, stopNames: Map<string | null, string | null>): string {
   const stopName = stopNames.get(stopId);
   return stopName && stopId ? `${stopName} (${stopId})` : stopId || "Stop ID not provided";
+}
+
+function routeStopLink(stopId: string | null, stopNames: Map<string | null, string | null>): Node {
+  const label = formatStop(stopId, stopNames);
+  const stop = stopId ? stopsById.get(stopId) : undefined;
+  if (!stop) return document.createTextNode(label);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "route-link";
+  button.textContent = label;
+  button.addEventListener("click", () => showStop(stop, "route"));
+  return button;
 }
 
 function showVariantTable(variant: RouteVariant, kind: "shapes.txt" | "trips.txt"): void {
@@ -833,7 +872,7 @@ function renderStopsMap(): void {
   mapView?.update(stops, []);
 }
 
-function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route", variantIndex = 0): void {
+function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route", variantIndex: number | "all" = 0): void {
   if (!feed) return;
   const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
   mapRouteVariants = route.fields.route_id ? getRouteVariants(feed, route.fields.route_id).variants : [];
@@ -852,7 +891,6 @@ function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route",
     option.textContent = mapVariantLabels[index];
     mapVariant.append(option);
   }
-  mapVariant.value = String(variantIndex);
   mapRouteColors.checked = true;
   if (mapRouteVariants.length) {
     const option = document.createElement("option");
@@ -860,6 +898,7 @@ function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route",
     option.textContent = "All variants";
     mapVariant.append(option);
   }
+  mapVariant.value = String(variantIndex);
   openMap(returnTo, title ? `Route map: ${title}` : "Route map");
   renderRouteMap();
 }
@@ -941,7 +980,9 @@ function renderRouteMap(): void {
   highlightedStopItems = [];
   pinnedVariant = null;
   mapStopListsToggle.hidden = mapRouteVariants.length === 0;
-  mapStopListsToggle.textContent = "Collapse all stop lists";
+  mapStopListsToggle.textContent = "V";
+  mapStopListsToggle.setAttribute("aria-label", "Collapse all stop lists");
+  mapStopListsToggle.title = "Collapse all stop lists";
   mapStopListsToggle.setAttribute("aria-expanded", "true");
   if (!mapRouteVariants.length) {
     mapSummary.textContent = "No route variants are available.";
@@ -980,6 +1021,7 @@ function renderRouteMap(): void {
       label,
       routeId: mapVariantRouteIds[index],
       color: mapVariantColors[index] ?? undefined,
+      stopIds: data.stops.flatMap((stop) => stop.id ? [stop.id] : []),
     });
     if (data.approximate) {
       if (data.line.length >= 2) approximateLines++;
@@ -1067,7 +1109,9 @@ function renderRouteMap(): void {
   mapView?.update(allStops.map((stop) => ({
     ...stop,
     hoverLabel: stop.id && stopLabels.has(stop.id)
-      ? `${stop.name?.trim() || stop.id} — stop ${stopLabels.get(stop.id)!.join(", ")}`
+      ? `${stop.name?.trim() || stop.id} — ${stopLabels.get(stop.id)!.length > 5
+        ? `${stopLabels.get(stop.id)!.length} stops`
+        : `stop ${stopLabels.get(stop.id)!.join(", ")}`}`
       : undefined,
   })), lines);
 }
@@ -1201,6 +1245,8 @@ backFromStop.addEventListener("click", () => {
     mapPanel.hidden = false;
     mapView.resize();
     mapHeading.focus();
+  } else if (stopReturn === "route" && stopReturnRoute) {
+    showRoute(stopReturnRoute, stopReturnRouteOrigin);
   } else {
     viewer.hidden = false;
     tableSelect.focus();
@@ -1212,7 +1258,10 @@ mapStopListsToggle.addEventListener("click", () => {
   const lists = [...mapSidebar.querySelectorAll<HTMLOListElement>("section > ol")];
   const collapse = lists.some((list) => !list.hidden);
   for (const list of lists) list.hidden = collapse;
-  mapStopListsToggle.textContent = collapse ? "Expand all stop lists" : "Collapse all stop lists";
+  const label = collapse ? "Expand all stop lists" : "Collapse all stop lists";
+  mapStopListsToggle.textContent = collapse ? ">" : "V";
+  mapStopListsToggle.setAttribute("aria-label", label);
+  mapStopListsToggle.title = label;
   mapStopListsToggle.setAttribute("aria-expanded", String(!collapse));
 });
 mapClearFilter.addEventListener("click", () => {
