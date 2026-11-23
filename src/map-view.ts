@@ -13,6 +13,7 @@ export interface MapLine {
   label: string;
   routeId?: string;
   color?: string;
+  stopIds?: string[];
 }
 
 export class MapView {
@@ -232,6 +233,9 @@ export class MapView {
     const index = this.hoveredVariant ?? this.highlightedVariant ?? -1;
     this.map.setFilter("route-highlight", ["all", ["==", ["get", "approximate"], false], ["==", ["get", "variantIndex"], index]]);
     this.map.setFilter("route-approximation-highlight", ["all", ["==", ["get", "approximate"], true], ["==", ["get", "variantIndex"], index]]);
+    const stopIds = [...new Set(this.lines.filter((line) => line.variantIndex === index).flatMap((line) => line.stopIds ?? []))];
+    this.map.setPaintProperty("stops", "circle-color", ["case", ["in", ["get", "stopId"], ["literal", stopIds]], "#e95e21", "#fff"]);
+    this.map.setPaintProperty("stops", "circle-stroke-color", ["case", ["in", ["get", "stopId"], ["literal", stopIds]], "#e95e21", "#1554a0"]);
   }
 
   private applyRouteColors(): void {

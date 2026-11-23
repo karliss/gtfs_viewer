@@ -109,6 +109,26 @@ test("map hover temporarily highlights variants without clearing pinned selectio
   assert.deepEqual(map.filters["route-highlight"][2], ["==", ["get", "variantIndex"], -1]);
 });
 
+test("variant highlighting colors only its stops and restores the pinned variant", () => {
+  const view = new MapView({}, () => {}, () => {});
+  view.update([], [
+    { coordinates: [[1, 2], [3, 4]], approximate: false, variantIndex: 0, label: "A", stopIds: ["a", "shared"] },
+    { coordinates: [[1, 2], [3, 4]], approximate: true, variantIndex: 1, label: "B", stopIds: ["b", "shared"] },
+  ]);
+  map.events.load();
+  const highlightedStops = () => map.paint["stops:circle-color"][1][2][1];
+  assert.deepEqual(highlightedStops(), []);
+  view.highlightVariant(0);
+  assert.deepEqual(highlightedStops(), ["a", "shared"]);
+  view.hoverVariant(1);
+  assert.deepEqual(highlightedStops(), ["b", "shared"]);
+  view.hoverVariant(null);
+  assert.deepEqual(highlightedStops(), ["a", "shared"]);
+  view.update([], []);
+  assert.deepEqual(highlightedStops(), []);
+  assert.equal(map.paint["stops:circle-radius"], undefined);
+});
+
 test("click opens stop details and pre-load zoom is applied after fit", () => {
   const content = {};
   const view = new MapView({}, () => {}, () => {}, (id) => id === "s" ? content : null);
