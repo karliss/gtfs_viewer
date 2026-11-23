@@ -34,6 +34,79 @@ export interface GtfsFeed {
   unrecognizedFiles: string[];
 }
 
+export function indexRoutes(feed: GtfsFeed): Map<string, GtfsRow<"routes.txt">> {
+  const routes = feed.tables.find((table) => table.kind === "routes.txt");
+  const byId = new Map<string, GtfsRow<"routes.txt">>();
+  for (const route of routes?.rows ?? []) {
+    if (route.fields.route_id && !byId.has(route.fields.route_id)) {
+      byId.set(route.fields.route_id, route);
+    }
+  }
+  return byId;
+}
+
+export function getReferencedRoute(
+  routes: ReadonlyMap<string, GtfsRow<"routes.txt">>,
+  tableKind: GtfsTable["kind"],
+  column: string,
+  value: string | null,
+): GtfsRow<"routes.txt"> | undefined {
+  if (tableKind === "routes.txt" || !value ||
+    (column !== "route_id" && column !== "from_route_id" && column !== "to_route_id")) {
+    return undefined;
+  }
+  return routes.get(value);
+}
+
+export interface RouteVariant {
+  shapeId: string;
+  stops: (string | null)[];
+}
+
+export function getRouteVariants(feed: GtfsFeed, routeId: string): {
+  variants: RouteVariant[];
+  tripsWithoutShape: number;
+} {
+  const trips = feed.tables.find((table) => table.kind === "trips.txt");
+  const stopTimes = feed.tables.find((table) => table.kind === "stop_times.txt");
+  const shapeTrips = new Map<string, string[]>();
+  let tripsWithoutShape = 0;
+
+  for (const { fields } of trips?.rows ?? []) {
+    if (fields.route_id !== routeId) continue;
+    if (!fields.shape_id) {
+      tripsWithoutShape++;
+      continue;
+    }
+    const tripIds = shapeTrips.get(fields.shape_id) ?? [];
+    if (fields.trip_id) tripIds.push(fields.trip_id);
+    shapeTrips.set(fields.shape_id, tripIds);
+  }
+
+  const relevantTrips = new Set([...shapeTrips.values()].flat());
+  const timesByTrip = new Map<string, GtfsRow<"stop_times.txt">[]>();
+  for (const row of stopTimes?.rows ?? []) {
+    const tripId = row.fields.trip_id;
+    if (!tripId || !relevantTrips.has(tripId)) continue;
+    const times = timesByTrip.get(tripId) ?? [];
+    times.push(row);
+    timesByTrip.set(tripId, times);
+  }
+
+  const variants = [...shapeTrips].map(([shapeId, tripIds]) => {
+    const times = tripIds.map((id) => timesByTrip.get(id)).find((rows) => rows?.length) ?? [];
+    const sequence = (value: string | null): number =>
+      value !== null && /^\d+$/.test(value) ? Number(value) : Infinity;
+    const ordered = [...times].sort((a, b) =>
+      sequence(a.fields.stop_sequence) - sequence(b.fields.stop_sequence));
+    return {
+      shapeId,
+      stops: ordered.map(({ fields }) => fields.stop_id),
+    };
+  });
+  return { variants, tripsWithoutShape };
+}
+
 function isGtfsTableName(name: string): name is GtfsTableName {
   return Object.prototype.hasOwnProperty.call(gtfsFields, name);
 }

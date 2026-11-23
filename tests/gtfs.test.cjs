@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
-const { loadGtfs } = require("../dist/gtfs.cjs");
+const { getReferencedRoute, getRouteVariants, indexRoutes, loadGtfs } = require("../dist/gtfs.cjs");
 
 function archive(files) {
   return zipSync(Object.fromEntries(
@@ -109,4 +109,67 @@ test("reports malformed CSV, empty headers and duplicate columns", () => {
 test("reports invalid UTF-8 in parsed tables", () => {
   const zip = zipSync({ "stops.txt": new Uint8Array([0xff]) });
   assert.throws(() => loadGtfs(zip), /valid UTF-8/);
+});
+
+test("groups route trips by shape and orders the representative trip's stops", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,shape_id\nr1,t1,s1\nr1,t2,s1\nr1,t3,s2\nr1,t4,\nr2,t5,s3\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\n"
+      + "t2,b,10\nt2,a,2\nt2,a,3\nt3,c,1\nt5,d,1\n",
+    "stops.txt": "stop_id,stop_name\na,Alpha\nb,Beta\n",
+  }));
+  assert.deepEqual(getRouteVariants(feed, "r1"), {
+    variants: [
+      { shapeId: "s1", stops: ["a", "a", "b"] },
+      { shapeId: "s2", stops: ["c"] },
+    ],
+    tripsWithoutShape: 1,
+  });
+});
+
+test("handles missing tables and shape trips without stop times", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,shape_id\nr,t,s\nr,u,\n",
+  }));
+  assert.deepEqual(getRouteVariants(feed, "r"), {
+    variants: [{ shapeId: "s", stops: [] }],
+    tripsWithoutShape: 1,
+  });
+  assert.deepEqual(getRouteVariants(feed, "other"), { variants: [], tripsWithoutShape: 0 });
+});
+
+test("resolves route references from other tables without linking missing IDs", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,route_short_name\nr,First\nr,Duplicate\n,No ID\n",
+    "trips.txt": "route_id,trip_id\nr,t\n",
+  }));
+  const routes = indexRoutes(feed);
+  for (const [table, column] of [
+    ["trips.txt", "route_id"],
+    ["transfers.txt", "from_route_id"],
+    ["transfers.txt", "to_route_id"],
+    ["unknown", "route_id"],
+  ]) {
+    assert.equal(getReferencedRoute(routes, table, column, "r").fields.route_short_name, "First");
+  }
+  assert.equal(getReferencedRoute(routes, "routes.txt", "route_id", "r"), undefined);
+  assert.equal(getReferencedRoute(routes, "trips.txt", "trip_id", "r"), undefined);
+  assert.equal(getReferencedRoute(routes, "trips.txt", "route_id", "missing"), undefined);
+  assert.equal(getReferencedRoute(routes, "trips.txt", "route_id", ""), undefined);
+  assert.equal(getReferencedRoute(routes, "trips.txt", "route_id", null), undefined);
+  assert.equal(indexRoutes(loadGtfs(archive({ "trips.txt": "trip_id\nt\n" }))).size, 0);
+});
+
+test("preserves missing stop IDs and variants with no stop times", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,shape_id\nr,t,s1\nr,u,s2\n",
+    "stop_times.txt": "trip_id,stop_sequence,location_group_id,location_id\nt,1,group,\nt,2,,location\n",
+  }));
+  assert.deepEqual(getRouteVariants(feed, "r"), {
+    variants: [
+      { shapeId: "s1", stops: [null, null] },
+      { shapeId: "s2", stops: [] },
+    ],
+    tripsWithoutShape: 0,
+  });
 });
