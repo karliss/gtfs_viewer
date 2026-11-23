@@ -1,4 +1,4 @@
-import { LngLatBounds, Map as LibreMap, NavigationControl, setWorkerUrl, type GeoJSONSource } from "maplibre-gl";
+import { LngLatBounds, Map as LibreMap, NavigationControl, Popup, setWorkerUrl, type GeoJSONSource } from "maplibre-gl";
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
 import mapWorker from "../dist/map-worker.txt";
 import type { Coordinate, MapStop } from "./map-data";
@@ -6,9 +6,11 @@ import type { Coordinate, MapStop } from "./map-data";
 const workerUrl = URL.createObjectURL(new Blob([mapWorker], { type: "text/javascript" }));
 setWorkerUrl(workerUrl);
 
-interface MapLine {
+export interface MapLine {
   coordinates: Coordinate[];
   approximate: boolean;
+  variantIndex: number;
+  label: string;
 }
 
 export class MapView {
@@ -17,8 +19,15 @@ export class MapView {
   private stops: MapStop[] = [];
   private lines: MapLine[] = [];
   private highlighted: Coordinate | null = null;
+  private highlightedVariant: number | null = null;
+  private hoveredStop: string | null = null;
+  private popup: Popup;
 
-  constructor(container: HTMLElement, onError: (message: string) => void) {
+  constructor(
+    container: HTMLElement,
+    onError: (message: string) => void,
+    onStopHover: (stopId: string | null) => void,
+  ) {
     this.map = new LibreMap({
       container,
       center: [0, 0],
@@ -37,6 +46,7 @@ export class MapView {
         layers: [{ id: "basemap", type: "raster", source: "osm" }],
       },
     });
+    this.popup = new Popup({ closeButton: false, closeOnClick: false });
     this.map.addControl(new NavigationControl(), "top-right");
     this.map.on("error", (event) => onError(`Map or basemap error: ${event.error.message}`));
     this.map.on("load", () => {
@@ -49,6 +59,20 @@ export class MapView {
         id: "route-approximations", type: "line", source: "route-lines", filter: ["==", ["get", "approximate"], true],
         paint: { "line-color": "#1554a0", "line-width": 4, "line-dasharray": [2, 2] },
       });
+      this.map.addLayer({
+        id: "route-highlight", type: "line", source: "route-lines",
+        filter: ["all", ["==", ["get", "approximate"], false], ["==", ["get", "variantIndex"], -1]],
+        paint: { "line-color": "#e95e21", "line-width": 7 },
+      });
+      this.map.addLayer({
+        id: "route-approximation-highlight", type: "line", source: "route-lines",
+        filter: ["all", ["==", ["get", "approximate"], true], ["==", ["get", "variantIndex"], -1]],
+        paint: { "line-color": "#e95e21", "line-width": 7, "line-dasharray": [2, 2] },
+      });
+      this.map.addLayer({
+        id: "route-hit", type: "line", source: "route-lines",
+        paint: { "line-color": "#1554a0", "line-width": 16, "line-opacity": 0 },
+      });
       this.map.addSource("stops", { type: "geojson", data: this.stopFeatures() });
       this.map.addLayer({
         id: "stops", type: "circle", source: "stops",
@@ -60,7 +84,32 @@ export class MapView {
         paint: { "circle-radius": 10, "circle-color": "#e95e21", "circle-stroke-color": "#fff", "circle-stroke-width": 2 },
       });
       this.loaded = true;
+      this.applyVariantHighlight();
       this.fit();
+    });
+    this.map.on("mousemove", (event) => {
+      if (!this.loaded) return;
+      const features = this.map.queryRenderedFeatures(event.point, { layers: ["stops", "route-hit"] });
+      const stop = features.find((feature) => feature.layer.id === "stops");
+      const line = features.find((feature) => feature.layer.id === "route-hit");
+      const feature = stop ?? line;
+      this.map.getCanvas().style.cursor = feature ? "pointer" : "";
+      const stopId = stop?.properties?.stopId || null;
+      if (stopId !== this.hoveredStop) {
+        this.hoveredStop = stopId;
+        onStopHover(stopId);
+      }
+      if (feature) {
+        this.popup.setLngLat(event.lngLat).setText(String(feature.properties?.label || "")).addTo(this.map);
+      } else {
+        this.popup.remove();
+      }
+    });
+    this.map.on("mouseout", () => {
+      this.popup.remove();
+      this.map.getCanvas().style.cursor = "";
+      this.hoveredStop = null;
+      onStopHover(null);
     });
   }
 
@@ -68,12 +117,21 @@ export class MapView {
     this.stops = stops;
     this.lines = lines;
     this.highlighted = null;
+    this.highlightedVariant = null;
+    this.hoveredStop = null;
+    this.popup.remove();
     if (this.loaded) {
       (this.map.getSource("stops") as GeoJSONSource).setData(this.stopFeatures());
       (this.map.getSource("route-lines") as GeoJSONSource).setData(this.lineFeatures());
       (this.map.getSource("highlight") as GeoJSONSource).setData(this.highlightFeatures());
+      this.applyVariantHighlight();
       this.fit();
     }
+  }
+
+  highlightVariant(index: number | null): void {
+    this.highlightedVariant = index;
+    if (this.loaded) this.applyVariantHighlight();
   }
 
   highlight(coordinate: Coordinate | null): void {
@@ -86,12 +144,16 @@ export class MapView {
   }
 
   remove(): void {
+    this.popup.remove();
     this.map.remove();
   }
 
   private stopFeatures(): FeatureCollection<Point> {
     const features: Feature<Point>[] = this.stops.flatMap((stop) => stop.coordinate
-      ? [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: stop.coordinate } }] : []);
+      ? [{
+        type: "Feature", properties: { stopId: stop.id ?? "", label: stop.name?.trim() || stop.id || "Stop" },
+        geometry: { type: "Point", coordinates: stop.coordinate },
+      }] : []);
     return { type: "FeatureCollection", features };
   }
 
@@ -99,10 +161,16 @@ export class MapView {
     return {
       type: "FeatureCollection",
       features: this.lines.filter((line) => line.coordinates.length >= 2).map((line) => ({
-        type: "Feature", properties: { approximate: line.approximate },
+        type: "Feature", properties: { approximate: line.approximate, variantIndex: line.variantIndex, label: line.label },
         geometry: { type: "LineString", coordinates: line.coordinates },
       })),
     };
+  }
+
+  private applyVariantHighlight(): void {
+    const index = this.highlightedVariant ?? -1;
+    this.map.setFilter("route-highlight", ["all", ["==", ["get", "approximate"], false], ["==", ["get", "variantIndex"], index]]);
+    this.map.setFilter("route-approximation-highlight", ["all", ["==", ["get", "approximate"], true], ["==", ["get", "variantIndex"], index]]);
   }
 
   private highlightFeatures(): FeatureCollection<Point> {

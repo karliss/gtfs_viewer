@@ -15,9 +15,13 @@ npm run build
 
 Open `index.html` in a browser, choose a GTFS ZIP file, and select **Load feed**. Select a table to browse its columns and rows; large tables are displayed 100 rows at a time. Files are processed locally and are not uploaded.
 
+For GitHub Pages, set the repository's Pages source to **GitHub Actions**. The Pages workflow builds and publishes pushes to `main` (and can also be run manually) at `https://<username>.github.io/<repository>/`.
+
 Select a route row or a route ID in another table to see its properties and variants. Route types are displayed with human-readable names. Trips are grouped by shape ID, trip headsign, trip short name, and ordered stop IDs from `stop_times.txt`; any available grouping property is enough to form a variant, even without a shape ID. Direction IDs are shown for each variant without affecting grouping. The view summarizes variant and trip counts, followed by collapsible variant stop lists and a unique route-wide stop list. Use the variant links to view matching shape points or trips in the feed tables.
 
 Use **View stops on map** in the stops table to map all rows matching the current search, or clear the filter on the map. Open a route map from its details or the routes table. Choose a variant or all variants; hover or focus a stop in the side panel to highlight it, and activate it to zoom. When a usable shape is unavailable, a dashed line connects known stop locations as an approximation. Stops with missing or invalid coordinates cannot be mapped.
+
+Hover a stop or route line on the map to see its name; matching stops are highlighted in the side panel. Hover or focus a variant name in the side panel to highlight its line.
 
 Maps use MapLibre GL and online OpenStreetMap tiles. The feed is not uploaded, but tile requests reveal the viewed geographic area to the tile provider. An internet connection and WebGL are needed for the basemap; tile requests from a directly opened `file://` page may be rejected by the provider. If necessary, serve the built app over HTTP (for example, run `python3 -m http.server` in the project directory and open `http://localhost:8000`).
 

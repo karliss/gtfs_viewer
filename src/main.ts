@@ -5,7 +5,7 @@ import {
 import workerSource from "../dist/gtfs-worker.txt";
 import type { WorkerResponse } from "./gtfs-worker";
 import { indexShapes, indexStops, mapStop, variantLabel, variantMapData, type MapStop } from "./map-data";
-import { MapView } from "./map-view";
+import { MapView, type MapLine } from "./map-view";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 const app = document.querySelector<HTMLElement>("#app");
@@ -77,7 +77,7 @@ app.innerHTML = `
       <div id="route-properties"></div>
       <p id="route-summary"></p>
       <button id="route-trips" type="button">View route trips</button>
-      <button id="route-map" type="button">View route on map</button>
+      <button id="route-map" type="button">🗺️ View route on map</button>
       <h3>Shapes and route variants</h3>
       <div id="route-variants"></div>
       <section id="all-route-stops">
@@ -158,6 +158,8 @@ let mapReturn: "table" | "route" = "table";
 let mapRouteVariants: RouteVariant[] = [];
 let mapStopsIndex = new Map<string, MapStop>();
 let mapShapesIndex = new Map<string, GtfsRow<"shapes.txt">[]>();
+const stopListItems = new Map<string, HTMLElement[]>();
+let highlightedStopItems: HTMLElement[] = [];
 
 type CellRenderer = (column: string, value: string | null) => HTMLTableCellElement;
 
@@ -395,12 +397,6 @@ function resetTableFilter(): void {
 function renderTable(table: GtfsTable): void {
   const { recognized, additional } = getTableColumns(table);
   const header = document.createElement("tr");
-  if (table.kind === "routes.txt") {
-    const cell = document.createElement("th");
-    cell.scope = "col";
-    cell.textContent = "Map";
-    header.append(cell);
-  }
   for (const column of recognized) {
     const cell = document.createElement("th");
     cell.scope = "col";
@@ -442,14 +438,6 @@ function renderTable(table: GtfsTable): void {
           showRoute(route);
         }
       });
-      const cell = document.createElement("td");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = "Map";
-      button.setAttribute("aria-label", `View route ${route.fields.route_short_name || route.fields.route_id || "details"} on map`);
-      button.addEventListener("click", () => showRouteMap(route, "table"));
-      cell.append(button);
-      row.append(cell);
     }
     for (const column of recognized) {
       const value = fields[column];
@@ -476,6 +464,17 @@ function renderTable(table: GtfsTable): void {
       const cell = document.createElement("td");
       cell.textContent = values.extraValues.length > 0 ? JSON.stringify(values.extraValues) : "";
       row.append(cell);
+    }
+    if (table.kind === "routes.txt") {
+      const route = values as GtfsRow<"routes.txt">;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "route-map-icon";
+      button.textContent = "🗺️";
+      button.title = "View route on map";
+      button.setAttribute("aria-label", `View route ${route.fields.route_short_name || route.fields.route_id || "details"} on map`);
+      button.addEventListener("click", () => showRouteMap(route, "table"));
+      row.firstElementChild?.prepend(button, " ");
     }
     rows.append(row);
   }
@@ -508,12 +507,20 @@ function openMap(returnTo: "table" | "route", title: string): void {
   mapError.textContent = "";
   mapSummary.textContent = "";
   mapSidebar.replaceChildren();
+  stopListItems.clear();
+  highlightedStopItems = [];
   try {
-    mapView = new MapView(mapCanvas, (message) => { mapError.textContent = message; });
+    mapView = new MapView(mapCanvas, (message) => { mapError.textContent = message; }, highlightStopList);
   } catch (error) {
     mapError.textContent = `Could not initialize the map: ${error instanceof Error ? error.message : "unknown error"}`;
   }
   mapHeading.focus();
+}
+
+function highlightStopList(stopId: string | null): void {
+  for (const item of highlightedStopItems) item.classList.remove("map-stop-highlight");
+  highlightedStopItems = stopId ? stopListItems.get(stopId) ?? [] : [];
+  for (const item of highlightedStopItems) item.classList.add("map-stop-highlight");
 }
 
 function showStopsMap(): void {
@@ -567,6 +574,8 @@ function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route")
 function renderRouteMap(): void {
   if (!feed) return;
   mapSidebar.replaceChildren();
+  stopListItems.clear();
+  highlightedStopItems = [];
   if (!mapRouteVariants.length) {
     mapSummary.textContent = "No route variants are available.";
     mapView?.update([], []);
@@ -574,14 +583,14 @@ function renderRouteMap(): void {
   }
   const selected = mapVariant.value === "all" ? mapRouteVariants.map((_, index) => index) : [Number(mapVariant.value)];
   const allStops: MapStop[] = [];
-  const lines: { coordinates: [number, number][]; approximate: boolean }[] = [];
+  const lines: MapLine[] = [];
   const warnings: string[] = [];
   for (const index of selected) {
     const variant = mapRouteVariants[index];
     const label = variantLabel(variant, index, mapStopsIndex);
     const data = variantMapData(mapShapesIndex, variant, mapStopsIndex);
     allStops.push(...data.stops);
-    lines.push({ coordinates: data.line, approximate: data.approximate });
+    lines.push({ coordinates: data.line, approximate: data.approximate, variantIndex: index, label });
     if (data.approximate) {
       warnings.push(`${label}: shape unavailable; ${data.line.length >= 2
         ? "dashed line connects known stops approximately" : "not enough located stops to draw a line"}.`);
@@ -590,11 +599,24 @@ function renderRouteMap(): void {
     }
     const section = document.createElement("section");
     const heading = document.createElement("h3");
-    heading.textContent = label;
+    const variantButton = document.createElement("button");
+    variantButton.type = "button";
+    variantButton.className = "map-variant-label";
+    variantButton.textContent = label;
+    variantButton.addEventListener("mouseenter", () => mapView?.highlightVariant(index));
+    variantButton.addEventListener("mouseleave", () => mapView?.highlightVariant(null));
+    variantButton.addEventListener("focus", () => mapView?.highlightVariant(index));
+    variantButton.addEventListener("blur", () => mapView?.highlightVariant(null));
+    heading.append(variantButton);
     section.append(heading);
     const list = document.createElement("ol");
     for (const stop of data.stops) {
       const item = document.createElement("li");
+      if (stop.id) {
+        const items = stopListItems.get(stop.id) ?? [];
+        items.push(item);
+        stopListItems.set(stop.id, items);
+      }
       const label = stop.name && stop.id ? `${stop.name} (${stop.id})` : stop.id || "Stop ID not provided";
       if (stop.coordinate) {
         const position = stop.coordinate;
