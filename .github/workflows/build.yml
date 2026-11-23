@@ -25,4 +25,5 @@ jobs:
             index.html
             styles.css
             dist/main.js
+            dist/main.css
           if-no-files-found: error

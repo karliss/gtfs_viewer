@@ -90,13 +90,13 @@ label {
   gap: 0.75rem;
 }
 
-button,
+button:where(:not(#map-canvas button)),
 select,
 input {
   font: inherit;
 }
 
-button,
+button:where(:not(#map-canvas button)),
 select {
   padding: 0.5rem 0.75rem;
   border: 1px solid #aebbd0;
@@ -143,6 +143,13 @@ input[type="file"] {
   text-align: left;
   text-decoration: underline;
   overflow-wrap: anywhere;
+}
+
+.route-map-icon {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  line-height: 1;
 }
 
 #route-heading {
@@ -260,4 +267,82 @@ tbody tr:last-child td {
 
 .pagination {
   margin-top: 1rem;
+}
+
+#stops-map,
+#route-map,
+#map-clear-filter {
+  margin-top: 0.75rem;
+}
+
+#map-heading {
+  margin-top: 1rem;
+}
+
+#map-error:not(:empty) {
+  color: #a32121;
+}
+
+.map-layout {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+#map-canvas {
+  flex: 1;
+  min-width: 0;
+  height: 65vh;
+  min-height: 24rem;
+}
+
+#map-sidebar {
+  width: 20rem;
+  max-height: 65vh;
+  overflow: auto;
+}
+
+#map-sidebar h3 {
+  overflow-wrap: anywhere;
+}
+
+#map-sidebar li {
+  margin-bottom: 0.5rem;
+}
+
+.map-variant-label {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+
+.map-variant-label:hover,
+.map-variant-label:focus-visible {
+  color: #b33a08;
+  text-decoration: underline;
+}
+
+#map-sidebar .map-stop-highlight {
+  background: #ffe2cc;
+  outline: 2px solid #e95e21;
+}
+
+@media (max-width: 700px) {
+  .map-layout {
+    flex-direction: column;
+  }
+
+  #map-canvas {
+    flex: none;
+    width: 100%;
+    height: 55vh;
+  }
+
+  #map-sidebar {
+    width: 100%;
+    max-height: 20rem;
+  }
 }
