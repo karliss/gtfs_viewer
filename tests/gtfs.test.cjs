@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
-const { getReferencedRoute, getRouteVariants, indexRoutes, loadGtfs } = require("../dist/gtfs.cjs");
+const { getReferencedRoute, getRouteVariants, getVariantTableRows, indexRoutes, loadGtfs } = require("../dist/gtfs.cjs");
 
 function archive(files) {
   return zipSync(Object.fromEntries(
@@ -111,30 +111,47 @@ test("reports invalid UTF-8 in parsed tables", () => {
   assert.throws(() => loadGtfs(zip), /valid UTF-8/);
 });
 
-test("groups route trips by shape and orders the representative trip's stops", () => {
+test("groups trips by shape, headsign, short name and ordered stops", () => {
   const feed = loadGtfs(archive({
-    "trips.txt": "route_id,trip_id,shape_id\nr1,t1,s1\nr1,t2,s1\nr1,t3,s2\nr1,t4,\nr2,t5,s3\n",
+    "trips.txt": "route_id,trip_id,shape_id,trip_headsign,trip_short_name,direction_id\n"
+      + "r,t1,s1,Center,10,0\nr,t2,s1,Center,10,1\n"
+      + "r,t3,s1,Other,10,0\nr,t4,s1,Center,11,0\n"
+      + "r,t5,s1,Center,10,0\nr,t6,s2,Center,10,0\n"
+      + "r,t7,,Center,10,0\nother,t8,s1,Center,10,0\n",
     "stop_times.txt": "trip_id,stop_id,stop_sequence\n"
-      + "t2,b,10\nt2,a,2\nt2,a,3\nt3,c,1\nt5,d,1\n",
-    "stops.txt": "stop_id,stop_name\na,Alpha\nb,Beta\n",
+      + "t1,b,10\nt1,a,2\nt2,a,1\nt2,b,2\n"
+      + "t3,a,1\nt3,b,2\nt4,a,1\nt4,b,2\n"
+      + "t5,b,1\nt5,a,2\nt6,a,1\nt6,b,2\nt8,a,1\nt8,b,2\n",
+    "shapes.txt": "shape_id,shape_pt_sequence\ns1,1\ns1,2\ns2,1\n",
   }));
-  assert.deepEqual(getRouteVariants(feed, "r1"), {
-    variants: [
-      { shapeId: "s1", stops: ["a", "a", "b"] },
-      { shapeId: "s2", stops: ["c"] },
-    ],
-    tripsWithoutShape: 1,
-  });
+  const { variants, tripsWithoutShape } = getRouteVariants(feed, "r");
+  assert.equal(tripsWithoutShape, 1);
+  assert.deepEqual(variants.map(({ shapeId, tripHeadsign, tripShortName, directionIds, stops, trips }) => ({
+    shapeId, tripHeadsign, tripShortName, directionIds, stops, trips: trips.map((trip) => trip.fields.trip_id),
+  })), [
+    { shapeId: "s1", tripHeadsign: "Center", tripShortName: "10", directionIds: ["0", "1"], stops: ["a", "b"], trips: ["t1", "t2"] },
+    { shapeId: "s1", tripHeadsign: "Other", tripShortName: "10", directionIds: ["0"], stops: ["a", "b"], trips: ["t3"] },
+    { shapeId: "s1", tripHeadsign: "Center", tripShortName: "11", directionIds: ["0"], stops: ["a", "b"], trips: ["t4"] },
+    { shapeId: "s1", tripHeadsign: "Center", tripShortName: "10", directionIds: ["0"], stops: ["b", "a"], trips: ["t5"] },
+    { shapeId: "s2", tripHeadsign: "Center", tripShortName: "10", directionIds: ["0"], stops: ["a", "b"], trips: ["t6"] },
+  ]);
+  const shapeRows = getVariantTableRows(feed, variants[0], "shapes.txt");
+  const tripRows = getVariantTableRows(feed, variants[0], "trips.txt");
+  assert.deepEqual(shapeRows.rows.map((row) => row.fields.shape_id), ["s1", "s1"]);
+  assert.deepEqual(tripRows.rows.map((row) => row.fields.trip_id), ["t1", "t2"]);
+  assert.equal(feed.tables.find((table) => table.kind === "trips.txt").rows.length, 8);
 });
 
 test("handles missing tables and shape trips without stop times", () => {
   const feed = loadGtfs(archive({
     "trips.txt": "route_id,trip_id,shape_id\nr,t,s\nr,u,\n",
   }));
-  assert.deepEqual(getRouteVariants(feed, "r"), {
-    variants: [{ shapeId: "s", stops: [] }],
-    tripsWithoutShape: 1,
-  });
+  const { variants, tripsWithoutShape } = getRouteVariants(feed, "r");
+  assert.equal(tripsWithoutShape, 1);
+  assert.deepEqual(variants.map(({ trips, ...variant }) => variant), [
+    { shapeId: "s", tripHeadsign: null, tripShortName: null, directionIds: [null], stops: [] },
+  ]);
+  assert.equal(getVariantTableRows(feed, variants[0], "shapes.txt"), undefined);
   assert.deepEqual(getRouteVariants(feed, "other"), { variants: [], tripsWithoutShape: 0 });
 });
 
@@ -165,11 +182,22 @@ test("preserves missing stop IDs and variants with no stop times", () => {
     "trips.txt": "route_id,trip_id,shape_id\nr,t,s1\nr,u,s2\n",
     "stop_times.txt": "trip_id,stop_sequence,location_group_id,location_id\nt,1,group,\nt,2,,location\n",
   }));
-  assert.deepEqual(getRouteVariants(feed, "r"), {
-    variants: [
-      { shapeId: "s1", stops: [null, null] },
-      { shapeId: "s2", stops: [] },
-    ],
-    tripsWithoutShape: 0,
-  });
+  const { variants, tripsWithoutShape } = getRouteVariants(feed, "r");
+  assert.equal(tripsWithoutShape, 0);
+  assert.deepEqual(variants.map(({ shapeId, stops }) => ({ shapeId, stops })), [
+    { shapeId: "s1", stops: [null, null] },
+    { shapeId: "s2", stops: [] },
+  ]);
+});
+
+test("distinguishes empty and absent trip properties and preserves repeated stops", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,shape_id,trip_headsign\nr,t1,s,\nr,t2,s\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,a,1\nt1,a,2\nt2,a,1\nt2,a,2\n",
+  }));
+  const { variants } = getRouteVariants(feed, "r");
+  assert.deepEqual(variants.map(({ tripHeadsign, stops }) => ({ tripHeadsign, stops })), [
+    { tripHeadsign: "", stops: ["a", "a"] },
+    { tripHeadsign: null, stops: ["a", "a"] },
+  ]);
 });

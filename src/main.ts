@@ -1,6 +1,6 @@
 import {
-  getReferencedRoute, getRouteVariants, indexRoutes, loadGtfs,
-  type GtfsFeed, type GtfsRow, type GtfsTable,
+  getReferencedRoute, getRouteVariants, getVariantTableRows, indexRoutes, loadGtfs,
+  type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
 
 const app = document.querySelector<HTMLElement>("#app");
@@ -31,8 +31,11 @@ app.innerHTML = `
     <section id="viewer" class="panel viewer" aria-labelledby="viewer-heading" hidden>
       <h2 id="viewer-heading">Feed tables</h2>
       <p id="feed-summary"></p>
+      <button id="back-to-route" type="button" hidden>Back to route details</button>
       <label for="table-select">Table</label>
       <select id="table-select"></select>
+      <p id="table-filter" hidden></p>
+      <button id="clear-filter" type="button" hidden>Show all rows</button>
       <p id="table-summary" aria-live="polite"></p>
       <div class="table-scroll" tabindex="0" role="region" aria-label="GTFS table">
         <table>
@@ -80,10 +83,15 @@ const routeHeading = element<HTMLHeadingElement>("#route-heading");
 const routeProperties = element<HTMLElement>("#route-properties");
 const routeVariants = element<HTMLElement>("#route-variants");
 const backToTables = element<HTMLButtonElement>("#back-to-tables");
+const backToRoute = element<HTMLButtonElement>("#back-to-route");
+const tableFilter = element<HTMLParagraphElement>("#table-filter");
+const clearFilter = element<HTMLButtonElement>("#clear-filter");
 const pageSize = 100;
 let feed: GtfsFeed | undefined;
 let page = 0;
 let routesById = new Map<string, GtfsRow<"routes.txt">>();
+let filteredTable: GtfsTable | undefined;
+let currentRoute: GtfsRow<"routes.txt"> | undefined;
 
 type CellRenderer = (column: string, value: string | null) => HTMLTableCellElement;
 
@@ -131,6 +139,7 @@ const tableCellRenderers: Record<string, CellRenderer> = {
 
 function showRoute(route: GtfsRow<"routes.txt">): void {
   if (!feed) return;
+  currentRoute = route;
   const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
   routeHeading.textContent = title ? `Route details: ${title}` : "Route details";
   const list = document.createElement("dl");
@@ -169,14 +178,44 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     message.textContent = "No shapes are referenced by trips for this route.";
     routeVariants.append(message);
   }
-  for (const variant of variants) {
+  for (const [index, variant] of variants.entries()) {
     const section = document.createElement("section");
     const heading = document.createElement("h4");
-    heading.textContent = `Shape: ${variant.shapeId}`;
+    heading.textContent = `Variant ${index + 1}`;
     section.append(heading);
+    const properties = document.createElement("dl");
+    properties.className = "route-properties";
+    for (const [name, value] of [
+      ["Shape ID", variant.shapeId],
+      ["Trip headsign", variant.tripHeadsign],
+      ["Trip short name", variant.tripShortName],
+      ["Direction ID", variant.directionIds.map((id) => id === null ? "Not provided" : id === "" ? "(empty)" : id).join(", ")],
+    ]) {
+      const term = document.createElement("dt");
+      term.textContent = name;
+      const description = document.createElement("dd");
+      description.textContent = value === null ? "Not provided" : value === "" ? "(empty)" : value;
+      properties.append(term, description);
+    }
+    section.append(properties);
+    for (const [kind, label] of [
+      ["shapes.txt", "View shape rows"],
+      ["trips.txt", "View variant trips"],
+    ] as const) {
+      if (!feed.tables.some((table) => table.kind === kind)) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "route-link variant-link";
+      button.textContent = label;
+      button.addEventListener("click", () => showVariantTable(variant, kind));
+      section.append(button);
+    }
+    const stopsHeading = document.createElement("h5");
+    stopsHeading.textContent = "Stops";
+    section.append(stopsHeading);
     if (variant.stops.length === 0) {
       const message = document.createElement("p");
-      message.textContent = "No stop times found for this shape.";
+      message.textContent = "No stop times found for this variant.";
       section.append(message);
     } else {
       const stops = document.createElement("ol");
@@ -200,6 +239,32 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
   viewer.hidden = true;
   routeDetail.hidden = false;
   routeHeading.focus();
+}
+
+function showVariantTable(variant: RouteVariant, kind: "shapes.txt" | "trips.txt"): void {
+  if (!feed) return;
+  const table = getVariantTableRows(feed, variant, kind);
+  if (!table) return;
+  filteredTable = table;
+  tableSelect.selectedIndex = feed.tables.findIndex((candidate) => candidate.kind === kind);
+  page = 0;
+  tableFilter.textContent = kind === "shapes.txt"
+    ? `Showing rows for shape ${variant.shapeId}.`
+    : "Showing trips for this variant.";
+  tableFilter.hidden = false;
+  clearFilter.hidden = false;
+  backToRoute.hidden = false;
+  routeDetail.hidden = true;
+  viewer.hidden = false;
+  renderSelectedTable();
+  tableSelect.focus();
+}
+
+function resetTableFilter(): void {
+  filteredTable = undefined;
+  tableFilter.hidden = true;
+  clearFilter.hidden = true;
+  backToRoute.hidden = true;
 }
 
 function renderTable(table: GtfsTable): void {
@@ -275,7 +340,7 @@ function renderTable(table: GtfsTable): void {
 }
 
 function renderSelectedTable(): void {
-  const table = feed?.tables[tableSelect.selectedIndex];
+  const table = filteredTable ?? feed?.tables[tableSelect.selectedIndex];
   if (table) renderTable(table);
 }
 
@@ -289,6 +354,8 @@ form.addEventListener("submit", async (event) => {
   status.textContent = "Loading feed…";
   viewer.hidden = true;
   routeDetail.hidden = true;
+  resetTableFilter();
+  currentRoute = undefined;
   feed = undefined;
   routesById.clear();
 
@@ -319,7 +386,18 @@ backToTables.addEventListener("click", () => {
   tableSelect.focus();
 });
 
+backToRoute.addEventListener("click", () => {
+  if (currentRoute) showRoute(currentRoute);
+});
+
+clearFilter.addEventListener("click", () => {
+  resetTableFilter();
+  page = 0;
+  renderSelectedTable();
+});
+
 tableSelect.addEventListener("change", () => {
+  resetTableFilter();
   page = 0;
   renderSelectedTable();
 });
@@ -330,7 +408,7 @@ previous.addEventListener("click", () => {
   }
 });
 next.addEventListener("click", () => {
-  const table = feed?.tables[tableSelect.selectedIndex];
+  const table = filteredTable ?? feed?.tables[tableSelect.selectedIndex];
   if (table && (page + 1) * pageSize < table.rows.length) {
     page++;
     renderSelectedTable();

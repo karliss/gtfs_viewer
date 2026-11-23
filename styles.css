@@ -169,6 +169,19 @@ input[type="file"] {
   overflow-wrap: anywhere;
 }
 
+#route-variants h5 {
+  margin-bottom: 0.5rem;
+}
+
+.variant-link {
+  margin-right: 1rem;
+}
+
+#back-to-route,
+#clear-filter {
+  margin-top: 0.75rem;
+}
+
 #status:not(:empty),
 #table-summary {
   margin-top: 1rem;

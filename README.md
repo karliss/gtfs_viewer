@@ -15,7 +15,7 @@ npm run build
 
 Open `index.html` in a browser, choose a GTFS ZIP file, and select **Load feed**. Select a table to browse its columns and rows; large tables are displayed 100 rows at a time. Files are processed locally and are not uploaded.
 
-Select a route row or a route ID in another table to see its properties and variants. Variants are grouped by shape ID from `trips.txt`; their ordered stops come from one trip's `stop_times.txt` entries, assuming trips with the same shape share the same stops. Trips without a shape ID are reported separately.
+Select a route row or a route ID in another table to see its properties and variants. Trips are grouped by shape ID, trip headsign, trip short name, and ordered stop IDs from `stop_times.txt`. Direction IDs are shown for each variant without affecting grouping. Trips without a shape ID are reported separately. Use the variant links to view matching shape points or trips in the feed tables.
 
 The viewer reads UTF-8 CSV-formatted `.txt` files from the archive, including optional and extension tables. Rows have typed fields for the GTFS Schedule tables in the [April 27, 2026 reference](https://github.com/google/transit/blob/2ce6aa79e3fa7bdbaf19d2a12765cee5b9fdd699/gtfs/spec/en/reference.md). Values remain strings; absent fields are `null`, while explicitly empty fields remain empty strings. Unrecognized columns are stored separately by header name, and values beyond the header are preserved in order and displayed together in an extra column.
 

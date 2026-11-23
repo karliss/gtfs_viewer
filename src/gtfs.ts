@@ -60,7 +60,25 @@ export function getReferencedRoute(
 
 export interface RouteVariant {
   shapeId: string;
+  tripHeadsign: string | null;
+  tripShortName: string | null;
+  directionIds: (string | null)[];
   stops: (string | null)[];
+  trips: GtfsRow<"trips.txt">[];
+}
+
+export function getVariantTableRows(
+  feed: GtfsFeed, variant: RouteVariant, kind: "shapes.txt" | "trips.txt",
+): GtfsTable | undefined {
+  const table = feed.tables.find((candidate) => candidate.kind === kind);
+  if (!table) return undefined;
+  if (table.kind === "shapes.txt") {
+    return { ...table, rows: table.rows.filter((row) => row.fields.shape_id === variant.shapeId) };
+  }
+  if (table.kind === "trips.txt") {
+    const trips = new Set(variant.trips);
+    return { ...table, rows: table.rows.filter((row) => trips.has(row)) };
+  }
 }
 
 export function getRouteVariants(feed: GtfsFeed, routeId: string): {
@@ -69,21 +87,8 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
 } {
   const trips = feed.tables.find((table) => table.kind === "trips.txt");
   const stopTimes = feed.tables.find((table) => table.kind === "stop_times.txt");
-  const shapeTrips = new Map<string, string[]>();
-  let tripsWithoutShape = 0;
-
-  for (const { fields } of trips?.rows ?? []) {
-    if (fields.route_id !== routeId) continue;
-    if (!fields.shape_id) {
-      tripsWithoutShape++;
-      continue;
-    }
-    const tripIds = shapeTrips.get(fields.shape_id) ?? [];
-    if (fields.trip_id) tripIds.push(fields.trip_id);
-    shapeTrips.set(fields.shape_id, tripIds);
-  }
-
-  const relevantTrips = new Set([...shapeTrips.values()].flat());
+  const routeTrips = (trips?.rows ?? []).filter(({ fields }) => fields.route_id === routeId);
+  const relevantTrips = new Set(routeTrips.flatMap(({ fields }) => fields.trip_id ? [fields.trip_id] : []));
   const timesByTrip = new Map<string, GtfsRow<"stop_times.txt">[]>();
   for (const row of stopTimes?.rows ?? []) {
     const tripId = row.fields.trip_id;
@@ -93,18 +98,36 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
     timesByTrip.set(tripId, times);
   }
 
-  const variants = [...shapeTrips].map(([shapeId, tripIds]) => {
-    const times = tripIds.map((id) => timesByTrip.get(id)).find((rows) => rows?.length) ?? [];
-    const sequence = (value: string | null): number =>
-      value !== null && /^\d+$/.test(value) ? Number(value) : Infinity;
-    const ordered = [...times].sort((a, b) =>
-      sequence(a.fields.stop_sequence) - sequence(b.fields.stop_sequence));
-    return {
-      shapeId,
-      stops: ordered.map(({ fields }) => fields.stop_id),
-    };
-  });
-  return { variants, tripsWithoutShape };
+  const sequence = (value: string | null): number =>
+    value !== null && /^\d+$/.test(value) ? Number(value) : Infinity;
+  const stopsByTrip = new Map<string, (string | null)[]>();
+  for (const [tripId, times] of timesByTrip) {
+    times.sort((a, b) => sequence(a.fields.stop_sequence) - sequence(b.fields.stop_sequence));
+    stopsByTrip.set(tripId, times.map(({ fields }) => fields.stop_id));
+  }
+
+  const variantsByKey = new Map<string, RouteVariant>();
+  let tripsWithoutShape = 0;
+  for (const trip of routeTrips) {
+    const { fields } = trip;
+    if (!fields.shape_id) {
+      tripsWithoutShape++;
+      continue;
+    }
+    const stops = fields.trip_id ? stopsByTrip.get(fields.trip_id) ?? [] : [];
+    const key = JSON.stringify([fields.shape_id, fields.trip_headsign, fields.trip_short_name, stops]);
+    let variant = variantsByKey.get(key);
+    if (!variant) {
+      variant = {
+        shapeId: fields.shape_id, tripHeadsign: fields.trip_headsign,
+        tripShortName: fields.trip_short_name, directionIds: [], stops, trips: [],
+      };
+      variantsByKey.set(key, variant);
+    }
+    if (!variant.directionIds.includes(fields.direction_id)) variant.directionIds.push(fields.direction_id);
+    variant.trips.push(trip);
+  }
+  return { variants: [...variantsByKey.values()], tripsWithoutShape };
 }
 
 function isGtfsTableName(name: string): name is GtfsTableName {
