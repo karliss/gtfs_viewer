@@ -179,6 +179,19 @@ test("reports invalid UTF-8 in parsed tables", () => {
   assert.throws(() => loadGtfs(zip), /valid UTF-8/);
 });
 
+test("trims route types in routes without altering unrelated fields", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,route_type,route_desc\n r , 3 , description \ns,   ,\nt\n",
+    "extension.txt": "route_type\n 3 \n",
+  }));
+  const routes = feed.tables.find((table) => table.kind === "routes.txt");
+  assert.equal(routes.rows[0].fields.route_type, "3");
+  assert.equal(routes.rows[0].fields.route_desc, " description ");
+  assert.equal(routes.rows[1].fields.route_type, "");
+  assert.equal(routes.rows[2].fields.route_type, null);
+  assert.equal(feed.tables.find((table) => table.kind === "unknown").rows[0].unrecognizedColumns.route_type, " 3 ");
+});
+
 test("groups trips by shape, headsign, short name and ordered stops", () => {
   const feed = loadGtfs(archive({
     "trips.txt": "route_id,trip_id,shape_id,trip_headsign,trip_short_name,direction_id\n"

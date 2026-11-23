@@ -36,6 +36,22 @@ app.innerHTML = `
       <select id="table-select"></select>
       <p id="table-filter" hidden></p>
       <button id="clear-filter" type="button" hidden>Show all rows</button>
+      <div class="table-controls">
+        <div>
+          <label for="table-search">Search rows</label>
+          <input id="table-search" type="search" placeholder="Search all fields" />
+        </div>
+        <div>
+          <label for="page-size">Rows per page</label>
+          <select id="page-size">
+            <option>25</option>
+            <option>50</option>
+            <option selected>100</option>
+            <option>250</option>
+            <option>500</option>
+          </select>
+        </div>
+      </div>
       <p id="table-summary" aria-live="polite"></p>
       <div class="table-scroll" tabindex="0" role="region" aria-label="GTFS table">
         <table>
@@ -54,9 +70,9 @@ app.innerHTML = `
       <h2 id="route-heading" tabindex="-1">Route details</h2>
       <div id="route-properties"></div>
       <p id="route-summary"></p>
+      <button id="route-trips" type="button">View route trips</button>
       <h3>Shapes and route variants</h3>
       <div id="route-variants"></div>
-      <div id="variant-stops"></div>
       <section id="all-route-stops">
         <h3>All route stops</h3>
         <ol id="route-stop-list"></ol>
@@ -78,6 +94,8 @@ const status = element<HTMLParagraphElement>("#status");
 const viewer = element<HTMLElement>("#viewer");
 const feedSummary = element<HTMLParagraphElement>("#feed-summary");
 const tableSelect = element<HTMLSelectElement>("#table-select");
+const tableSearch = element<HTMLInputElement>("#table-search");
+const pageSizeSelect = element<HTMLSelectElement>("#page-size");
 const tableSummary = element<HTMLParagraphElement>("#table-summary");
 const tableHead = element<HTMLTableSectionElement>("#table-head");
 const tableBody = element<HTMLTableSectionElement>("#table-body");
@@ -89,13 +107,13 @@ const routeHeading = element<HTMLHeadingElement>("#route-heading");
 const routeProperties = element<HTMLElement>("#route-properties");
 const routeVariants = element<HTMLElement>("#route-variants");
 const routeSummary = element<HTMLParagraphElement>("#route-summary");
-const variantStops = element<HTMLElement>("#variant-stops");
+const routeTrips = element<HTMLButtonElement>("#route-trips");
 const routeStopList = element<HTMLOListElement>("#route-stop-list");
 const backToTables = element<HTMLButtonElement>("#back-to-tables");
 const backToRoute = element<HTMLButtonElement>("#back-to-route");
 const tableFilter = element<HTMLParagraphElement>("#table-filter");
 const clearFilter = element<HTMLButtonElement>("#clear-filter");
-const pageSize = 100;
+let pageSize = 100;
 let feed: GtfsFeed | undefined;
 let page = 0;
 let routesById = new Map<string, GtfsRow<"routes.txt">>();
@@ -110,8 +128,8 @@ function renderGenericCell(_column: string, value: string | null): HTMLTableCell
   return cell;
 }
 
-function renderRoutesCell(column: string, value: string | null): HTMLTableCellElement {
-  if (column === "route_url" && value) {
+function renderUrlCell(column: string, value: string | null): HTMLTableCellElement {
+  if (value) {
     let url: URL;
     try {
       url = new URL(value);
@@ -129,6 +147,19 @@ function renderRoutesCell(column: string, value: string | null): HTMLTableCellEl
     }
   }
 
+  return renderGenericCell(column, value);
+}
+
+function routeTypeLabel(value: string): string {
+  const name = decodeRouteType(value);
+  return name === `Unknown route type (${value})` ? name : `${name} (${value})`;
+}
+
+function renderRoutesCell(column: string, value: string | null): HTMLTableCellElement {
+  if (column === "route_url") return renderUrlCell(column, value);
+  if (column === "route_type" && value) {
+    return renderGenericCell(column, routeTypeLabel(value));
+  }
   if (column === "route_color" && value && /^[\da-f]{6}$/i.test(value)) {
     const swatch = document.createElement("span");
     swatch.className = "route-color-swatch";
@@ -144,6 +175,8 @@ function renderRoutesCell(column: string, value: string | null): HTMLTableCellEl
 
 const tableCellRenderers: Record<string, CellRenderer> = {
   "routes.txt": renderRoutesCell,
+  "agency.txt": (column, value) => column === "agency_url" || column === "agency_fare_url"
+    ? renderUrlCell(column, value) : renderGenericCell(column, value),
 };
 
 function showRoute(route: GtfsRow<"routes.txt">): void {
@@ -162,10 +195,12 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       description.textContent = "Not provided";
     } else if (value === "") {
       description.textContent = "(empty)";
-    } else if (name === "route_type") {
-      description.textContent = `${decodeRouteType(value)} (${value})`;
     } else {
       description.append(...renderRoutesCell(name, value).childNodes);
+    }
+    if (value === null || value === "") {
+      term.className = "not-provided";
+      description.className = "not-provided";
     }
     list.append(term, description);
   }
@@ -184,10 +219,10 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
   routeSummary.textContent =
     `${variants.length} ${variants.length === 1 ? "variant" : "variants"} · `
     + `${tripsCount} ${tripsCount === 1 ? "trip references" : "trips reference"} this route.`;
+  routeTrips.hidden = !route.fields.route_id || !feed.tables.some((table) => table.kind === "trips.txt");
   const stopsTable = feed.tables.find((table) => table.kind === "stops.txt");
   const stopNames = new Map(stopsTable?.rows.map(({ fields }) => [fields.stop_id, fields.stop_name]));
   routeVariants.replaceChildren();
-  variantStops.replaceChildren();
   routeStopList.replaceChildren();
   if (variants.length === 0) {
     const message = document.createElement("p");
@@ -198,20 +233,32 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
   for (const [index, variant] of variants.entries()) {
     const section = document.createElement("section");
     const heading = document.createElement("h4");
-    heading.textContent = `Variant ${index + 1}`;
+    const firstStop = variant.stops[0];
+    const lastStop = variant.stops.length > 1 ? variant.stops[variant.stops.length - 1] : null;
+    const endpoints = [firstStop, lastStop]
+      .map((id) => id == null ? "" : stopNames.get(id)?.trim() ?? "")
+      .filter(Boolean)
+      .join(" → ");
+    const headingParts = [variant.tripHeadsign?.trim(), variant.tripShortName?.trim(), endpoints].filter(Boolean);
+    heading.textContent = headingParts.join(" · ") || `Variant ${index + 1}`;
     section.append(heading);
     const properties = document.createElement("dl");
     properties.className = "route-properties";
-    for (const [name, value] of [
-      ["Shape ID", variant.shapeId],
-      ["Trip headsign", variant.tripHeadsign],
-      ["Trip short name", variant.tripShortName],
-      ["Direction ID", variant.directionIds.map((id) => id === null ? "Not provided" : id === "" ? "(empty)" : id).join(", ")],
-    ]) {
+    for (const [name, value, missing] of [
+      ["Shape ID", variant.shapeId, !variant.shapeId],
+      ["Trip headsign", variant.tripHeadsign, variant.tripHeadsign === null || variant.tripHeadsign === ""],
+      ["Trip short name", variant.tripShortName, variant.tripShortName === null || variant.tripShortName === ""],
+      ["Direction ID", variant.directionIds.map((id) => id === null ? "Not provided" : id === "" ? "(empty)" : id).join(", "),
+        variant.directionIds.every((id) => id === null || id === "")],
+    ] as const) {
       const term = document.createElement("dt");
       term.textContent = name;
       const description = document.createElement("dd");
       description.textContent = value === null ? "Not provided" : value === "" ? "(empty)" : value;
+      if (missing) {
+        term.className = "not-provided";
+        description.className = "not-provided";
+      }
       properties.append(term, description);
     }
     section.append(properties);
@@ -228,11 +275,9 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       button.addEventListener("click", () => showVariantTable(variant, kind));
       section.append(button);
     }
-    routeVariants.append(section);
-
     const details = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = `Stops for variant ${index + 1} (${variant.stops.length})`;
+    summary.textContent = `Stops (${variant.stops.length})`;
     details.append(summary);
     if (variant.stops.length === 0) {
       const message = document.createElement("p");
@@ -248,7 +293,8 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       }
       details.append(stops);
     }
-    variantStops.append(details);
+    section.append(details);
+    routeVariants.append(section);
   }
   if (tripsWithoutVariant > 0) {
     const message = document.createElement("p");
@@ -279,12 +325,18 @@ function showVariantTable(variant: RouteVariant, kind: "shapes.txt" | "trips.txt
   if (!feed) return;
   const table = getVariantTableRows(feed, variant, kind);
   if (!table) return;
-  filteredTable = table;
-  tableSelect.selectedIndex = feed.tables.findIndex((candidate) => candidate.kind === kind);
-  page = 0;
-  tableFilter.textContent = kind === "shapes.txt"
+  showFilteredTable(table, kind === "shapes.txt"
     ? `Showing rows for shape ${variant.shapeId}.`
-    : "Showing trips for this variant.";
+    : "Showing trips for this variant.");
+}
+
+function showFilteredTable(table: GtfsTable, message: string): void {
+  if (!feed) return;
+  filteredTable = table;
+  tableSelect.selectedIndex = feed.tables.findIndex((candidate) => candidate.kind === table.kind);
+  page = 0;
+  tableSearch.value = "";
+  tableFilter.textContent = message;
   tableFilter.hidden = false;
   clearFilter.hidden = false;
   backToRoute.hidden = false;
@@ -324,10 +376,18 @@ function renderTable(table: GtfsTable): void {
   }
   tableHead.replaceChildren(header);
 
+  const query = tableSearch.value.trim().toLocaleLowerCase();
+  const matchingRows = query ? table.rows.filter((row) => {
+    const values = [...Object.values(row.fields), ...Object.values(row.unrecognizedColumns), ...row.extraValues];
+    if (table.kind === "routes.txt" && "route_type" in row.fields && row.fields.route_type) {
+      values.push(routeTypeLabel(row.fields.route_type));
+    }
+    return values.some((value) => value !== null && value.toLocaleLowerCase().includes(query));
+  }) : table.rows;
   const start = page * pageSize;
   const rows = document.createDocumentFragment();
   const renderCell = tableCellRenderers[table.kind] ?? renderGenericCell;
-  for (const values of table.rows.slice(start, start + pageSize)) {
+  for (const values of matchingRows.slice(start, start + pageSize)) {
     const row = document.createElement("tr");
     const fields: Record<string, string | null> = values.fields;
     if (table.kind === "routes.txt") {
@@ -376,8 +436,10 @@ function renderTable(table: GtfsTable): void {
   tableBody.replaceChildren(rows);
   tableSummary.textContent = table.rows.length === 0
     ? "This table has no data rows."
-    : `Showing ${start + 1}–${Math.min(start + pageSize, table.rows.length)} of ${table.rows.length} rows.`;
-  const pageCount = Math.max(1, Math.ceil(table.rows.length / pageSize));
+    : matchingRows.length === 0
+      ? "No rows match the search."
+      : `Showing ${start + 1}–${Math.min(start + pageSize, matchingRows.length)} of ${matchingRows.length} rows.`;
+  const pageCount = Math.max(1, Math.ceil(matchingRows.length / pageSize));
   pageLabel.textContent = `Page ${page + 1} of ${pageCount}`;
   previous.disabled = page === 0;
   next.disabled = page + 1 >= pageCount;
@@ -399,6 +461,7 @@ form.addEventListener("submit", async (event) => {
   viewer.hidden = true;
   routeDetail.hidden = true;
   resetTableFilter();
+  tableSearch.value = "";
   currentRoute = undefined;
   feed = undefined;
   routesById.clear();
@@ -434,6 +497,17 @@ backToRoute.addEventListener("click", () => {
   if (currentRoute) showRoute(currentRoute);
 });
 
+routeTrips.addEventListener("click", () => {
+  if (!feed || !currentRoute?.fields.route_id) return;
+  const table = feed.tables.find((candidate) => candidate.kind === "trips.txt");
+  if (!table) return;
+  const routeId = currentRoute.fields.route_id;
+  showFilteredTable(
+    { ...table, rows: table.rows.filter((row) => row.fields.route_id === routeId) },
+    `Showing trips for route ${routeId}.`,
+  );
+});
+
 clearFilter.addEventListener("click", () => {
   resetTableFilter();
   page = 0;
@@ -442,6 +516,16 @@ clearFilter.addEventListener("click", () => {
 
 tableSelect.addEventListener("change", () => {
   resetTableFilter();
+  tableSearch.value = "";
+  page = 0;
+  renderSelectedTable();
+});
+tableSearch.addEventListener("input", () => {
+  page = 0;
+  renderSelectedTable();
+});
+pageSizeSelect.addEventListener("change", () => {
+  pageSize = Number(pageSizeSelect.value);
   page = 0;
   renderSelectedTable();
 });
@@ -452,8 +536,7 @@ previous.addEventListener("click", () => {
   }
 });
 next.addEventListener("click", () => {
-  const table = filteredTable ?? feed?.tables[tableSelect.selectedIndex];
-  if (table && (page + 1) * pageSize < table.rows.length) {
+  if (!next.disabled) {
     page++;
     renderSelectedTable();
   }
