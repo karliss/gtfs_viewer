@@ -174,15 +174,51 @@ test("trims IDs and route short names without changing unrelated values", () => 
   assert.deepEqual(variants[0].trips.map(({ fields }) => fields.trip_id), ["t", "t2"]);
 });
 
-test("summarizes all trip accessibility values including missing and empty entries", () => {
+test("summarizes trip accessibility with missing and empty values counted as zero", () => {
   const [table] = loadGtfs(archive({
     "trips.txt": "trip_id,wheelchair_accessible,bikes_allowed\n1,1,2\n2,1,2\n3,2,\n4,,2\n5\n",
   })).tables;
   assert.equal(summarizeTripField([], "bikes_allowed"), "No trips available");
   assert.equal(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), "1");
-  assert.equal(summarizeTripField(table.rows, "wheelchair_accessible"), "1 (40%), 2 (20%), (empty) (20%), Not provided (20%)");
-  assert.equal(summarizeTripField(table.rows, "bikes_allowed"), "2 (60%), (empty) (20%), Not provided (20%)");
-  assert.equal(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), "2 (66.7%), (empty) (33.3%)");
+  assert.equal(summarizeTripField(table.rows, "wheelchair_accessible"), "1 (40%), 2 (20%), 0 (40%)");
+  assert.equal(summarizeTripField(table.rows, "bikes_allowed"), "2 (60%), 0 (40%)");
+  assert.equal(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), "2 (66.7%), 0 (33.3%)");
+});
+
+test("defaults only GTFS enums whose empty value is equivalent to zero", () => {
+  const feed = loadGtfs(archive({
+    "stops.txt": "stop_id,location_type,wheelchair_boarding,stop_name,stop_access\ns1,,  ,,\ns2,2,1, Stop ,\n",
+    "routes.txt": "route_id,continuous_pickup,continuous_drop_off\nr,,\n",
+    "stop_times.txt": "trip_id,pickup_type,timepoint,continuous_pickup\nt,2,,\nu\n",
+    "calendar.txt": "service_id,monday,tuesday\ns,1,\n",
+    "fare_attributes.txt": "fare_id,transfers\nf,\n",
+    "translations.txt": "language,table_name\nen,\n",
+    "extension.txt": "pickup_type\n \n",
+  }));
+  const stops = feed.tables.find((table) => table.kind === "stops.txt");
+  assert.equal(stops.rows[0].fields.location_type, "0");
+  assert.equal(stops.rows[0].fields.wheelchair_boarding, "0");
+  assert.equal(stops.rows[0].fields.stop_name, "");
+  assert.equal(stops.rows[1].fields.location_type, "2");
+  assert.equal(stops.rows[1].fields.stop_name, " Stop ");
+  assert.equal(stops.rows[0].fields.stop_access, "");
+  const routes = feed.tables.find((table) => table.kind === "routes.txt");
+  assert.equal(routes.rows[0].fields.continuous_pickup, "");
+  assert.equal(routes.rows[0].fields.continuous_drop_off, "");
+  const times = feed.tables.find((table) => table.kind === "stop_times.txt");
+  assert.equal(times.rows[0].fields.pickup_type, "2");
+  assert.equal(times.rows[0].fields.timepoint, "");
+  assert.equal(times.rows[0].fields.continuous_pickup, "");
+  assert.equal(times.rows[1].fields.timepoint, null);
+  assert.equal(times.rows[1].fields.continuous_pickup, null);
+  assert.equal(times.rows[1].fields.pickup_type, "0");
+  const calendar = feed.tables.find((table) => table.kind === "calendar.txt");
+  assert.equal(calendar.rows[0].fields.monday, "1");
+  assert.equal(calendar.rows[0].fields.tuesday, "");
+  assert.equal(calendar.rows[0].fields.wednesday, null);
+  assert.equal(feed.tables.find((table) => table.kind === "fare_attributes.txt").rows[0].fields.transfers, "");
+  assert.equal(feed.tables.find((table) => table.kind === "translations.txt").rows[0].fields.table_name, "");
+  assert.equal(feed.tables.find((table) => table.kind === "unknown").rows[0].unrecognizedColumns.pickup_type, " ");
 });
 
 test("reports invalid UTF-8 in parsed tables", () => {
