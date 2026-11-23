@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "npm run typecheck && esbuild src/gtfs-worker.ts --bundle --outfile=dist/gtfs-worker.txt && esbuild src/main.ts --bundle --loader:.txt=text --outfile=dist/main.js",
+    "build": "npm run typecheck && esbuild src/gtfs-worker.ts --bundle --outfile=dist/gtfs-worker.txt && esbuild node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs --bundle --format=esm --outfile=dist/map-worker.txt && esbuild src/main.ts --bundle --loader:.txt=text --outfile=dist/main.js",
     "typecheck": "tsc --project tsconfig.json --noEmit",
-    "test": "esbuild src/gtfs.ts --bundle --platform=node --format=cjs --outfile=dist/gtfs.cjs && esbuild src/gtfs-worker.ts --bundle --outfile=dist/gtfs-worker.txt && tsc --ignoreConfig --noEmit --target ES2020 --module ES2022 --moduleResolution bundler --strict --skipLibCheck tests/gtfs-types.ts && node --test tests/*.test.cjs"
+    "test": "esbuild src/gtfs.ts --bundle --platform=node --format=cjs --outfile=dist/gtfs.cjs && esbuild src/map-data.ts --bundle --platform=node --format=cjs --outfile=dist/map-data.cjs && esbuild src/gtfs-worker.ts --bundle --outfile=dist/gtfs-worker.txt && tsc --ignoreConfig --noEmit --target ES2020 --module ES2022 --moduleResolution bundler --strict --skipLibCheck tests/gtfs-types.ts && node --test tests/*.test.cjs"
   },
   "dependencies": {
     "fflate": "^0.8.2",
+    "maplibre-gl": "^6.19.0",
     "papaparse": "^5.5.3"
   },
   "devDependencies": {

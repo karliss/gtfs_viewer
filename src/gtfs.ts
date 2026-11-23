@@ -46,6 +46,20 @@ export function getTableColumns(table: GtfsTable): {
   };
 }
 
+export function getMatchingRows(table: GtfsTable, search: string): GtfsTable["rows"][number][] {
+  const query = search.trim().toLocaleLowerCase();
+  if (!query) return table.rows;
+  return table.rows.filter((row) => {
+    const values = [...Object.values(row.fields), ...Object.values(row.unrecognizedColumns), ...row.extraValues];
+    if (table.kind === "routes.txt" && "route_type" in row.fields && row.fields.route_type) {
+      const value = row.fields.route_type;
+      const name = decodeRouteType(value);
+      values.push(name === `Unknown route type (${value})` ? name : `${name} (${value})`);
+    }
+    return values.some((value) => value !== null && value.toLocaleLowerCase().includes(query));
+  });
+}
+
 export function indexRoutes(feed: GtfsFeed): Map<string, GtfsRow<"routes.txt">> {
   const routes = feed.tables.find((table) => table.kind === "routes.txt");
   const byId = new Map<string, GtfsRow<"routes.txt">>();
