@@ -4,6 +4,7 @@ const Module = require("node:module");
 
 let map;
 let popup;
+let detailPopup;
 class FakeMap {
   constructor() {
     map = this;
@@ -23,12 +24,15 @@ class FakeMap {
   getCanvas() { return this.canvas; }
   resize() {}
   fitBounds() {}
+  getZoom() { return 3; }
+  easeTo(options) { this.lastEase = options; }
   remove() { this.removed = true; }
 }
 class FakePopup {
-  constructor() { popup = this; }
+  constructor(options) { if (options.closeButton) detailPopup = this; else popup = this; }
   setLngLat(value) { this.position = value; return this; }
   setText(value) { this.text = value; return this; }
+  setDOMContent(value) { this.content = value; return this; }
   addTo() { this.visible = true; return this; }
   remove() { this.visible = false; return this; }
 }
@@ -88,4 +92,32 @@ test("variant highlighting handles solid and dashed lines and clears on update",
   view.highlightVariant(2);
   view.update([], []);
   assert.deepEqual(map.filters["route-highlight"][2], ["==", ["get", "variantIndex"], -1]);
+});
+
+test("map hover temporarily highlights variants without clearing pinned selection", () => {
+  const view = new MapView({}, () => {}, () => {});
+  map.events.load();
+  view.highlightVariant(3);
+  map.features = [{ layer: { id: "route-hit" }, properties: { label: "Other", variantIndex: 5 } }];
+  map.events.mousemove({ point: {}, lngLat: [1, 2] });
+  assert.deepEqual(map.filters["route-highlight"][2], ["==", ["get", "variantIndex"], 5]);
+  map.events.mouseout();
+  assert.deepEqual(map.filters["route-highlight"][2], ["==", ["get", "variantIndex"], 3]);
+  view.highlightVariant(null);
+  assert.deepEqual(map.filters["route-highlight"][2], ["==", ["get", "variantIndex"], -1]);
+});
+
+test("click opens stop details and pre-load zoom is applied after fit", () => {
+  const content = {};
+  const view = new MapView({}, () => {}, () => {}, (id) => id === "s" ? content : null);
+  view.update([{ id: "s", name: "Stop", coordinate: [1, 2], hoverLabel: "Stop — stop 2" }], []);
+  view.zoomTo([1, 2]);
+  map.events.load();
+  assert.equal(map.sources.stops.data.features[0].properties.label, "Stop — stop 2");
+  assert.deepEqual(map.lastEase.center, [1, 2]);
+  assert.equal(map.lastEase.zoom, 16);
+  map.features = [{ layer: { id: "stops" }, properties: { stopId: "s" } }];
+  map.events.click({ point: {}, lngLat: [1, 2] });
+  assert.equal(detailPopup.content, content);
+  assert.equal(detailPopup.visible, true);
 });
