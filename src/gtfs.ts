@@ -59,7 +59,7 @@ export function getReferencedRoute(
 }
 
 export interface RouteVariant {
-  shapeId: string;
+  shapeId: string | null;
   tripHeadsign: string | null;
   tripShortName: string | null;
   directionIds: (string | null)[];
@@ -72,7 +72,7 @@ export function getVariantTableRows(
 ): GtfsTable | undefined {
   const table = feed.tables.find((candidate) => candidate.kind === kind);
   if (!table) return undefined;
-  if (table.kind === "shapes.txt") {
+  if (table.kind === "shapes.txt" && variant.shapeId !== null) {
     return { ...table, rows: table.rows.filter((row) => row.fields.shape_id === variant.shapeId) };
   }
   if (table.kind === "trips.txt") {
@@ -83,7 +83,8 @@ export function getVariantTableRows(
 
 export function getRouteVariants(feed: GtfsFeed, routeId: string): {
   variants: RouteVariant[];
-  tripsWithoutShape: number;
+  tripsCount: number;
+  tripsWithoutVariant: number;
 } {
   const trips = feed.tables.find((table) => table.kind === "trips.txt");
   const stopTimes = feed.tables.find((table) => table.kind === "stop_times.txt");
@@ -107,19 +108,19 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
   }
 
   const variantsByKey = new Map<string, RouteVariant>();
-  let tripsWithoutShape = 0;
+  let tripsWithoutVariant = 0;
   for (const trip of routeTrips) {
     const { fields } = trip;
-    if (!fields.shape_id) {
-      tripsWithoutShape++;
+    const stops = fields.trip_id ? stopsByTrip.get(fields.trip_id) ?? [] : [];
+    if (!fields.shape_id && !fields.trip_headsign && !fields.trip_short_name && stops.length === 0) {
+      tripsWithoutVariant++;
       continue;
     }
-    const stops = fields.trip_id ? stopsByTrip.get(fields.trip_id) ?? [] : [];
     const key = JSON.stringify([fields.shape_id, fields.trip_headsign, fields.trip_short_name, stops]);
     let variant = variantsByKey.get(key);
     if (!variant) {
       variant = {
-        shapeId: fields.shape_id, tripHeadsign: fields.trip_headsign,
+        shapeId: fields.shape_id || null, tripHeadsign: fields.trip_headsign,
         tripShortName: fields.trip_short_name, directionIds: [], stops, trips: [],
       };
       variantsByKey.set(key, variant);
@@ -127,7 +128,28 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
     if (!variant.directionIds.includes(fields.direction_id)) variant.directionIds.push(fields.direction_id);
     variant.trips.push(trip);
   }
-  return { variants: [...variantsByKey.values()], tripsWithoutShape };
+  return {
+    variants: [...variantsByKey.values()],
+    tripsCount: routeTrips.length,
+    tripsWithoutVariant,
+  };
+}
+
+export const ROUTE_TYPE_NAMES: Readonly<Record<string, string>> = {
+  "0": "Tram",
+  "1": "Subway",
+  "2": "Rail",
+  "3": "Bus",
+  "4": "Ferry",
+  "5": "Cable tram",
+  "6": "Aerial lift",
+  "7": "Funicular",
+  "11": "Trolleybus",
+  "12": "Monorail",
+};
+
+export function decodeRouteType(routeType: string): string {
+  return ROUTE_TYPE_NAMES[routeType] ?? `Unknown route type (${routeType})`;
 }
 
 function isGtfsTableName(name: string): name is GtfsTableName {

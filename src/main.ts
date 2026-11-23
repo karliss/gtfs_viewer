@@ -1,5 +1,5 @@
 import {
-  getReferencedRoute, getRouteVariants, getVariantTableRows, indexRoutes, loadGtfs,
+  decodeRouteType, getReferencedRoute, getRouteVariants, getVariantTableRows, indexRoutes, loadGtfs,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
 
@@ -53,8 +53,14 @@ app.innerHTML = `
       <button id="back-to-tables" type="button">Back to tables</button>
       <h2 id="route-heading" tabindex="-1">Route details</h2>
       <div id="route-properties"></div>
+      <p id="route-summary"></p>
       <h3>Shapes and route variants</h3>
       <div id="route-variants"></div>
+      <div id="variant-stops"></div>
+      <section id="all-route-stops">
+        <h3>All route stops</h3>
+        <ol id="route-stop-list"></ol>
+      </section>
     </section>
   </main>
 `;
@@ -82,6 +88,9 @@ const routeDetail = element<HTMLElement>("#route-detail");
 const routeHeading = element<HTMLHeadingElement>("#route-heading");
 const routeProperties = element<HTMLElement>("#route-properties");
 const routeVariants = element<HTMLElement>("#route-variants");
+const routeSummary = element<HTMLParagraphElement>("#route-summary");
+const variantStops = element<HTMLElement>("#variant-stops");
+const routeStopList = element<HTMLOListElement>("#route-stop-list");
 const backToTables = element<HTMLButtonElement>("#back-to-tables");
 const backToRoute = element<HTMLButtonElement>("#back-to-route");
 const tableFilter = element<HTMLParagraphElement>("#table-filter");
@@ -153,6 +162,8 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       description.textContent = "Not provided";
     } else if (value === "") {
       description.textContent = "(empty)";
+    } else if (name === "route_type") {
+      description.textContent = `${decodeRouteType(value)} (${value})`;
     } else {
       description.append(...renderRoutesCell(name, value).childNodes);
     }
@@ -167,17 +178,23 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
   }
   routeProperties.replaceChildren(list);
 
-  const { variants, tripsWithoutShape } = route.fields.route_id
+  const { variants, tripsCount, tripsWithoutVariant } = route.fields.route_id
     ? getRouteVariants(feed, route.fields.route_id)
-    : { variants: [], tripsWithoutShape: 0 };
+    : { variants: [], tripsCount: 0, tripsWithoutVariant: 0 };
+  routeSummary.textContent =
+    `${variants.length} ${variants.length === 1 ? "variant" : "variants"} · `
+    + `${tripsCount} ${tripsCount === 1 ? "trip references" : "trips reference"} this route.`;
   const stopsTable = feed.tables.find((table) => table.kind === "stops.txt");
   const stopNames = new Map(stopsTable?.rows.map(({ fields }) => [fields.stop_id, fields.stop_name]));
   routeVariants.replaceChildren();
+  variantStops.replaceChildren();
+  routeStopList.replaceChildren();
   if (variants.length === 0) {
     const message = document.createElement("p");
-    message.textContent = "No shapes are referenced by trips for this route.";
+    message.textContent = "No route variants could be formed from this route's trips.";
     routeVariants.append(message);
   }
+  const uniqueStops = new Set<string | null>();
   for (const [index, variant] of variants.entries()) {
     const section = document.createElement("section");
     const heading = document.createElement("h4");
@@ -198,10 +215,11 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       properties.append(term, description);
     }
     section.append(properties);
-    for (const [kind, label] of [
-      ["shapes.txt", "View shape rows"],
+    const tableLinks: (readonly ["shapes.txt" | "trips.txt", string])[] = [
+      ...(variant.shapeId ? [["shapes.txt", "View shape rows"] as const] : []),
       ["trips.txt", "View variant trips"],
-    ] as const) {
+    ];
+    for (const [kind, label] of tableLinks) {
       if (!feed.tables.some((table) => table.kind === kind)) continue;
       const button = document.createElement("button");
       button.type = "button";
@@ -210,35 +228,51 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       button.addEventListener("click", () => showVariantTable(variant, kind));
       section.append(button);
     }
-    const stopsHeading = document.createElement("h5");
-    stopsHeading.textContent = "Stops";
-    section.append(stopsHeading);
+    routeVariants.append(section);
+
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = `Stops for variant ${index + 1} (${variant.stops.length})`;
+    details.append(summary);
     if (variant.stops.length === 0) {
       const message = document.createElement("p");
       message.textContent = "No stop times found for this variant.";
-      section.append(message);
+      details.append(message);
     } else {
       const stops = document.createElement("ol");
       for (const stopId of variant.stops) {
         const item = document.createElement("li");
-        const stopName = stopNames.get(stopId);
-        item.textContent = stopName && stopId
-          ? `${stopName} (${stopId})`
-          : stopId || "Stop ID not provided";
+        item.textContent = formatStop(stopId, stopNames);
         stops.append(item);
+        uniqueStops.add(stopId);
       }
-      section.append(stops);
+      details.append(stops);
     }
-    routeVariants.append(section);
+    variantStops.append(details);
   }
-  if (tripsWithoutShape > 0) {
+  if (tripsWithoutVariant > 0) {
     const message = document.createElement("p");
-    message.textContent = `${tripsWithoutShape} ${tripsWithoutShape === 1 ? "trip has" : "trips have"} no shape ID and cannot be grouped into a shape variant.`;
+    message.textContent = `${tripsWithoutVariant} ${tripsWithoutVariant === 1 ? "trip lacks" : "trips lack"} all variant grouping data (shape, headsign, short name, and stop sequence).`;
     routeVariants.append(message);
+  }
+  for (const stopId of uniqueStops) {
+    const item = document.createElement("li");
+    item.textContent = formatStop(stopId, stopNames);
+    routeStopList.append(item);
+  }
+  if (uniqueStops.size === 0) {
+    const item = document.createElement("li");
+    item.textContent = "No stops available.";
+    routeStopList.append(item);
   }
   viewer.hidden = true;
   routeDetail.hidden = false;
   routeHeading.focus();
+}
+
+function formatStop(stopId: string | null, stopNames: Map<string | null, string | null>): string {
+  const stopName = stopNames.get(stopId);
+  return stopName && stopId ? `${stopName} (${stopId})` : stopId || "Stop ID not provided";
 }
 
 function showVariantTable(variant: RouteVariant, kind: "shapes.txt" | "trips.txt"): void {
