@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const { getMatchingRows, getRouteVariants, loadGtfs } = require("../dist/gtfs.cjs");
-const { coordinate, indexShapes, indexStops, mapStop, variantMapData } = require("../dist/map-data.cjs");
+const { coordinate, indexShapes, indexStopRoutes, indexStops, mapStop, variantMapData } = require("../dist/map-data.cjs");
 
 function feedFrom(files) {
   return loadGtfs(zipSync(Object.fromEntries(
@@ -16,6 +16,17 @@ test("coordinates reject absent, malformed and out-of-range values", () => {
   for (const [lon, lat] of [["", "2"], ["  ", "2"], ["1", null], ["NaN", "2"], ["0x10", "2"], ["181", "0"], ["0", "-91"]]) {
     assert.equal(coordinate(lon, lat), null);
   }
+});
+
+test("stop routes join stop times to trips and deduplicate route IDs", () => {
+  const feed = feedFrom({
+    "trips.txt": "route_id,trip_id\nr1,t1\nr1,t2\nr2,t3\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,s,1\nt1,s,2\nt2,s,1\nt3,s,1\nunknown,s,2\nt3,other,2\n",
+  });
+  const routes = indexStopRoutes(feed);
+  assert.deepEqual(routes.get("s"), ["r1", "r2"]);
+  assert.deepEqual(routes.get("other"), ["r2"]);
+  assert.equal(routes.has("unknown"), false);
 });
 
 test("stop search uses all fields and all matching rows rather than a page", () => {

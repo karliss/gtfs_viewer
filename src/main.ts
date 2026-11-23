@@ -4,7 +4,7 @@ import {
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
 import type { WorkerResponse } from "./gtfs-worker";
-import { indexShapes, indexStops, mapStop, variantLabel, variantMapData, type MapStop } from "./map-data";
+import { indexShapes, indexStopRoutes, indexStops, mapStop, variantLabel, variantMapData, type MapStop } from "./map-data";
 import { MapView, type MapLine } from "./map-view";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -42,6 +42,7 @@ app.innerHTML = `
       <p id="table-filter" hidden></p>
       <button id="clear-filter" type="button" hidden>Show all rows</button>
       <button id="stops-map" type="button" hidden>View stops on map</button>
+      <button id="routes-map" type="button" hidden>View routes on map</button>
       <div class="table-controls">
         <div>
           <label for="table-search">Search rows</label>
@@ -85,8 +86,14 @@ app.innerHTML = `
         <ol id="route-stop-list"></ol>
       </section>
     </section>
+    <section id="stop-detail" class="panel viewer" aria-labelledby="stop-heading" hidden>
+      <button id="back-from-stop" type="button">Back</button>
+      <h2 id="stop-heading" tabindex="-1">Stop details</h2>
+      <div id="stop-properties"></div>
+    </section>
     <section id="map-panel" class="panel viewer" aria-labelledby="map-heading" hidden>
       <button id="back-from-map" type="button">Back</button>
+      <button id="map-to-tables" type="button">Feed tables</button>
       <h2 id="map-heading" tabindex="-1">Map</h2>
       <p id="map-error" role="alert"></p>
       <p id="map-summary" role="status"></p>
@@ -136,7 +143,12 @@ const backToRoute = element<HTMLButtonElement>("#back-to-route");
 const tableFilter = element<HTMLParagraphElement>("#table-filter");
 const clearFilter = element<HTMLButtonElement>("#clear-filter");
 const stopsMapButton = element<HTMLButtonElement>("#stops-map");
+const routesMapButton = element<HTMLButtonElement>("#routes-map");
 const routeMapButton = element<HTMLButtonElement>("#route-map");
+const stopDetail = element<HTMLElement>("#stop-detail");
+const stopHeading = element<HTMLHeadingElement>("#stop-heading");
+const stopProperties = element<HTMLElement>("#stop-properties");
+const backFromStop = element<HTMLButtonElement>("#back-from-stop");
 const mapPanel = element<HTMLElement>("#map-panel");
 const mapHeading = element<HTMLHeadingElement>("#map-heading");
 const mapCanvas = element<HTMLElement>("#map-canvas");
@@ -147,15 +159,21 @@ const mapVariantControls = element<HTMLElement>("#map-variant-controls");
 const mapVariant = element<HTMLSelectElement>("#map-variant");
 const mapClearFilter = element<HTMLButtonElement>("#map-clear-filter");
 const backFromMap = element<HTMLButtonElement>("#back-from-map");
+const mapToTables = element<HTMLButtonElement>("#map-to-tables");
 let pageSize = 100;
 let feed: GtfsFeed | undefined;
 let page = 0;
 let routesById = new Map<string, GtfsRow<"routes.txt">>();
 let filteredTable: GtfsTable | undefined;
 let currentRoute: GtfsRow<"routes.txt"> | undefined;
+let stopsById = new Map<string, GtfsRow<"stops.txt">>();
+let routesByStop = new Map<string, string[]>();
+let stopReturn: "table" | "map" = "table";
 let mapView: MapView | undefined;
 let mapReturn: "table" | "route" = "table";
 let mapRouteVariants: RouteVariant[] = [];
+let mapVariantLabels: string[] = [];
+let pinnedVariant: number | null = null;
 let mapStopsIndex = new Map<string, MapStop>();
 let mapShapesIndex = new Map<string, GtfsRow<"shapes.txt">[]>();
 const stopListItems = new Map<string, HTMLElement[]>();
@@ -211,6 +229,58 @@ function renderRoutesCell(column: string, value: string | null): HTMLTableCellEl
   }
 
   return renderGenericCell(column, value);
+}
+
+function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
+  const content = document.createElement("div");
+  if (popup) {
+    const heading = document.createElement("h3");
+    heading.textContent = stop.fields.stop_name || stop.fields.stop_id || "Stop details";
+    content.append(heading);
+  }
+  const list = document.createElement("dl");
+  list.className = "route-properties";
+  const addProperty = (name: string, value: string | null): void => {
+    const term = document.createElement("dt");
+    term.textContent = name;
+    const description = document.createElement("dd");
+    if (value === null || value === "") {
+      description.textContent = value === null ? "Not provided" : "(empty)";
+      description.className = "not-provided";
+    } else {
+      description.append(name === "stop_url" ? renderLink(value, value) : document.createTextNode(value));
+    }
+    list.append(term, description);
+  };
+  const ids = stop.fields.stop_id ? routesByStop.get(stop.fields.stop_id) ?? [] : [];
+  const names = ids.map((id) => {
+    const route = routesById.get(id);
+    return route ? `${route.fields.route_short_name || route.fields.route_long_name || id} (${id})` : id;
+  });
+  addProperty("Routes", names.length ? names.join(", ") : "None found");
+  for (const [name, value] of [...Object.entries(stop.fields), ...Object.entries(stop.unrecognizedColumns)]) {
+    addProperty(name, value);
+  }
+  if (stop.extraValues.length) addProperty("Extra values", JSON.stringify(stop.extraValues));
+  content.append(list);
+  if (popup) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Open stop details";
+    button.addEventListener("click", () => showStop(stop, "map"));
+    content.append(button);
+  }
+  return content;
+}
+
+function showStop(stop: GtfsRow<"stops.txt">, returnTo: "table" | "map"): void {
+  stopReturn = returnTo;
+  stopHeading.textContent = `Stop details: ${stop.fields.stop_name || stop.fields.stop_id || "Stop"}`;
+  stopProperties.replaceChildren(stopContent(stop));
+  viewer.hidden = true;
+  mapPanel.hidden = true;
+  stopDetail.hidden = false;
+  stopHeading.focus();
 }
 
 const tableCellRenderers: Record<string, CellRenderer> = {
@@ -283,6 +353,14 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       .join(" → ");
     const headingParts = [variant.tripHeadsign?.trim(), variant.tripShortName?.trim(), endpoints].filter(Boolean);
     heading.textContent = headingParts.join(" · ") || `Variant ${index + 1}`;
+    const mapButton = document.createElement("button");
+    mapButton.type = "button";
+    mapButton.className = "route-map-icon";
+    mapButton.textContent = "🗺️";
+    mapButton.title = "View variant on map";
+    mapButton.setAttribute("aria-label", `View ${heading.textContent} on map`);
+    mapButton.addEventListener("click", () => showRouteMap(route, "route", index));
+    heading.append(" ", mapButton);
     section.append(heading);
     const properties = document.createElement("dl");
     properties.className = "route-properties";
@@ -438,6 +516,20 @@ function renderTable(table: GtfsTable): void {
           showRoute(route);
         }
       });
+    } else if (table.kind === "stops.txt") {
+      const stop = values as GtfsRow<"stops.txt">;
+      row.className = "route-row";
+      row.tabIndex = 0;
+      row.setAttribute("aria-label", `Open stop ${stop.fields.stop_name || stop.fields.stop_id || "details"}`);
+      row.addEventListener("click", (event) => {
+        if (!(event.target instanceof Element) || !event.target.closest("a, button")) showStop(stop, "table");
+      });
+      row.addEventListener("keydown", (event) => {
+        if (event.target === row && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          showStop(stop, "table");
+        }
+      });
     }
     for (const column of recognized) {
       const value = fields[column];
@@ -475,6 +567,21 @@ function renderTable(table: GtfsTable): void {
       button.setAttribute("aria-label", `View route ${route.fields.route_short_name || route.fields.route_id || "details"} on map`);
       button.addEventListener("click", () => showRouteMap(route, "table"));
       row.firstElementChild?.prepend(button, " ");
+    } else if (table.kind === "stops.txt") {
+      const stop = values as GtfsRow<"stops.txt">;
+      const position = mapStop(stop).coordinate;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "route-map-icon";
+      button.textContent = "🗺️";
+      button.title = position ? "View stop on map" : "Stop location unavailable";
+      button.setAttribute("aria-label", `View stop ${stop.fields.stop_name || stop.fields.stop_id || "details"} on map`);
+      button.disabled = !position;
+      button.addEventListener("click", () => {
+        showStopsMap();
+        if (position) mapView?.zoomTo(position);
+      });
+      row.firstElementChild?.prepend(button, " ");
     }
     rows.append(row);
   }
@@ -493,6 +600,7 @@ function renderTable(table: GtfsTable): void {
 function renderSelectedTable(): void {
   const table = filteredTable ?? feed?.tables[tableSelect.selectedIndex];
   stopsMapButton.hidden = table?.kind !== "stops.txt";
+  routesMapButton.hidden = table?.kind !== "routes.txt";
   if (table) renderTable(table);
 }
 
@@ -510,7 +618,10 @@ function openMap(returnTo: "table" | "route", title: string): void {
   stopListItems.clear();
   highlightedStopItems = [];
   try {
-    mapView = new MapView(mapCanvas, (message) => { mapError.textContent = message; }, highlightStopList);
+    mapView = new MapView(mapCanvas, (message) => { mapError.textContent = message; }, highlightStopList, (id) => {
+      const stop = stopsById.get(id);
+      return stop ? stopContent(stop, true) : null;
+    });
   } catch (error) {
     mapError.textContent = `Could not initialize the map: ${error instanceof Error ? error.message : "unknown error"}`;
   }
@@ -545,12 +656,13 @@ function renderStopsMap(): void {
   mapView?.update(stops, []);
 }
 
-function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route"): void {
+function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route", variantIndex = 0): void {
   if (!feed) return;
   const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
   mapRouteVariants = route.fields.route_id ? getRouteVariants(feed, route.fields.route_id).variants : [];
   mapStopsIndex = indexStops(feed);
   mapShapesIndex = indexShapes(feed);
+  mapVariantLabels = mapRouteVariants.map((variant, index) => variantLabel(variant, index, mapStopsIndex));
   mapSidebar.hidden = false;
   mapVariantControls.hidden = mapRouteVariants.length === 0;
   mapClearFilter.hidden = true;
@@ -558,9 +670,10 @@ function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route")
   for (const [index, variant] of mapRouteVariants.entries()) {
     const option = document.createElement("option");
     option.value = String(index);
-    option.textContent = variantLabel(variant, index, mapStopsIndex);
+    option.textContent = mapVariantLabels[index];
     mapVariant.append(option);
   }
+  mapVariant.value = String(variantIndex);
   if (mapRouteVariants.length) {
     const option = document.createElement("option");
     option.value = "all";
@@ -571,11 +684,77 @@ function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route")
   renderRouteMap();
 }
 
+function showAllRoutesMap(): void {
+  if (!feed) return;
+  const table = filteredTable ?? feed.tables[tableSelect.selectedIndex];
+  if (table?.kind !== "routes.txt") return;
+  const trips = feed.tables.find((candidate) => candidate.kind === "trips.txt");
+  const times = feed.tables.find((candidate) => candidate.kind === "stop_times.txt");
+  const tripsByRoute = new Map<string, GtfsRow<"trips.txt">[]>();
+  const routeByTrip = new Map<string, string>();
+  for (const trip of trips?.rows ?? []) {
+    const { route_id, trip_id } = trip.fields;
+    if (!route_id) continue;
+    const rows = tripsByRoute.get(route_id) ?? [];
+    rows.push(trip);
+    tripsByRoute.set(route_id, rows);
+    if (trip_id) routeByTrip.set(trip_id, route_id);
+  }
+  const timesByRoute = new Map<string, GtfsRow<"stop_times.txt">[]>();
+  for (const time of times?.rows ?? []) {
+    const routeId = time.fields.trip_id && routeByTrip.get(time.fields.trip_id);
+    if (!routeId) continue;
+    const rows = timesByRoute.get(routeId) ?? [];
+    rows.push(time);
+    timesByRoute.set(routeId, rows);
+  }
+  mapStopsIndex = indexStops(feed);
+  mapShapesIndex = indexShapes(feed);
+  mapRouteVariants = [];
+  mapVariantLabels = [];
+  for (const route of getMatchingRows(table, tableSearch.value) as GtfsRow<"routes.txt">[]) {
+    const id = route.fields.route_id;
+    if (!id) continue;
+    const routeFeed: GtfsFeed = {
+      ...feed,
+      tables: feed.tables.map((candidate) => {
+        if (candidate.kind === "trips.txt") return { ...candidate, rows: tripsByRoute.get(id) ?? [] };
+        if (candidate.kind === "stop_times.txt") return { ...candidate, rows: timesByRoute.get(id) ?? [] };
+        return candidate;
+      }),
+    };
+    const variants = getRouteVariants(routeFeed, id).variants;
+    const routeName = route.fields.route_short_name || route.fields.route_long_name || id;
+    for (const [index, variant] of variants.entries()) {
+      mapRouteVariants.push(variant);
+      mapVariantLabels.push(`${routeName}: ${variantLabel(variant, index, mapStopsIndex)}`);
+    }
+  }
+  mapSidebar.hidden = false;
+  mapVariantControls.hidden = !mapRouteVariants.length;
+  mapClearFilter.hidden = true;
+  mapVariant.replaceChildren();
+  for (const [index, label] of mapVariantLabels.entries()) {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = label;
+    mapVariant.append(option);
+  }
+  const all = document.createElement("option");
+  all.value = "all";
+  all.textContent = "All variants";
+  mapVariant.append(all);
+  mapVariant.value = "all";
+  openMap("table", "Routes map");
+  renderRouteMap();
+}
+
 function renderRouteMap(): void {
   if (!feed) return;
   mapSidebar.replaceChildren();
   stopListItems.clear();
   highlightedStopItems = [];
+  pinnedVariant = null;
   if (!mapRouteVariants.length) {
     mapSummary.textContent = "No route variants are available.";
     mapView?.update([], []);
@@ -585,15 +764,31 @@ function renderRouteMap(): void {
   const allStops: MapStop[] = [];
   const lines: MapLine[] = [];
   const warnings: string[] = [];
+  let approximateLines = 0;
+  let missingLines = 0;
+  const stopLabels = new Map<string, string[]>();
+  const clearHighlight = document.createElement("button");
+  clearHighlight.type = "button";
+  clearHighlight.textContent = "Clear variant highlight";
+  clearHighlight.hidden = true;
+  clearHighlight.addEventListener("click", () => {
+    pinnedVariant = null;
+    clearHighlight.hidden = true;
+    for (const button of mapSidebar.querySelectorAll<HTMLButtonElement>(".map-variant-label")) {
+      button.setAttribute("aria-pressed", "false");
+    }
+    mapView?.highlightVariant(null);
+  });
+  mapSidebar.append(clearHighlight);
   for (const index of selected) {
     const variant = mapRouteVariants[index];
-    const label = variantLabel(variant, index, mapStopsIndex);
+    const label = mapVariantLabels[index];
     const data = variantMapData(mapShapesIndex, variant, mapStopsIndex);
     allStops.push(...data.stops);
     lines.push({ coordinates: data.line, approximate: data.approximate, variantIndex: index, label });
     if (data.approximate) {
-      warnings.push(`${label}: shape unavailable; ${data.line.length >= 2
-        ? "dashed line connects known stops approximately" : "not enough located stops to draw a line"}.`);
+      if (data.line.length >= 2) approximateLines++;
+      else missingLines++;
     } else if (data.invalidShapePoints) {
       warnings.push(`${label}: ${data.invalidShapePoints} invalid shape points omitted.`);
     }
@@ -603,27 +798,49 @@ function renderRouteMap(): void {
     variantButton.type = "button";
     variantButton.className = "map-variant-label";
     variantButton.textContent = label;
-    variantButton.addEventListener("mouseenter", () => mapView?.highlightVariant(index));
-    variantButton.addEventListener("mouseleave", () => mapView?.highlightVariant(null));
-    variantButton.addEventListener("focus", () => mapView?.highlightVariant(index));
-    variantButton.addEventListener("blur", () => mapView?.highlightVariant(null));
+    variantButton.setAttribute("aria-pressed", "false");
+    variantButton.addEventListener("mouseenter", () => mapView?.hoverVariant(index));
+    variantButton.addEventListener("mouseleave", () => mapView?.hoverVariant(null));
+    variantButton.addEventListener("focus", () => mapView?.hoverVariant(index));
+    variantButton.addEventListener("blur", () => mapView?.hoverVariant(null));
+    variantButton.addEventListener("click", () => {
+      pinnedVariant = pinnedVariant === index ? null : index;
+      clearHighlight.hidden = pinnedVariant === null;
+      for (const button of mapSidebar.querySelectorAll<HTMLButtonElement>(".map-variant-label")) {
+        button.setAttribute("aria-pressed", String(button === variantButton && pinnedVariant !== null));
+      }
+      mapView?.highlightVariant(pinnedVariant);
+    });
     heading.append(variantButton);
     section.append(heading);
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.textContent = "Hide stops";
+    toggle.setAttribute("aria-expanded", "true");
     const list = document.createElement("ol");
-    for (const stop of data.stops) {
+    toggle.addEventListener("click", () => {
+      list.hidden = !list.hidden;
+      toggle.textContent = list.hidden ? "Show stops" : "Hide stops";
+      toggle.setAttribute("aria-expanded", String(!list.hidden));
+    });
+    section.append(toggle);
+    for (const [stopIndex, stop] of data.stops.entries()) {
       const item = document.createElement("li");
       if (stop.id) {
         const items = stopListItems.get(stop.id) ?? [];
         items.push(item);
         stopListItems.set(stop.id, items);
+        const labels = stopLabels.get(stop.id) ?? [];
+        labels.push(selected.length > 1 ? `${label}: ${stopIndex + 1}` : String(stopIndex + 1));
+        stopLabels.set(stop.id, labels);
       }
-      const label = stop.name && stop.id ? `${stop.name} (${stop.id})` : stop.id || "Stop ID not provided";
+      const stopLabel = stop.name && stop.id ? `${stop.name} (${stop.id})` : stop.id || "Stop ID not provided";
       if (stop.coordinate) {
         const position = stop.coordinate;
         const button = document.createElement("button");
         button.type = "button";
         button.className = "route-link";
-        button.textContent = label;
+        button.textContent = stopLabel;
         button.addEventListener("mouseenter", () => mapView?.highlight(position));
         button.addEventListener("mouseleave", () => mapView?.highlight(null));
         button.addEventListener("focus", () => mapView?.highlight(position));
@@ -631,7 +848,17 @@ function renderRouteMap(): void {
         button.addEventListener("click", () => mapView?.zoomTo(position));
         item.append(button);
       } else {
-        item.textContent = `${label} (location unavailable)`;
+        item.textContent = `${stopLabel} (location unavailable)`;
+      }
+      const row = stop.id ? stopsById.get(stop.id) : undefined;
+      if (row) {
+        const details = document.createElement("button");
+        details.type = "button";
+        details.className = "stop-details-link";
+        details.textContent = "Details";
+        details.setAttribute("aria-label", `Open details for ${stopLabel}`);
+        details.addEventListener("click", () => showStop(row, "map"));
+        item.append(" ", details);
       }
       list.append(item);
     }
@@ -643,10 +870,21 @@ function renderRouteMap(): void {
     section.append(list);
     mapSidebar.append(section);
   }
+  const missingShapes = approximateLines + missingLines;
+  if (missingShapes) {
+    warnings.push(`Shape unavailable for ${missingShapes} ${missingShapes === 1 ? "variant" : "variants"}.`
+      + (approximateLines ? ` ${approximateLines} shown as dashed lines connecting known stops approximately.` : "")
+      + (missingLines ? ` ${missingLines} have too few located stops to draw a line.` : ""));
+  }
   const missing = allStops.filter((stop) => !stop.coordinate).length;
   if (missing) warnings.push(`${missing} stop ${missing === 1 ? "location is" : "locations are"} unavailable.`);
   mapSummary.textContent = warnings.join(" ") || `${selected.length} ${selected.length === 1 ? "variant" : "variants"} shown.`;
-  mapView?.update(allStops, lines);
+  mapView?.update(allStops.map((stop) => ({
+    ...stop,
+    hoverLabel: stop.id && stopLabels.has(stop.id)
+      ? `${stop.name?.trim() || stop.id} — stop ${stopLabels.get(stop.id)!.join(", ")}`
+      : undefined,
+  })), lines);
 }
 
 function loadFeed(file: File): Promise<GtfsFeed> {
@@ -690,6 +928,7 @@ form.addEventListener("submit", async (event) => {
   status.textContent = "Loading feed…";
   viewer.hidden = true;
   routeDetail.hidden = true;
+  stopDetail.hidden = true;
   mapPanel.hidden = true;
   mapView?.remove();
   mapView = undefined;
@@ -702,6 +941,12 @@ form.addEventListener("submit", async (event) => {
   try {
     feed = await loadFeed(file);
     routesById = indexRoutes(feed);
+    stopsById = new Map();
+    const stops = feed.tables.find((table) => table.kind === "stops.txt");
+    for (const stop of stops?.rows ?? []) {
+      if (stop.fields.stop_id && !stopsById.has(stop.fields.stop_id)) stopsById.set(stop.fields.stop_id, stop);
+    }
+    routesByStop = indexStopRoutes(feed);
     tableSelect.replaceChildren(...feed.tables.map((table) => {
       const option = document.createElement("option");
       option.textContent = table.name;
@@ -727,6 +972,7 @@ backToTables.addEventListener("click", () => {
 });
 
 stopsMapButton.addEventListener("click", showStopsMap);
+routesMapButton.addEventListener("click", showAllRoutesMap);
 routeMapButton.addEventListener("click", () => {
   if (currentRoute) showRouteMap(currentRoute, "route");
 });
@@ -737,6 +983,24 @@ backFromMap.addEventListener("click", () => {
   if (mapReturn === "route") {
     routeDetail.hidden = false;
     routeMapButton.focus();
+  } else {
+    viewer.hidden = false;
+    tableSelect.focus();
+  }
+});
+mapToTables.addEventListener("click", () => {
+  mapView?.remove();
+  mapView = undefined;
+  mapPanel.hidden = true;
+  viewer.hidden = false;
+  tableSelect.focus();
+});
+backFromStop.addEventListener("click", () => {
+  stopDetail.hidden = true;
+  if (stopReturn === "map" && mapView) {
+    mapPanel.hidden = false;
+    mapView.resize();
+    mapHeading.focus();
   } else {
     viewer.hidden = false;
     tableSelect.focus();

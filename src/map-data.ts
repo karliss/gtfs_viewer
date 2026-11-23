@@ -5,6 +5,25 @@ export interface MapStop {
   id: string | null;
   name: string | null;
   coordinate: Coordinate | null;
+  hoverLabel?: string;
+}
+
+export function indexStopRoutes(feed: GtfsFeed): Map<string, string[]> {
+  const trips = feed.tables.find((table) => table.kind === "trips.txt");
+  const times = feed.tables.find((table) => table.kind === "stop_times.txt");
+  const routesByTrip = new Map<string, string>();
+  for (const { fields } of trips?.rows ?? []) {
+    if (fields.trip_id && fields.route_id) routesByTrip.set(fields.trip_id, fields.route_id);
+  }
+  const routesByStop = new Map<string, Set<string>>();
+  for (const { fields } of times?.rows ?? []) {
+    const route = fields.trip_id && routesByTrip.get(fields.trip_id);
+    if (!fields.stop_id || !route) continue;
+    const routes = routesByStop.get(fields.stop_id) ?? new Set<string>();
+    routes.add(route);
+    routesByStop.set(fields.stop_id, routes);
+  }
+  return new Map([...routesByStop].map(([stop, routes]) => [stop, [...routes]]));
 }
 
 export function coordinate(lon: string | null, lat: string | null): Coordinate | null {

@@ -20,13 +20,17 @@ export class MapView {
   private lines: MapLine[] = [];
   private highlighted: Coordinate | null = null;
   private highlightedVariant: number | null = null;
+  private hoveredVariant: number | null = null;
   private hoveredStop: string | null = null;
   private popup: Popup;
+  private detailPopup: Popup;
+  private pendingZoom: Coordinate | null = null;
 
   constructor(
     container: HTMLElement,
     onError: (message: string) => void,
     onStopHover: (stopId: string | null) => void,
+    stopDetails?: (stopId: string) => HTMLElement | null,
   ) {
     this.map = new LibreMap({
       container,
@@ -47,6 +51,7 @@ export class MapView {
       },
     });
     this.popup = new Popup({ closeButton: false, closeOnClick: false });
+    this.detailPopup = new Popup({ closeButton: true, closeOnClick: true });
     this.map.addControl(new NavigationControl(), "top-right");
     this.map.on("error", (event) => onError(`Map or basemap error: ${event.error.message}`));
     this.map.on("load", () => {
@@ -86,6 +91,10 @@ export class MapView {
       this.loaded = true;
       this.applyVariantHighlight();
       this.fit();
+      if (this.pendingZoom) {
+        this.zoomTo(this.pendingZoom);
+        this.pendingZoom = null;
+      }
     });
     this.map.on("mousemove", (event) => {
       if (!this.loaded) return;
@@ -95,6 +104,9 @@ export class MapView {
       const feature = stop ?? line;
       this.map.getCanvas().style.cursor = feature ? "pointer" : "";
       const stopId = stop?.properties?.stopId || null;
+      const variant = !stop && line && typeof line.properties?.variantIndex === "number"
+        ? line.properties.variantIndex : null;
+      this.hoverVariant(variant);
       if (stopId !== this.hoveredStop) {
         this.hoveredStop = stopId;
         onStopHover(stopId);
@@ -109,7 +121,16 @@ export class MapView {
       this.popup.remove();
       this.map.getCanvas().style.cursor = "";
       this.hoveredStop = null;
+      this.hoverVariant(null);
       onStopHover(null);
+    });
+    this.map.on("click", (event) => {
+      if (!this.loaded || !stopDetails) return;
+      const stop = this.map.queryRenderedFeatures(event.point, { layers: ["stops"] })[0];
+      const id = stop?.properties?.stopId;
+      if (!id) return;
+      const content = stopDetails(String(id));
+      if (content) this.detailPopup.setLngLat(event.lngLat).setDOMContent(content).addTo(this.map);
     });
   }
 
@@ -118,8 +139,11 @@ export class MapView {
     this.lines = lines;
     this.highlighted = null;
     this.highlightedVariant = null;
+    this.hoveredVariant = null;
+    this.pendingZoom = null;
     this.hoveredStop = null;
     this.popup.remove();
+    this.detailPopup.remove();
     if (this.loaded) {
       (this.map.getSource("stops") as GeoJSONSource).setData(this.stopFeatures());
       (this.map.getSource("route-lines") as GeoJSONSource).setData(this.lineFeatures());
@@ -134,24 +158,39 @@ export class MapView {
     if (this.loaded) this.applyVariantHighlight();
   }
 
+  hoverVariant(index: number | null): void {
+    if (this.hoveredVariant === index) return;
+    this.hoveredVariant = index;
+    if (this.loaded) this.applyVariantHighlight();
+  }
+
   highlight(coordinate: Coordinate | null): void {
     this.highlighted = coordinate;
     if (this.loaded) (this.map.getSource("highlight") as GeoJSONSource).setData(this.highlightFeatures());
   }
 
   zoomTo(coordinate: Coordinate): void {
+    if (!this.loaded) {
+      this.pendingZoom = coordinate;
+      return;
+    }
     this.map.easeTo({ center: coordinate, zoom: Math.max(this.map.getZoom(), 16) });
+  }
+
+  resize(): void {
+    this.map.resize();
   }
 
   remove(): void {
     this.popup.remove();
+    this.detailPopup.remove();
     this.map.remove();
   }
 
   private stopFeatures(): FeatureCollection<Point> {
     const features: Feature<Point>[] = this.stops.flatMap((stop) => stop.coordinate
       ? [{
-        type: "Feature", properties: { stopId: stop.id ?? "", label: stop.name?.trim() || stop.id || "Stop" },
+        type: "Feature", properties: { stopId: stop.id ?? "", label: stop.hoverLabel || stop.name?.trim() || stop.id || "Stop" },
         geometry: { type: "Point", coordinates: stop.coordinate },
       }] : []);
     return { type: "FeatureCollection", features };
@@ -168,7 +207,7 @@ export class MapView {
   }
 
   private applyVariantHighlight(): void {
-    const index = this.highlightedVariant ?? -1;
+    const index = this.hoveredVariant ?? this.highlightedVariant ?? -1;
     this.map.setFilter("route-highlight", ["all", ["==", ["get", "approximate"], false], ["==", ["get", "variantIndex"], index]]);
     this.map.setFilter("route-approximation-highlight", ["all", ["==", ["get", "approximate"], true], ["==", ["get", "variantIndex"], index]]);
   }

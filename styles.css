@@ -270,6 +270,7 @@ tbody tr:last-child td {
 }
 
 #stops-map,
+#routes-map,
 #route-map,
 #map-clear-filter {
   margin-top: 0.75rem;
@@ -320,9 +321,27 @@ tbody tr:last-child td {
 }
 
 .map-variant-label:hover,
-.map-variant-label:focus-visible {
+.map-variant-label:focus-visible,
+.map-variant-label[aria-pressed="true"] {
   color: #b33a08;
   text-decoration: underline;
+}
+
+.stop-details-link {
+  padding: 0;
+  border: 0;
+  color: #1554a0;
+  text-decoration: underline;
+}
+
+#map-canvas .maplibregl-popup-content {
+  max-height: 45vh;
+  overflow: auto;
+}
+
+#map-canvas .route-properties {
+  grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr);
+  font-size: 0.85rem;
 }
 
 #map-sidebar .map-stop-highlight {
