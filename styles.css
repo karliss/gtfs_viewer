@@ -11,15 +11,13 @@
 }
 
 body {
-  min-width: 320px;
   min-height: 100vh;
   margin: 0;
 }
 
 .page {
-  width: min(100% - 2rem, 72rem);
-  margin: 0 auto;
-  padding: 4rem 0;
+  width: 100%;
+  padding: 4rem 1rem;
 }
 
 .page__header {
@@ -116,6 +114,15 @@ button:disabled {
 
 input[type="file"] {
   max-width: 100%;
+}
+
+.route-color-swatch {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  margin-right: 0.5rem;
+  border: 1px solid #aebbd0;
+  vertical-align: -0.1rem;
 }
 
 #status:not(:empty),

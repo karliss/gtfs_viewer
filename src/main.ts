@@ -69,6 +69,50 @@ const pageSize = 100;
 let feed: GtfsFeed | undefined;
 let page = 0;
 
+type CellRenderer = (column: string, value: string | null) => HTMLTableCellElement;
+
+function renderGenericCell(_column: string, value: string | null): HTMLTableCellElement {
+  const cell = document.createElement("td");
+  cell.textContent = value;
+  return cell;
+}
+
+function renderRoutesCell(column: string, value: string | null): HTMLTableCellElement {
+  if (column === "route_url" && value) {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      return renderGenericCell(column, value);
+    }
+
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      const link = document.createElement("a");
+      link.href = url.href;
+      link.textContent = value;
+      const cell = document.createElement("td");
+      cell.append(link);
+      return cell;
+    }
+  }
+
+  if (column === "route_color" && value && /^[\da-f]{6}$/i.test(value)) {
+    const swatch = document.createElement("span");
+    swatch.className = "route-color-swatch";
+    swatch.style.backgroundColor = `#${value}`;
+    swatch.setAttribute("aria-hidden", "true");
+    const cell = document.createElement("td");
+    cell.append(swatch, document.createTextNode(value));
+    return cell;
+  }
+
+  return renderGenericCell(column, value);
+}
+
+const tableCellRenderers: Record<string, CellRenderer> = {
+  "routes.txt": renderRoutesCell,
+};
+
 function renderTable(table: GtfsTable): void {
   const header = document.createElement("tr");
   for (const column of table.columns) {
@@ -87,15 +131,15 @@ function renderTable(table: GtfsTable): void {
 
   const start = page * pageSize;
   const rows = document.createDocumentFragment();
+  const renderCell = tableCellRenderers[table.name] ?? renderGenericCell;
   for (const values of table.rows.slice(start, start + pageSize)) {
     const row = document.createElement("tr");
     const fields: Record<string, string | null> = values.fields;
     for (const column of table.columns) {
-      const cell = document.createElement("td");
-      cell.textContent = Object.prototype.hasOwnProperty.call(fields, column)
+      const value = Object.prototype.hasOwnProperty.call(fields, column)
         ? fields[column]
         : values.unrecognizedColumns[column];
-      row.append(cell);
+      row.append(renderCell(column, value));
     }
     if (table.hasExtraValues) {
       const cell = document.createElement("td");
