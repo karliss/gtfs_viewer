@@ -1,7 +1,9 @@
 import {
-  decodeRouteType, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, loadGtfs,
+  decodeRouteType, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
+import workerSource from "../dist/gtfs-worker.txt";
+import type { WorkerResponse } from "./gtfs-worker";
 
 const app = document.querySelector<HTMLElement>("#app");
 
@@ -128,26 +130,25 @@ function renderGenericCell(_column: string, value: string | null): HTMLTableCell
   return cell;
 }
 
-function renderUrlCell(column: string, value: string | null): HTMLTableCellElement {
-  if (value) {
-    let url: URL;
-    try {
-      url = new URL(value);
-    } catch {
-      return renderGenericCell(column, value);
-    }
-
-    if (url.protocol === "http:" || url.protocol === "https:") {
-      const link = document.createElement("a");
-      link.href = url.href;
-      link.textContent = value;
-      const cell = document.createElement("td");
-      cell.append(link);
-      return cell;
-    }
+function renderLink(value: string | null, label: string): Node {
+  if (!value) return document.createTextNode(label);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return document.createTextNode(label);
   }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return document.createTextNode(label);
+  const link = document.createElement("a");
+  link.href = url.href;
+  link.textContent = label;
+  return link;
+}
 
-  return renderGenericCell(column, value);
+function renderUrlCell(_column: string, value: string | null): HTMLTableCellElement {
+  const cell = document.createElement("td");
+  cell.append(renderLink(value, value ?? ""));
+  return cell;
 }
 
 function routeTypeLabel(value: string): string {
@@ -177,6 +178,8 @@ const tableCellRenderers: Record<string, CellRenderer> = {
   "routes.txt": renderRoutesCell,
   "agency.txt": (column, value) => column === "agency_url" || column === "agency_fare_url"
     ? renderUrlCell(column, value) : renderGenericCell(column, value),
+  "stops.txt": (column, value) => column === "stop_url"
+    ? renderUrlCell(column, value) : renderGenericCell(column, value),
 };
 
 function showRoute(route: GtfsRow<"routes.txt">): void {
@@ -199,7 +202,6 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       description.append(...renderRoutesCell(name, value).childNodes);
     }
     if (value === null || value === "") {
-      term.className = "not-provided";
       description.className = "not-provided";
     }
     list.append(term, description);
@@ -222,6 +224,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
   routeTrips.hidden = !route.fields.route_id || !feed.tables.some((table) => table.kind === "trips.txt");
   const stopsTable = feed.tables.find((table) => table.kind === "stops.txt");
   const stopNames = new Map(stopsTable?.rows.map(({ fields }) => [fields.stop_id, fields.stop_name]));
+  const stopUrls = new Map(stopsTable?.rows.map(({ fields }) => [fields.stop_id, fields.stop_url]));
   routeVariants.replaceChildren();
   routeStopList.replaceChildren();
   if (variants.length === 0) {
@@ -256,7 +259,6 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       const description = document.createElement("dd");
       description.textContent = value === null ? "Not provided" : value === "" ? "(empty)" : value;
       if (missing) {
-        term.className = "not-provided";
         description.className = "not-provided";
       }
       properties.append(term, description);
@@ -287,7 +289,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       const stops = document.createElement("ol");
       for (const stopId of variant.stops) {
         const item = document.createElement("li");
-        item.textContent = formatStop(stopId, stopNames);
+        item.append(renderLink(stopId ? stopUrls.get(stopId) ?? null : null, formatStop(stopId, stopNames)));
         stops.append(item);
         uniqueStops.add(stopId);
       }
@@ -303,7 +305,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
   }
   for (const stopId of uniqueStops) {
     const item = document.createElement("li");
-    item.textContent = formatStop(stopId, stopNames);
+    item.append(renderLink(stopId ? stopUrls.get(stopId) ?? null : null, formatStop(stopId, stopNames)));
     routeStopList.append(item);
   }
   if (uniqueStops.size === 0) {
@@ -450,6 +452,37 @@ function renderSelectedTable(): void {
   if (table) renderTable(table);
 }
 
+function loadFeed(file: File): Promise<GtfsFeed> {
+  const url = URL.createObjectURL(new Blob([workerSource], { type: "text/javascript" }));
+  let worker: Worker;
+  try {
+    worker = new Worker(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  return new Promise((resolve, reject) => {
+    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+      worker.terminate();
+      if ("error" in event.data) reject(new Error(event.data.error));
+      else resolve(event.data.feed);
+    };
+    worker.onerror = (event) => {
+      worker.terminate();
+      reject(new Error(event.message || "Could not load the feed."));
+    };
+    worker.onmessageerror = () => {
+      worker.terminate();
+      reject(new Error("Could not read the parsed feed."));
+    };
+    try {
+      worker.postMessage(file);
+    } catch (error) {
+      worker.terminate();
+      reject(error);
+    }
+  });
+}
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const file = input.files?.[0];
@@ -467,7 +500,7 @@ form.addEventListener("submit", async (event) => {
   routesById.clear();
 
   try {
-    feed = loadGtfs(new Uint8Array(await file.arrayBuffer()));
+    feed = await loadFeed(file);
     routesById = indexRoutes(feed);
     tableSelect.replaceChildren(...feed.tables.map((table) => {
       const option = document.createElement("option");
