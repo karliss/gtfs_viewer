@@ -11,6 +11,8 @@ export interface MapLine {
   approximate: boolean;
   variantIndex: number;
   label: string;
+  routeId?: string;
+  color?: string;
 }
 
 export class MapView {
@@ -22,6 +24,7 @@ export class MapView {
   private highlightedVariant: number | null = null;
   private hoveredVariant: number | null = null;
   private hoveredStop: string | null = null;
+  private routeColorsEnabled = true;
   private popup: Popup;
   private detailPopup: Popup;
   private pendingZoom: Coordinate | null = null;
@@ -31,6 +34,7 @@ export class MapView {
     onError: (message: string) => void,
     onStopHover: (stopId: string | null) => void,
     stopDetails?: (stopId: string) => HTMLElement | null,
+    routeDetails?: (routeId: string) => HTMLElement | null,
   ) {
     this.map = new LibreMap({
       container,
@@ -90,6 +94,7 @@ export class MapView {
       });
       this.loaded = true;
       this.applyVariantHighlight();
+      this.applyRouteColors();
       this.fit();
       if (this.pendingZoom) {
         this.zoomTo(this.pendingZoom);
@@ -125,11 +130,15 @@ export class MapView {
       onStopHover(null);
     });
     this.map.on("click", (event) => {
-      if (!this.loaded || !stopDetails) return;
-      const stop = this.map.queryRenderedFeatures(event.point, { layers: ["stops"] })[0];
-      const id = stop?.properties?.stopId;
-      if (!id) return;
-      const content = stopDetails(String(id));
+      if (!this.loaded) return;
+      const features = this.map.queryRenderedFeatures(event.point, { layers: ["stops", "route-hit"] });
+      const stop = features.find((feature) => feature.layer.id === "stops");
+      const route = features.find((feature) => feature.layer.id === "route-hit");
+      const stopId = stop?.properties?.stopId;
+      const routeId = route?.properties?.routeId;
+      const content = stopId && stopDetails
+        ? stopDetails(String(stopId))
+        : routeId && routeDetails ? routeDetails(String(routeId)) : null;
       if (content) this.detailPopup.setLngLat(event.lngLat).setDOMContent(content).addTo(this.map);
     });
   }
@@ -149,6 +158,7 @@ export class MapView {
       (this.map.getSource("route-lines") as GeoJSONSource).setData(this.lineFeatures());
       (this.map.getSource("highlight") as GeoJSONSource).setData(this.highlightFeatures());
       this.applyVariantHighlight();
+      this.applyRouteColors();
       this.fit();
     }
   }
@@ -156,6 +166,11 @@ export class MapView {
   highlightVariant(index: number | null): void {
     this.highlightedVariant = index;
     if (this.loaded) this.applyVariantHighlight();
+  }
+
+  setRouteColors(enabled: boolean): void {
+    this.routeColorsEnabled = enabled;
+    if (this.loaded) this.applyRouteColors();
   }
 
   hoverVariant(index: number | null): void {
@@ -200,7 +215,14 @@ export class MapView {
     return {
       type: "FeatureCollection",
       features: this.lines.filter((line) => line.coordinates.length >= 2).map((line) => ({
-        type: "Feature", properties: { approximate: line.approximate, variantIndex: line.variantIndex, label: line.label },
+        type: "Feature",
+        properties: {
+          approximate: line.approximate,
+          variantIndex: line.variantIndex,
+          label: line.label,
+          routeId: line.routeId ?? "",
+          color: line.color ?? "#1554a0",
+        },
         geometry: { type: "LineString", coordinates: line.coordinates },
       })),
     };
@@ -210,6 +232,16 @@ export class MapView {
     const index = this.hoveredVariant ?? this.highlightedVariant ?? -1;
     this.map.setFilter("route-highlight", ["all", ["==", ["get", "approximate"], false], ["==", ["get", "variantIndex"], index]]);
     this.map.setFilter("route-approximation-highlight", ["all", ["==", ["get", "approximate"], true], ["==", ["get", "variantIndex"], index]]);
+  }
+
+  private applyRouteColors(): void {
+    if (this.routeColorsEnabled) {
+      this.map.setPaintProperty("route-lines", "line-color", ["get", "color"]);
+      this.map.setPaintProperty("route-approximations", "line-color", ["get", "color"]);
+    } else {
+      this.map.setPaintProperty("route-lines", "line-color", "#1554a0");
+      this.map.setPaintProperty("route-approximations", "line-color", "#1554a0");
+    }
   }
 
   private highlightFeatures(): FeatureCollection<Point> {
