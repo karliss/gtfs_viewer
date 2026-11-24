@@ -893,15 +893,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       const hourHeading = document.createElement("span");
       hourHeading.textContent = "";
       headings.append(hourHeading);
-      const headingDays = timetable.popularDays.length > 0
-        ? timetable.popularDays
-        : (() => {
-          const knownDays = [...new Set(timetable.rows.flatMap((row) => row.departures)
-            .flatMap((departure) => departure.days ?? []))]
-            .sort((left, right) => left - right);
-          return knownDays.length > 0 ? [knownDays] : [[]];
-        })();
-      for (const days of headingDays) {
+      for (const days of timetable.popularDays) {
         const heading = document.createElement("span");
         heading.className = "timetable-popular-days";
         if (timetable.popularDays.length === 2) {

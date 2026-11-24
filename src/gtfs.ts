@@ -126,7 +126,7 @@ export interface VariantTimetable {
 }
 
 export function formatTimetableDayRange(days: readonly number[]): string {
-  if (days.length === 0) return "";
+  if (days.length === 0) return "1-7";
   const sorted = [...new Set(days)].filter((day) => day >= 1 && day <= 7).sort((a, b) => a - b);
   const ranges: string[] = [];
   for (let index = 0; index < sorted.length;) {
@@ -223,6 +223,14 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
         })),
       ),
     }));
+  if (rows.length > 0 && popularDays.length === 0) {
+    const knownDays = [...new Set(rows.flatMap((row) => row.departures
+      .flatMap((departure) => departure.days ?? [])))]
+      .sort((left, right) => left - right);
+    popularDays.push(knownDays.length > 0
+      ? knownDays
+      : [1, 2, 3, 4, 5, 6, 7]);
+  }
   const serviceIds = new Set(variant.trips.flatMap((trip) =>
     trip.fields.service_id ? [trip.fields.service_id] : []));
   const exceptionDates = calendarDates

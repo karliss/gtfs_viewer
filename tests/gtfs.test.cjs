@@ -43,7 +43,7 @@ test("formats timetable day ranges and generates first-stop departures", () => {
   ]);
   assert.equal(formatTimetableDayRange([7, 1, 2, 3, 5, 6, 4]), "1-7");
   assert.equal(formatTimetableDayRange([1, 2, 4, 5, 7]), "1-2, 4-5, 7");
-  assert.equal(formatTimetableDayRange([]), "");
+  assert.equal(formatTimetableDayRange([]), "1-7");
 });
 
 test("uses weekday and weekend sets when the two popular masks intersect", () => {
@@ -76,6 +76,21 @@ test("uses a single 1-5 popular day set for weekday-only trips", () => {
   assert.equal(formatTimetableDayRange(timetable.popularDays[0]), "1-5");
   assert.deepEqual(timetable.rows, [
     { hour: 7, departures: [{ minute: 20, days: [1, 2, 3, 4, 5] }] },
+  ]);
+});
+
+test("uses all seven days when trips have times but no usable calendar masks", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,service_id,shape_id\n"
+      + "r,calendar-less,unknown-service,s\n",
+    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\n"
+      + "calendar-less,08:30:00,a,1\n",
+  }));
+  const variant = getRouteVariants(feed, "r").variants[0];
+  const timetable = getVariantTimetable(feed, variant);
+  assert.deepEqual(timetable.popularDays, [[1, 2, 3, 4, 5, 6, 7]]);
+  assert.deepEqual(timetable.rows, [
+    { hour: 8, departures: [{ minute: 30, days: null }] },
   ]);
 });
 
