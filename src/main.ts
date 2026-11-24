@@ -441,6 +441,34 @@ function sameTimetableDays(left: readonly number[], right: readonly number[]): b
   return left.every((day, index) => day === right[index]);
 }
 
+function appendExceptionDates(container: HTMLElement, dates: readonly string[]): void {
+  const today = new Date();
+  const todayKey = [
+    String(today.getFullYear()).padStart(4, "0"),
+    String(today.getMonth() + 1).padStart(2, "0"),
+    String(today.getDate()).padStart(2, "0"),
+  ].join("");
+  const pastDates = dates.filter((date) => date < todayKey);
+  const currentOrFutureDates = dates.filter((date) => date >= todayKey);
+  const exceptions = document.createElement("div");
+  exceptions.className = "timetable-exception-dates";
+  const label = document.createElement("span");
+  label.textContent = "Exceptions:";
+  exceptions.append(label);
+  if (currentOrFutureDates.length > 0) {
+    exceptions.append(document.createTextNode(` ${currentOrFutureDates.join(", ")}`));
+  }
+  if (pastDates.length > 0) {
+    const past = document.createElement("details");
+    past.className = "timetable-past-exceptions";
+    const pastSummary = document.createElement("summary");
+    pastSummary.textContent = `Past dates (${pastDates.length})`;
+    past.append(pastSummary, document.createTextNode(pastDates.join(", ")));
+    exceptions.append(document.createTextNode(" "), past);
+  }
+  container.append(exceptions);
+}
+
 function renderRoutesCell(column: string, value: string | null): HTMLTableCellElement {
   if (column === "route_url") return renderUrlCell(column, value);
   if (column === "route_type" && value) {
@@ -852,10 +880,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
         message.textContent = "No timetable times found for this variant.";
         timetableDetails.append(message);
         if (timetable.exceptionDates.length > 0) {
-          const exceptions = document.createElement("p");
-          exceptions.className = "timetable-exception-dates";
-          exceptions.textContent = `Exception dates: ${timetable.exceptionDates.join(", ")}`;
-          timetableDetails.append(exceptions);
+          appendExceptionDates(timetableDetails, timetable.exceptionDates);
         }
         return;
       }
@@ -925,10 +950,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       }
       timetableDetails.append(table);
       if (timetable.exceptionDates.length > 0) {
-        const exceptions = document.createElement("p");
-        exceptions.className = "timetable-exception-dates";
-        exceptions.textContent = `Exception dates: ${timetable.exceptionDates.join(", ")}`;
-        timetableDetails.append(exceptions);
+        appendExceptionDates(timetableDetails, timetable.exceptionDates);
       }
     });
     expanders.append(timetableDetails);

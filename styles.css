@@ -282,18 +282,21 @@ input[type="file"] {
 
 .timetable {
   overflow-x: auto;
+  font-family: monospace;
 }
 
 .timetable-row {
   display: grid;
-  grid-template-columns: 2.5rem repeat(var(--timetable-columns), minmax(7rem, 1fr));
+  grid-template-columns: 2.5rem repeat(var(--timetable-columns), max-content);
+  column-gap: 0;
   align-items: baseline;
   white-space: nowrap;
 }
 
 .timetable-headings {
   display: grid;
-  grid-template-columns: 2.5rem repeat(var(--timetable-columns), minmax(7rem, 1fr));
+  grid-template-columns: 2.5rem repeat(var(--timetable-columns), max-content);
+  column-gap: 0;
   margin-bottom: 0.25rem;
 }
 
@@ -302,7 +305,20 @@ input[type="file"] {
 }
 
 .timetable-minute {
-  margin-right: 0.5rem;
+  margin-right: 0;
+}
+
+.timetable-exception-dates {
+  margin-top: 0.5rem;
+  font-family: monospace;
+}
+
+.timetable-past-exceptions {
+  display: inline;
+}
+
+.timetable-past-exceptions summary {
+  display: inline;
 }
 
 #route-variants summary {
