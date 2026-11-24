@@ -6,6 +6,7 @@ import workerSource from "../dist/gtfs-worker.txt";
 import type { WorkerResponse } from "./gtfs-worker";
 import { indexShapes, indexStopRoutes, indexStops, mapStop, variantLabel, variantMapData, type MapStop } from "./map-data";
 import { MapView, type MapLine } from "./map-view";
+import { DEFAULT_VIEW_STATE, ViewHistory, type ViewState } from "./view-history";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 const app = document.querySelector<HTMLElement>("#app");
@@ -34,6 +35,12 @@ app.innerHTML = `
     <section id="viewer" class="panel viewer" aria-labelledby="viewer-heading" hidden>
       <h2 id="viewer-heading">Feed tables</h2>
       <p id="feed-summary"></p>
+      <div class="history-controls" aria-label="View history">
+        <button id="history-back" type="button" title="Back">← Back</button>
+        <button id="history-forward" type="button" title="Forward">Forward →</button>
+        <label for="history-select" class="history-select-label">History</label>
+        <select id="history-select"></select>
+      </div>
       <button id="back-to-route" type="button" hidden>Back to route details</button>
       <label for="table-select">Table</label>
       <select id="table-select"></select>
@@ -167,6 +174,9 @@ const tableBody = element<HTMLTableSectionElement>("#table-body");
 const previous = element<HTMLButtonElement>("#previous");
 const next = element<HTMLButtonElement>("#next");
 const pageLabel = element<HTMLSpanElement>("#page-label");
+const historyBack = element<HTMLButtonElement>("#history-back");
+const historyForward = element<HTMLButtonElement>("#history-forward");
+const historySelect = element<HTMLSelectElement>("#history-select");
 const routeDetail = element<HTMLElement>("#route-detail");
 const routeHeading = element<HTMLHeadingElement>("#route-heading");
 const routeProperties = element<HTMLElement>("#route-properties");
@@ -215,11 +225,7 @@ let filteredTable: GtfsTable | undefined;
 let currentRoute: GtfsRow<"routes.txt"> | undefined;
 let stopsById = new Map<string, GtfsRow<"stops.txt">>();
 let routesByStop = new Map<string, string[]>();
-let stopReturn: "table" | "map" | "route" = "table";
-let stopReturnRoute: GtfsRow<"routes.txt"> | undefined;
-let stopReturnRouteOrigin: "table" | "stop" = "table";
 let mapView: MapView | undefined;
-let mapReturn: "table" | "route" = "table";
 let mapRoutes: GtfsRow<"routes.txt">[] = [];
 let mapRouteVariants: RouteVariant[] = [];
 let mapVariantLabels: string[] = [];
@@ -231,9 +237,135 @@ let mapStopsIndex = new Map<string, MapStop>();
 let mapShapesIndex = new Map<string, GtfsRow<"shapes.txt">[]>();
 const stopListItems = new Map<string, HTMLElement[]>();
 let highlightedStopItems: HTMLElement[] = [];
-let routeReturn: "table" | "stop" = "table";
+const viewHistory = new ViewHistory();
+let viewHistoryRestoring = false;
+let mapMode: "stops" | "routes" | "route" = "routes";
+const filteredTableStates = new Map<string, GtfsTable>();
 
 type CellRenderer = (column: string, value: string | null) => HTMLTableCellElement;
+
+function tableKind(): string {
+  if (!feed) return "";
+  return filteredTable?.kind ?? feed.tables[tableSelect.selectedIndex]?.kind ?? "";
+}
+
+function tableFilterKey(): string | undefined {
+  if (!filteredTable) return undefined;
+  return `${filteredTable.kind}:${filteredTable.rows.map((row) => {
+    const idFields = ["route_id", "stop_id", "trip_id", "shape_id"];
+    return idFields.map((field) => String(row.fields[field as keyof typeof row.fields] ?? "")).join(":");
+  }).join("|")}`;
+}
+
+function captureViewState(): ViewState {
+  if (routeDetail && !routeDetail.hidden && currentRoute) {
+    return { type: "route", routeId: currentRoute.fields.route_id ?? "" };
+  }
+  if (stopDetail && !stopDetail.hidden) {
+    const stopId = [...stopsById.entries()].find(([, stop]) =>
+      `Stop details: ${stop.fields.stop_name || stop.fields.stop_id || "Stop"}` === stopHeading.textContent
+    )?.[0] ?? "";
+    return { type: "stop", stopId };
+  }
+  if (mapPanel && !mapPanel.hidden) {
+    if (mapMode === "route") {
+      const routeId = mapRoute.value === "all"
+        ? undefined
+        : mapRoutes[Number(mapRoute.value)]?.fields.route_id ?? undefined;
+      const variant = mapVariant.value === "all" ? "all" as const : Number(mapVariant.value);
+      return { type: "map", mode: "route", routeId, variantIndex: variant };
+    }
+    return { type: "map", mode: mapMode };
+  }
+  const filterKey = tableFilterKey();
+  if (filterKey && filteredTable) filteredTableStates.set(filterKey, filteredTable);
+  return {
+    type: "table",
+    table: tableKind(),
+    itemIndex: page * pageSize,
+    search: tableSearch.value,
+    filter: tableFilter.textContent ?? undefined,
+    filterKind: filterKey,
+  };
+}
+
+function stateLabel(state: ViewState): string {
+  if (state.type === "table") return state.filter ? `Table: ${state.filter}` : `Table: ${state.table || "feed"}`;
+  if (state.type === "route") return `Route: ${routesById.get(state.routeId)?.fields.route_long_name || routesById.get(state.routeId)?.fields.route_short_name || state.routeId || "details"}`;
+  if (state.type === "stop") return `Stop: ${stopsById.get(state.stopId)?.fields.stop_name || state.stopId || "details"}`;
+  if (state.type === "map") return state.mode === "stops" ? "Map: stops" : state.mode === "routes" ? "Map: routes" : "Map: route";
+  return "Table";
+}
+
+function updateHistoryUi(): void {
+  historyBack.disabled = !viewHistory.canGoBack;
+  historyForward.disabled = !viewHistory.canGoForward;
+  historySelect.replaceChildren();
+  viewHistory.states.forEach((state, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = `${index === viewHistory.currentIndex ? "• " : ""}${stateLabel(state)}`;
+    historySelect.append(option);
+  });
+  historySelect.value = String(viewHistory.currentIndex);
+  historySelect.title = "View history";
+}
+
+function pushViewState(): void {
+  if (viewHistoryRestoring) return;
+  viewHistory.push(captureViewState());
+  updateHistoryUi();
+}
+
+function restoreTableState(state: Extract<ViewState, { type: "table" }>): void {
+  const index = feed?.tables.findIndex((table) => table.kind === state.table) ?? -1;
+  if (index >= 0) tableSelect.selectedIndex = index;
+  filteredTable = state.filterKind ? filteredTableStates.get(state.filterKind) : undefined;
+  tableSearch.value = state.search;
+  page = Math.floor(state.itemIndex / pageSize);
+  resetTableFilter();
+  if (filteredTable && state.filter) {
+    tableFilter.textContent = state.filter;
+    tableFilter.hidden = false;
+    clearFilter.hidden = false;
+  }
+  routeDetail.hidden = true;
+  stopDetail.hidden = true;
+  mapView?.remove();
+  mapView = undefined;
+  mapPanel.hidden = true;
+  viewer.hidden = false;
+  renderSelectedTable();
+  tableSelect.focus();
+}
+
+function restoreViewState(state: ViewState): void {
+  viewHistoryRestoring = true;
+  try {
+    if (state.type === "table") {
+      restoreTableState(state);
+    } else if (state.type === "route") {
+      const route = routesById.get(state.routeId);
+      if (route) showRoute(route);
+      else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
+    } else if (state.type === "stop") {
+      const stop = stopsById.get(state.stopId);
+      if (stop) showStop(stop, "table");
+      else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
+    } else if (state.type === "map") {
+      if (state.mode === "stops") showStopsMap();
+      else if (state.mode === "routes") showAllRoutesMap();
+      else {
+        const route = state.routeId ? routesById.get(state.routeId) : undefined;
+        if (route) showRouteMap(route, "table", state.variantIndex ?? "all");
+        else showAllRoutesMap();
+      }
+    }
+  } finally {
+    viewHistoryRestoring = false;
+  }
+  updateHistoryUi();
+}
 
 function renderGenericCell(_column: string, value: string | null): HTMLTableCellElement {
   const cell = document.createElement("td");
@@ -388,7 +520,7 @@ function routeCompactContent(route: GtfsRow<"routes.txt">, variantIndex: number 
   mapButton.addEventListener("click", () => {
     const indices = mapVariantRouteIds.flatMap((id, index) => id === route.fields.route_id ? [index] : []);
     const localIndex = variantIndex === null ? -1 : indices.indexOf(variantIndex);
-    showRouteMap(route, mapReturn, localIndex < 0 ? "all" : localIndex);
+    showRouteMap(route, "table", localIndex < 0 ? "all" : localIndex);
   });
   content.append(" ", mapButton);
   return content;
@@ -457,7 +589,7 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
         const label = !popup && longName && longName !== shortName ? `${shortName} — ${longName}` : shortName;
         button.append(document.createTextNode(label));
         button.setAttribute("aria-label", popup ? `Show route ${label} on map` : `Open route ${label}`);
-        button.addEventListener("click", () => popup ? showRouteMap(route, mapReturn, "all") : showRoute(route, "stop"));
+        button.addEventListener("click", () => popup ? showRouteMap(route, "table", "all") : showRoute(route, "stop"));
         item.append(button);
       } else {
         item.textContent = route ? routeListLabel(route) : id;
@@ -472,11 +604,6 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
 }
 
 function showStop(stop: GtfsRow<"stops.txt">, returnTo: "table" | "map" | "route"): void {
-  stopReturn = returnTo;
-  if (returnTo === "route") {
-    stopReturnRoute = currentRoute;
-    stopReturnRouteOrigin = routeReturn;
-  }
   stopHeading.textContent = `Stop details: ${stop.fields.stop_name || stop.fields.stop_id || "Stop"}`;
   stopProperties.replaceChildren(stopContent(stop));
   viewer.hidden = true;
@@ -484,6 +611,7 @@ function showStop(stop: GtfsRow<"stops.txt">, returnTo: "table" | "map" | "route
   routeDetail.hidden = true;
   stopDetail.hidden = false;
   stopHeading.focus();
+  pushViewState();
 }
 
 const tableCellRenderers: Record<string, CellRenderer> = {
@@ -496,7 +624,6 @@ const tableCellRenderers: Record<string, CellRenderer> = {
 
 function showRoute(route: GtfsRow<"routes.txt">, returnTo: "table" | "stop" = "table"): void {
   if (!feed) return;
-  routeReturn = returnTo;
   currentRoute = route;
   const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
   routeHeading.textContent = title ? `Route details: ${title}` : "Route details";
@@ -658,6 +785,7 @@ function showRoute(route: GtfsRow<"routes.txt">, returnTo: "table" | "stop" = "t
   stopDetail.hidden = true;
   mapPanel.hidden = true;
   routeHeading.focus();
+  pushViewState();
 }
 
 function formatStop(stopId: string | null, stopNames: Map<string | null, string | null>): string {
@@ -700,6 +828,7 @@ function showFilteredTable(table: GtfsTable, message: string, fromRoute = true):
   viewer.hidden = false;
   renderSelectedTable();
   tableSelect.focus();
+  pushViewState();
 }
 
 function resetTableFilter(): void {
@@ -853,7 +982,6 @@ function renderSelectedTable(): void {
 function openMap(returnTo: "table" | "route", title: string): void {
   mapView?.remove();
   mapView = undefined;
-  mapReturn = returnTo;
   viewer.hidden = true;
   routeDetail.hidden = true;
   mapPanel.hidden = false;
@@ -902,8 +1030,10 @@ function showStopsMap(): void {
   if (table?.kind !== "stops.txt") return;
   mapSidebar.hidden = true;
   mapVariantControls.hidden = true;
+  mapMode = "stops";
   openMap("table", "Stops map");
   renderStopsMap();
+  pushViewState();
 }
 
 function renderStopsMap(): void {
@@ -932,6 +1062,8 @@ function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route",
   }
   openMap(returnTo, title ? `Route map: ${title}` : "Route map");
   renderRouteMap();
+  mapMode = "route";
+  pushViewState();
 }
 
 function showAllRoutesMap(): void {
@@ -943,6 +1075,8 @@ function showAllRoutesMap(): void {
   populateMapVariants();
   openMap("table", "Routes map");
   renderRouteMap();
+  mapMode = "routes";
+  pushViewState();
 }
 
 function prepareRouteMap(routes: GtfsRow<"routes.txt">[]): void {
@@ -1248,6 +1382,7 @@ form.addEventListener("submit", async (event) => {
   mapPanel.hidden = true;
   mapView?.remove();
   mapView = undefined;
+  viewHistory.clear();
   resetTableFilter();
   tableSearch.value = "";
   currentRoute = undefined;
@@ -1278,6 +1413,7 @@ form.addEventListener("submit", async (event) => {
     feedSummary.textContent = `${file.name} · ${feed.tables.length} ${feed.tables.length === 1 ? "table" : "tables"}`;
     page = 0;
     renderSelectedTable();
+    pushViewState();
     viewer.hidden = false;
     loadPanel.classList.add("loaded");
     status.textContent = "Feed loaded.";
@@ -1290,14 +1426,9 @@ form.addEventListener("submit", async (event) => {
 });
 
 backToTables.addEventListener("click", () => {
-  routeDetail.hidden = true;
-  if (routeReturn === "stop") {
-    stopDetail.hidden = false;
-    stopHeading.focus();
-  } else {
-    viewer.hidden = false;
-    tableSelect.focus();
-  }
+  const state = viewHistory.back();
+  if (state) restoreViewState(state);
+  else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
 });
 
 element<HTMLButtonElement>("#agency-dialog-close").addEventListener("click", () => agencyDialog.close());
@@ -1307,16 +1438,9 @@ routeMapButton.addEventListener("click", () => {
   if (currentRoute) showRouteMap(currentRoute, "route");
 });
 backFromMap.addEventListener("click", () => {
-  mapView?.remove();
-  mapView = undefined;
-  mapPanel.hidden = true;
-  if (mapReturn === "route") {
-    routeDetail.hidden = false;
-    routeMapButton.focus();
-  } else {
-    viewer.hidden = false;
-    tableSelect.focus();
-  }
+  const state = viewHistory.back();
+  if (state) restoreViewState(state);
+  else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
 });
 mapToTables.addEventListener("click", () => {
   mapView?.remove();
@@ -1326,21 +1450,14 @@ mapToTables.addEventListener("click", () => {
   tableSelect.focus();
 });
 backFromStop.addEventListener("click", () => {
-  stopDetail.hidden = true;
-  if (stopReturn === "map" && mapView) {
-    mapPanel.hidden = false;
-    mapView.resize();
-    mapHeading.focus();
-  } else if (stopReturn === "route" && stopReturnRoute) {
-    showRoute(stopReturnRoute, stopReturnRouteOrigin);
-  } else {
-    viewer.hidden = false;
-    tableSelect.focus();
-  }
+  const state = viewHistory.back();
+  if (state) restoreViewState(state);
+  else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
 });
 mapRoute.addEventListener("change", () => {
   populateMapVariants();
   renderRouteMap();
+  pushViewState();
 });
 mapRouteReset.addEventListener("click", () => {
   mapRoute.value = "all";
@@ -1348,6 +1465,7 @@ mapRouteReset.addEventListener("click", () => {
   renderRouteMap();
 });
 mapVariant.addEventListener("change", () => renderRouteMap());
+mapVariant.addEventListener("change", () => pushViewState());
 mapVariantReset.addEventListener("click", () => {
   mapVariant.value = "all";
   renderRouteMap();
@@ -1373,7 +1491,7 @@ mapClearFilter.addEventListener("click", () => {
 });
 
 backToRoute.addEventListener("click", () => {
-  if (currentRoute) showRoute(currentRoute, routeReturn);
+  if (currentRoute) showRoute(currentRoute);
 });
 
 routeTrips.addEventListener("click", () => {
@@ -1391,6 +1509,7 @@ clearFilter.addEventListener("click", () => {
   resetTableFilter();
   page = 0;
   renderSelectedTable();
+  pushViewState();
 });
 
 tableSelect.addEventListener("change", () => {
@@ -1398,25 +1517,46 @@ tableSelect.addEventListener("change", () => {
   tableSearch.value = "";
   page = 0;
   renderSelectedTable();
+  pushViewState();
 });
 tableSearch.addEventListener("input", () => {
   page = 0;
   renderSelectedTable();
+  pushViewState();
 });
 pageSizeSelect.addEventListener("change", () => {
   pageSize = Number(pageSizeSelect.value);
   page = 0;
   renderSelectedTable();
+  pushViewState();
 });
 previous.addEventListener("click", () => {
   if (page > 0) {
     page--;
     renderSelectedTable();
+    pushViewState();
   }
 });
 next.addEventListener("click", () => {
   if (!next.disabled) {
     page++;
     renderSelectedTable();
+    pushViewState();
   }
+});
+
+historyBack.addEventListener("click", () => {
+  const state = viewHistory.back();
+  if (state) restoreViewState(state);
+  else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
+});
+
+historyForward.addEventListener("click", () => {
+  const state = viewHistory.forward();
+  if (state) restoreViewState(state);
+});
+
+historySelect.addEventListener("change", () => {
+  const state = viewHistory.select(Number(historySelect.value));
+  if (state) restoreViewState(state);
 });
