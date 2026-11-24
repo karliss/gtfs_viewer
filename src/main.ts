@@ -1,5 +1,6 @@
 import {
   decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, summarizeTripField,
+  getVariantTimetable, formatTimetableDayRange,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
@@ -769,6 +770,7 @@ const tableCellRenderers: Record<string, CellRenderer> = {
 
 function showRoute(route: GtfsRow<"routes.txt">): void {
   if (!feed) return;
+  const activeFeed = feed;
   currentRoute = route;
   const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
   routeHeading.textContent = title ? `Route details: ${title}` : "Route details";
@@ -881,14 +883,17 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       button.addEventListener("click", () => showVariantTable(variant, kind));
       section.append(button);
     }
-    const details = document.createElement("details");
-    const summary = document.createElement("summary");
-    summary.textContent = `Stops (${variant.stops.length})`;
-    details.append(summary);
+    const expanders = document.createElement("div");
+    expanders.className = "variant-expanders";
+    const stopDetails = document.createElement("details");
+    stopDetails.className = "variant-expander";
+    const stopSummary = document.createElement("summary");
+    stopSummary.textContent = `Stops (${variant.stops.length})`;
+    stopDetails.append(stopSummary);
     if (variant.stops.length === 0) {
       const message = document.createElement("p");
       message.textContent = "No stop times found for this variant.";
-      details.append(message);
+      stopDetails.append(message);
     } else {
       const stops = document.createElement("ol");
       for (const stopId of variant.stops) {
@@ -897,9 +902,72 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
         stops.append(item);
         uniqueStops.add(stopId);
       }
-      details.append(stops);
+      stopDetails.append(stops);
     }
-    section.append(details);
+    expanders.append(stopDetails);
+
+    const timetableDetails = document.createElement("details");
+    timetableDetails.className = "variant-expander variant-timetable";
+    const timetableSummary = document.createElement("summary");
+    timetableSummary.textContent = "Timetable";
+    timetableDetails.append(timetableSummary);
+    let timetableLoaded = false;
+    timetableDetails.addEventListener("toggle", () => {
+      if (!timetableDetails.open || timetableLoaded) return;
+      timetableLoaded = true;
+      const timetable = getVariantTimetable(activeFeed, variant);
+      if (timetable.rows.length === 0) {
+        const message = document.createElement("p");
+        message.textContent = "No timetable times found for this variant.";
+        timetableDetails.append(message);
+        return;
+      }
+      const table = document.createElement("div");
+      table.className = "timetable";
+      table.style.setProperty("--timetable-columns", String(Math.max(timetable.popularDays.length, 1)));
+      const headings = document.createElement("div");
+      headings.className = "timetable-headings";
+      headings.append(document.createElement("span"));
+      for (const days of timetable.popularDays) {
+        const heading = document.createElement("span");
+        heading.className = "timetable-popular-days";
+        if (timetable.popularDays.length === 2) heading.classList.add("timetable-day-column");
+        heading.textContent = formatTimetableDayRange(days);
+        headings.append(heading);
+      }
+      table.append(headings);
+      for (const row of timetable.rows) {
+        const line = document.createElement("div");
+        line.className = "timetable-row";
+        const hour = document.createElement("span");
+        hour.className = "timetable-hour";
+        hour.textContent = `${String(row.hour)} `;
+        line.append(hour);
+        for (const popularDays of timetable.popularDays) {
+          const column = document.createElement("span");
+          column.className = "timetable-column";
+          if (timetable.popularDays.length === 2) column.classList.add("timetable-day-column");
+          for (const departure of row.departures) {
+            if (departure.days && !departure.days.some((day) => popularDays.includes(day))) continue;
+            const minute = document.createElement("span");
+            minute.className = "timetable-minute";
+            minute.textContent = String(departure.minute).padStart(2, "0");
+            column.append(minute, " ");
+          }
+          line.append(column);
+        }
+        table.append(line);
+      }
+      timetableDetails.append(table);
+      if (timetable.exceptionDates.length > 0) {
+        const exceptions = document.createElement("p");
+        exceptions.className = "timetable-exception-dates";
+        exceptions.textContent = `Exceptions: ${timetable.exceptionDates.join(", ")}`;
+        timetableDetails.append(exceptions);
+      }
+    });
+    expanders.append(timetableDetails);
+    section.append(expanders);
     routeVariants.append(section);
   }
   if (tripsWithoutVariant > 0) {

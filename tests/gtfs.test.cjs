@@ -2,7 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
-  decodeRouteType, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, loadGtfs, summarizeTripField,
+  decodeRouteType, formatTimetableDayRange, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
+  getVariantTimetable, indexRoutes, loadGtfs, summarizeTripField,
 } = require("../dist/gtfs.cjs");
 const {
   WarningCollector, WARNING_DESCRIPTIONS, WARNING_TYPES,
@@ -422,6 +423,36 @@ test("trims route types in routes without altering unrelated fields", () => {
   assert.equal(routes.rows[1].fields.route_type, "");
   assert.equal(routes.rows[2].fields.route_type, null);
   assert.equal(feed.tables.find((table) => table.kind === "unknown").rows[0].unrecognizedColumns.route_type, " 3 ");
+});
+
+test("preserves valid single-trip calendar masks", () => {
+  for (const [monday, tuesday, wednesday, thursday, friday, saturday, sunday, expected] of [
+    ["1", "1", "1", "1", "1", "1", "0", [1, 2, 3, 4, 5, 6]],
+    ["1", "1", "0", "0", "0", "0", "1", [1, 2, 7]],
+  ]) {
+    const feed = loadGtfs(archive({
+      "trips.txt": "route_id,trip_id,service_id,shape_id\nr,trip,service,s\n",
+      "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\ntrip,07:20:00,a,1\n",
+      "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+        + `service,${monday},${tuesday},${wednesday},${thursday},${friday},${saturday},${sunday},20260101,20261231\n`,
+    }));
+    const variant = getRouteVariants(feed, "r").variants[0];
+    const timetable = getVariantTimetable(feed, variant);
+    assert.deepEqual(timetable.popularDays, [expected]);
+  }
+});
+
+test("trims calendar IDs and values for single-trip timetables", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,service_id,shape_id\nr,weekday,weekday-service,s\n",
+    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\nweekday,07:20:00,a,1\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "weekday-service, 1 ,1,1,1,1,0,0,20260101,20261231\n",
+  }));
+  const variant = getRouteVariants(feed, "r").variants[0];
+  const timetable = getVariantTimetable(feed, variant);
+  assert.deepEqual(timetable.popularDays, [[1, 2, 3, 4, 5]]);
+  assert.equal(formatTimetableDayRange(timetable.popularDays[0]), "1-5");
 });
 
 test("groups trips by shape, headsign, short name and ordered stops", () => {
