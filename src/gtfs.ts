@@ -1,6 +1,8 @@
 import { unzipSync } from "fflate";
 import Papa from "papaparse";
-import { gtfsZeroDefaultEnumFields, gtfsFields, type GtfsFields, type GtfsTableName } from "./gtfs-schema";
+import {
+  gtfsFloatFields, gtfsIntegerFields, gtfsFields, type GtfsFields, type GtfsTableName,
+} from "./gtfs-schema";
 import type { GtfsWarning, WarningCollector } from "./warnings";
 
 export type { GtfsFields, GtfsTableName } from "./gtfs-schema";
@@ -53,12 +55,12 @@ export function getMatchingRows(table: GtfsTable, search: string): GtfsTable["ro
   if (!query) return table.rows;
   return table.rows.filter((row) => {
     const values = [...Object.values(row.fields), ...Object.values(row.unrecognizedColumns), ...row.extraValues];
-    if (table.kind === "routes.txt" && "route_type" in row.fields && row.fields.route_type) {
-      const value = row.fields.route_type;
+    if (table.kind === "routes.txt" && "route_type" in row.fields && row.fields.route_type !== null) {
+      const value = String(row.fields.route_type);
       const name = decodeRouteType(value);
       values.push(name === `Unknown route type (${value})` ? name : `${name} (${value})`);
     }
-    return values.some((value) => value !== null && value.toLocaleLowerCase().includes(query));
+    return values.some((value) => value !== null && String(value).toLocaleLowerCase().includes(query));
   });
 }
 
@@ -77,13 +79,13 @@ export function getReferencedRoute(
   routes: ReadonlyMap<string, GtfsRow<"routes.txt">>,
   tableKind: GtfsTable["kind"],
   column: string,
-  value: string | null,
+  value: string | number | null,
 ): GtfsRow<"routes.txt"> | undefined {
   if (tableKind === "routes.txt" || !value ||
     (column !== "route_id" && column !== "from_route_id" && column !== "to_route_id")) {
     return undefined;
   }
-  return routes.get(value);
+  return routes.get(String(value));
 }
 
 export function summarizeTripField(
@@ -91,12 +93,12 @@ export function summarizeTripField(
   field: "wheelchair_accessible" | "bikes_allowed",
 ): string {
   if (!trips.length) return "No trips available";
-  const counts = new Map<string | null, number>();
+  const counts = new Map<number | null, number>();
   for (const trip of trips) {
-    const value = trip.fields[field]?.trim() ? trip.fields[field] : "0";
+    const value = trip.fields[field];
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
-  const label = (value: string | null): string => value === null ? "Not provided" : value === "" ? "(empty)" : value;
+  const label = (value: number | null): string => value === null ? "Not provided" : String(value);
   return [...counts].map(([value, count]) => counts.size === 1
     ? label(value)
     : `${label(value)} (${Number((count * 100 / trips.length).toFixed(1))}%)`).join(", ");
@@ -106,7 +108,7 @@ export interface RouteVariant {
   shapeId: string | null;
   tripHeadsign: string | null;
   tripShortName: string | null;
-  directionIds: (string | null)[];
+  directionIds: (number | null)[];
   stops: (string | null)[];
   trips: GtfsRow<"trips.txt">[];
 }
@@ -150,19 +152,18 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
   const tripIds = new Set(variant.trips.flatMap((trip) => trip.fields.trip_id ? [trip.fields.trip_id] : []));
 
   const daySetForService = (serviceId: string | null): number[] | null => {
-    const normalizedServiceId = serviceId?.trim();
-    if (!normalizedServiceId) return null;
+    if (!serviceId) return null;
     const row = calendar?.rows.find((candidate) =>
-      candidate.fields.service_id?.trim() === normalizedServiceId);
+      candidate.fields.service_id === serviceId);
     if (!row) return null;
     return [
-      row.fields.monday?.trim() === "1" ? 1 : null,
-      row.fields.tuesday?.trim() === "1" ? 2 : null,
-      row.fields.wednesday?.trim() === "1" ? 3 : null,
-      row.fields.thursday?.trim() === "1" ? 4 : null,
-      row.fields.friday?.trim() === "1" ? 5 : null,
-      row.fields.saturday?.trim() === "1" ? 6 : null,
-      row.fields.sunday?.trim() === "1" ? 7 : null,
+      row.fields.monday === 1 ? 1 : null,
+      row.fields.tuesday === 1 ? 2 : null,
+      row.fields.wednesday === 1 ? 3 : null,
+      row.fields.thursday === 1 ? 4 : null,
+      row.fields.friday === 1 ? 5 : null,
+      row.fields.saturday === 1 ? 6 : null,
+      row.fields.sunday === 1 ? 7 : null,
     ].filter((day): day is number => day !== null);
   };
 
@@ -195,7 +196,7 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
     const days = daySetForService(trip.fields.service_id);
     const dayKey = days?.join(",") ?? "";
     for (const row of rows) {
-      const time = row.fields.departure_time?.trim() || row.fields.arrival_time?.trim();
+      const time = row.fields.departure_time || row.fields.arrival_time;
       if (!time) continue;
       const match = /^(\d+):(\d{2})(:\d{2})?$/.exec(time);
       if (!match) continue;
@@ -279,8 +280,7 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
     timesByTrip.set(tripId, times);
   }
 
-  const sequence = (value: string | null): number =>
-    value !== null && /^\d+$/.test(value) ? Number(value) : Infinity;
+  const sequence = (value: number | null): number => value ?? Infinity;
   const stopsByTrip = new Map<string, (string | null)[]>();
   for (const [tripId, times] of timesByTrip) {
     times.sort((a, b) => sequence(a.fields.stop_sequence) - sequence(b.fields.stop_sequence));
@@ -340,26 +340,53 @@ function parseTable(name: string, columns: string[], records: string[][], collec
   const key = name.toLowerCase();
   const kind = isGtfsTableName(key) ? key : "unknown";
   const fields: readonly string[] = kind === "unknown" ? [] : gtfsFields[kind];
-  const enumFields = new Set(kind === "unknown" ? [] : gtfsZeroDefaultEnumFields[kind] ?? []);
   const fieldNames = new Set(fields);
+  const floatFields = new Set<string>(kind === "unknown" ? [] :
+    (gtfsFloatFields as Partial<Record<GtfsTableName, readonly string[]>>)[kind] ?? []);
+  const integerFields = new Set<string>(kind === "unknown" ? [] :
+    (gtfsIntegerFields as Partial<Record<GtfsTableName, readonly string[]>>)[kind] ?? []);
   const columnIndexes = new Map(columns.map((column, index) => [column, index]));
   const unknownColumns = columns
     .map((column, index) => ({ column, index }))
     .filter(({ column }) => !fieldNames.has(column));
-  const valueAt = (record: string[], column: string, index: number | undefined): string | null => {
+  const valueAt = (
+    record: string[], column: string, index: number | undefined, rowIndex: number,
+  ): string | number | null => {
     const value = index === undefined ? null : record[index] ?? null;
-    if (enumFields.has(column) && !value?.trim()) return "0";
-    return value !== null && (column === "id" || column.endsWith("_id") ||
-      (kind === "routes.txt" && (column === "route_type" || column === "route_short_name"))) ? value.trim() : value;
+    if (value === null) return null;
+    if (fieldNames.has(column)) {
+      const normalized = value.trim();
+      if (!normalized) return null;
+      if (floatFields.has(column) || integerFields.has(column)) {
+        const valid = floatFields.has(column)
+          ? /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)
+          : /^[+-]?\d+$/.test(normalized);
+        const parsed = Number(normalized);
+        if (valid && Number.isFinite(parsed) && (floatFields.has(column) || Number.isSafeInteger(parsed))) {
+          return parsed;
+        }
+        collector?.add({
+          type: "invalid_values",
+          parameters: { file: name, row: rowIndex + 2, column, value },
+          relatedObjectIds: [],
+          csvRowNumber: rowIndex + 2,
+        });
+        return null;
+      }
+      return normalized;
+    }
+    return column === "id" || column.endsWith("_id") ? value.trim() : value;
   };
   const rows = records.map((record, index) => {
     const row = {
       fields: Object.fromEntries(fields.map((field) => {
         const columnIndex = columnIndexes.get(field);
-        return [field, valueAt(record, field, columnIndex)];
+        return [field, valueAt(record, field, columnIndex, index)];
       })),
       unrecognizedColumns: Object.fromEntries(
-        unknownColumns.map(({ column, index }) => [column, valueAt(record, column, index)]),
+        unknownColumns.map(({ column, index: columnIndex }) => [
+          column, valueAt(record, column, columnIndex, index),
+        ]),
       ),
       extraValues: record.slice(columns.length),
     };
@@ -403,8 +430,9 @@ function parseTable(name: string, columns: string[], records: string[][], collec
   if (idColumn) {
     const seen = new Map<string, number>();
     for (const [index, row] of rows.entries()) {
-      const id = row.fields[idColumn];
-      if (!id?.trim()) {
+      const rawId = row.fields[idColumn];
+      const id = typeof rawId === "string" ? rawId : null;
+      if (id === null || id === "") {
         collector?.add({
           type: "missing_or_duplicate_ids",
           parameters: { file: name, row: index + 2, column: idColumn, issue: "missing", idSuffix: "" },

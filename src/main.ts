@@ -336,7 +336,7 @@ let warningRowsPerPage = 100;
 const warningCollector = new WarningCollector();
 const filteredTableStates = new Map<string, GtfsTable>();
 
-type CellRenderer = (column: string, value: string | null) => HTMLTableCellElement;
+type CellRenderer = (column: string, value: string | number | null) => HTMLTableCellElement;
 
 function tableKind(): string {
   if (!feed) return "";
@@ -478,17 +478,17 @@ function restoreViewState(state: ViewState): void {
   updateHistoryUi();
 }
 
-function renderGenericCell(_column: string, value: string | null): HTMLTableCellElement {
+function renderGenericCell(_column: string, value: string | number | null): HTMLTableCellElement {
   const cell = document.createElement("td");
-  cell.textContent = value;
+  cell.textContent = value === null ? "" : String(value);
   return cell;
 }
 
-function renderLink(value: string | null, label: string): Node {
+function renderLink(value: string | number | null, label: string): Node {
   if (!value) return document.createTextNode(label);
   let url: URL;
   try {
-    url = new URL(value);
+    url = new URL(String(value));
   } catch {
     return document.createTextNode(label);
   }
@@ -499,23 +499,24 @@ function renderLink(value: string | null, label: string): Node {
   return link;
 }
 
-function renderUrlCell(_column: string, value: string | null): HTMLTableCellElement {
+function renderUrlCell(_column: string, value: string | number | null): HTMLTableCellElement {
   const cell = document.createElement("td");
-  cell.append(renderLink(value, value ?? ""));
+  cell.append(renderLink(value, value === null ? "" : String(value)));
   return cell;
 }
 
-function routeTypeLabel(value: string): string {
-  const name = decodeRouteType(value);
-  return name === `Unknown route type (${value})` ? name : `${name} (${value})`;
+function routeTypeLabel(value: string | number): string {
+  const text = String(value);
+  const name = decodeRouteType(text);
+  return name === `Unknown route type (${text})` ? name : `${name} (${text})`;
 }
 
-function renderRoutesCell(column: string, value: string | null): HTMLTableCellElement {
+function renderRoutesCell(column: string, value: string | number | null): HTMLTableCellElement {
   if (column === "route_url") return renderUrlCell(column, value);
-  if (column === "route_type" && value) {
+  if (column === "route_type" && value !== null) {
     return renderGenericCell(column, routeTypeLabel(value));
   }
-  if (column === "route_color" && value && /^[\da-f]{6}$/i.test(value)) {
+  if (column === "route_color" && typeof value === "string" && /^[\da-f]{6}$/i.test(value)) {
     const swatch = document.createElement("span");
     swatch.className = "route-color-swatch";
     swatch.style.backgroundColor = `#${value}`;
@@ -539,9 +540,9 @@ function showAgency(agency: GtfsRow<"agency.txt">): void {
       description.textContent = value === null ? "Not provided" : "(empty)";
       description.className = "not-provided";
     } else if (name === "agency_url" || name === "agency_fare_url") {
-      description.append(renderLink(value, value));
+      description.append(renderLink(value, String(value)));
     } else {
-      description.textContent = value;
+      description.textContent = String(value);
     }
     list.append(term, description);
   }
@@ -598,16 +599,16 @@ function routeCompactContent(route: GtfsRow<"routes.txt">, variantIndex: number 
     if (![
       "route_id", "route_short_name", "route_long_name", "route_desc", "route_type",
       "route_color", "agency_id", "route_url",
-    ].includes(name) || !value) continue;
+    ].includes(name) || value === null || value === "") continue;
     const term = document.createElement("dt");
     term.textContent = name;
     const description = document.createElement("dd");
     if (name === "route_url") {
-      description.append(renderLink(value, value));
+      description.append(renderLink(value, String(value)));
     } else {
-      description.textContent = name === "route_type" ? routeTypeLabel(value) : value;
+      description.textContent = name === "route_type" ? routeTypeLabel(value) : String(value);
     }
-    if (name === "route_color" && /^[\da-f]{6}$/i.test(value)) {
+    if (name === "route_color" && typeof value === "string" && /^[\da-f]{6}$/i.test(value)) {
       const swatch = document.createElement("span");
       swatch.className = "route-color-swatch";
       swatch.style.backgroundColor = `#${value}`;
@@ -646,7 +647,7 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
   }
   const list = document.createElement("dl");
   list.className = "route-properties";
-  const addProperty = (name: string, value: string | null): void => {
+  const addProperty = (name: string, value: string | number | null): void => {
     const term = document.createElement("dt");
     term.textContent = name;
     const description = document.createElement("dd");
@@ -654,7 +655,7 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
       description.textContent = value === null ? "Not provided" : "(empty)";
       description.className = "not-provided";
     } else {
-      description.append(name === "stop_url" ? renderLink(value, value) : document.createTextNode(value));
+      description.append(name === "stop_url" ? renderLink(value, String(value)) : document.createTextNode(String(value)));
     }
     if (popup && name === "stop_id") {
       const button = document.createElement("button");
@@ -786,7 +787,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     } else if (value === "") {
       description.textContent = "(empty)";
     } else if (name === "agency_id") {
-      description.append(agencyLink(value, true));
+      description.append(agencyLink(String(value), true));
     } else {
       description.append(...renderRoutesCell(name, value).childNodes);
     }
@@ -837,10 +838,10 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     const firstStop = variant.stops[0];
     const lastStop = variant.stops.length > 1 ? variant.stops[variant.stops.length - 1] : null;
     const endpoints = [firstStop, lastStop]
-      .map((id) => id == null ? "" : stopNames.get(id)?.trim() ?? "")
+      .map((id) => id == null ? "" : stopNames.get(id) ?? "")
       .filter(Boolean)
       .join(" → ");
-    const headingParts = [variant.tripHeadsign?.trim(), variant.tripShortName?.trim(), endpoints].filter(Boolean);
+    const headingParts = [variant.tripHeadsign, variant.tripShortName, endpoints].filter(Boolean);
     heading.textContent = headingParts.join(" · ") || `Variant ${index + 1}`;
     const mapButton = document.createElement("button");
     mapButton.type = "button";
@@ -857,13 +858,13 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       ["Shape ID", variant.shapeId, !variant.shapeId],
       ["Trip headsign", variant.tripHeadsign, variant.tripHeadsign === null || variant.tripHeadsign === ""],
       ["Trip short name", variant.tripShortName, variant.tripShortName === null || variant.tripShortName === ""],
-      ["Direction ID", variant.directionIds.map((id) => id === null ? "Not provided" : id === "" ? "(empty)" : id).join(", "),
-        variant.directionIds.every((id) => id === null || id === "")],
+      ["Direction ID", variant.directionIds.map((id) => id === null ? "Not provided" : String(id)).join(", "),
+        variant.directionIds.every((id) => id === null)],
     ] as const) {
       const term = document.createElement("dt");
       term.textContent = name;
       const description = document.createElement("dd");
-      description.textContent = value === null ? "Not provided" : value === "" ? "(empty)" : value;
+      description.textContent = value === null ? "Not provided" : value === "" ? "(empty)" : String(value);
       if (missing) {
         description.className = "not-provided";
       }
@@ -1079,13 +1080,13 @@ function renderTable(table: GtfsTable): void {
   const renderCell = tableCellRenderers[table.kind] ?? renderGenericCell;
   for (const values of matchingRows.slice(start, start + pageSize)) {
     const row = document.createElement("tr");
-    const fields: Record<string, string | null> = values.fields;
+    const fields: Record<string, string | number | null> = values.fields;
     for (const column of recognized) {
       const value = fields[column];
       const referencedRoute = getReferencedRoute(routesById, table.kind, column, value);
-      if (column === "agency_id" && value && agenciesById.has(value)) {
+      if (column === "agency_id" && value && agenciesById.has(String(value))) {
         const cell = document.createElement("td");
-        cell.append(agencyLink(value));
+        cell.append(agencyLink(String(value)));
         row.append(cell);
       } else if (table.kind === "fare_rules.txt" && (column === "origin_id" || column === "destination_id" || column === "contains_id")
         && value && feed?.tables.some((candidate) => candidate.kind === "stops.txt")) {
@@ -1093,9 +1094,9 @@ function renderTable(table: GtfsTable): void {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "route-link";
-        button.textContent = value;
+        button.textContent = String(value);
         button.setAttribute("aria-label", `Show stops in zone ${value}`);
-        button.addEventListener("click", () => showZoneStops(value));
+        button.addEventListener("click", () => showZoneStops(String(value)));
         cell.append(button);
         row.append(cell);
       } else if (referencedRoute) {
@@ -1103,7 +1104,7 @@ function renderTable(table: GtfsTable): void {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "route-link";
-        button.textContent = value;
+        button.textContent = String(value);
         button.addEventListener("click", () => showRoute(referencedRoute));
         cell.append(button);
         row.append(cell);
@@ -1579,7 +1580,7 @@ function renderRouteMap(preserveMapView = false): void {
   mapView?.update(displayedStops.map((stop) => ({
     ...stop,
     hoverLabel: stop.id && stopLabels.has(stop.id)
-      ? `${stop.name?.trim() || stop.id} — ${stopLabels.get(stop.id)!.length > 5
+      ? `${stop.name || stop.id} — ${stopLabels.get(stop.id)!.length > 5
         ? `${stopLabels.get(stop.id)!.length} stops`
         : `stop ${stopLabels.get(stop.id)!.join(", ")}`}`
       : undefined,

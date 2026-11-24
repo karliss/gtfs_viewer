@@ -10,10 +10,10 @@ function feedFrom(files) {
   )));
 }
 
-test("coordinates reject absent, malformed and out-of-range values", () => {
-  assert.deepEqual(coordinate("0", "0"), [0, 0]);
-  assert.deepEqual(coordinate("-180", "90"), [-180, 90]);
-  for (const [lon, lat] of [["", "2"], ["  ", "2"], ["1", null], ["NaN", "2"], ["0x10", "2"], ["181", "0"], ["0", "-91"]]) {
+test("coordinates reject absent and out-of-range normalized values", () => {
+  assert.deepEqual(coordinate(0, 0), [0, 0]);
+  assert.deepEqual(coordinate(-180, 90), [-180, 90]);
+  for (const [lon, lat] of [[null, 2], [1, null], [181, 0], [0, -91]]) {
     assert.equal(coordinate(lon, lat), null);
   }
 });

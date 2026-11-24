@@ -26,12 +26,10 @@ export function indexStopRoutes(feed: GtfsFeed): Map<string, string[]> {
   return new Map([...routesByStop].map(([stop, routes]) => [stop, [...routes]]));
 }
 
-export function coordinate(lon: string | null, lat: string | null): Coordinate | null {
-  if (!lon?.trim() || !lat?.trim()) return null;
-  const numeric = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i;
-  if (!numeric.test(lon.trim()) || !numeric.test(lat.trim())) return null;
-  const x = Number(lon);
-  const y = Number(lat);
+export function coordinate(lon: number | null, lat: number | null): Coordinate | null {
+  if (lon === null || lat === null) return null;
+  const x = lon;
+  const y = lat;
   return Number.isFinite(x) && Number.isFinite(y) && x >= -180 && x <= 180 && y >= -90 && y <= 90
     ? [x, y] : null;
 }
@@ -70,8 +68,8 @@ export function indexStops(feed: GtfsFeed): Map<string, MapStop> {
 export function variantLabel(variant: RouteVariant, index: number, stops: ReadonlyMap<string, MapStop>): string {
   const first = variant.stops[0];
   const last = variant.stops.length > 1 ? variant.stops[variant.stops.length - 1] : null;
-  const endpoints = [first, last].map((id) => id ? stops.get(id)?.name?.trim() ?? "" : "").filter(Boolean).join(" → ");
-  return [variant.tripHeadsign?.trim(), variant.tripShortName?.trim(), endpoints].filter(Boolean).join(" · ")
+  const endpoints = [first, last].map((id) => id ? stops.get(id)?.name ?? "" : "").filter(Boolean).join(" → ");
+  return [variant.tripHeadsign, variant.tripShortName, endpoints].filter(Boolean).join(" · ")
     || `Variant ${index + 1}`;
 }
 
@@ -90,8 +88,7 @@ export function variantMapData(
   const points = rows.flatMap((row) => {
     const sequence = row.fields.shape_pt_sequence;
     const position = coordinate(row.fields.shape_pt_lon, row.fields.shape_pt_lat);
-    return sequence !== null && /^\d+$/.test(sequence) && Number.isSafeInteger(Number(sequence)) && position
-      ? [{ sequence: Number(sequence), position }] : [];
+    return sequence !== null && position ? [{ sequence, position }] : [];
   }).sort((a, b) => a.sequence - b.sequence);
   const approximate = points.length < 2;
   return {

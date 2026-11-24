@@ -560,7 +560,7 @@ export class MapView {
         properties: {
           stopId: stop.id ?? "",
           stopIndex: index,
-          label: stop.hoverLabel || stop.name?.trim() || stop.id || "Stop",
+          label: stop.hoverLabel || stop.name || stop.id || "Stop",
           ...(stop.id && stopOrders.has(stop.id) ? { stopOrder: stopOrders.get(stop.id) } : {}),
         },
         geometry: { type: "Point", coordinates: stop.coordinate },
