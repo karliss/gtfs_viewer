@@ -27,13 +27,17 @@ test("worker reads and parses a feed asynchronously", async () => {
   assert.equal(messages.length, 0);
   finishReading(bytes.buffer);
   await processing;
-  assert.equal(messages[0].feed.tables[0].rows[0].fields.route_type, "3");
+  const finalMessage = messages.find((message) => message.feed);
+  assert.equal(finalMessage.feed.tables[0].rows[0].fields.route_type, "3");
+  assert.ok(messages.some((message) => message.progress?.phase === "extracting"));
+  assert.ok(messages.some((message) => message.progress?.phase === "parsing"));
 });
 
 test("worker reports file-reading and archive errors", async () => {
   const { handler, messages } = createWorker();
   await handler({ data: { arrayBuffer: async () => { throw new Error("Read failed"); } } });
   await handler({ data: { arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer } });
-  assert.equal(messages[0].error, "Read failed");
-  assert.match(messages[1].error, /ZIP/);
+  const errors = messages.filter((message) => message.error);
+  assert.equal(errors[0].error, "Read failed");
+  assert.match(errors[1].error, /ZIP/);
 });
