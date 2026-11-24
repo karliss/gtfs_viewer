@@ -46,6 +46,21 @@ test("formats timetable day ranges and generates first-stop departures", () => {
   assert.equal(formatTimetableDayRange([]), "1-7");
 });
 
+test("uses weekday and weekend sets when the two popular masks intersect", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,service_id,shape_id\n"
+      + "r,mon-fri,mwf,s\nr,mon-sat,mws,s\n",
+    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\n"
+      + "mon-fri,08:10:00,a,1\nmon-sat,08:20:00,a,1\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "mwf,1,1,1,1,1,0,0,20260101,20261231\n"
+      + "mws,1,1,1,1,1,1,0,20260101,20261231\n",
+  }));
+  const variant = getRouteVariants(feed, "r").variants[0];
+  const timetable = getVariantTimetable(feed, variant);
+  assert.deepEqual(timetable.popularDays, [[1, 2, 3, 4, 5], [6, 7]]);
+});
+
 test("loads typed rows while preserving quoted CSV, unknown columns, and ZIP paths", () => {
   const feed = loadGtfs(archive({
     "feed/STOPS.TXT": '\ufeffstop_id,stop_name,description\r\n001,"Main, Street","First\nSecond"\r\n',

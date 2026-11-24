@@ -177,6 +177,9 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
   if (rankedDays.length > 1 &&
     rankedDays[1].days.every((day) => !rankedDays[0].days.includes(day))) {
     popularDays.push(rankedDays[1].days);
+  } else if (rankedDays.length > 1) {
+    popularDays.splice(0);
+    popularDays.push([1, 2, 3, 4, 5], [6, 7]);
   }
 
   const grouped = new Map<number, Map<number, Map<string, number>>>();
