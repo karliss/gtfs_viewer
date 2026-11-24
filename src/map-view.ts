@@ -43,7 +43,11 @@ export const MAP_BASE_LAYERS: readonly MapBaseLayerOption[] = [
     id: "osm-humanitarian",
     label: "OpenStreetMap Humanitarian",
     source: {
-      tiles: ["https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png"],
+      tiles: [
+        "https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+        "https://b.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+        "https://c.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png",
+      ],
       tileSize: 256,
       maxzoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.hotosm.org/">Humanitarian OpenStreetMap Team</a>',
@@ -53,7 +57,11 @@ export const MAP_BASE_LAYERS: readonly MapBaseLayerOption[] = [
     id: "opentopomap",
     label: "OpenTopoMap",
     source: {
-      tiles: ["https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"],
+      tiles: [
+        "https://a.tile.opentopomap.org/{z}/{x}/{y}.png",
+        "https://b.tile.opentopomap.org/{z}/{x}/{y}.png",
+        "https://c.tile.opentopomap.org/{z}/{x}/{y}.png",
+      ],
       tileSize: 256,
       maxzoom: 17,
       attribution: 'Kartendaten: © <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende, SRTM | Kartendarstellung: © <a href="http://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
