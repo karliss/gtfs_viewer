@@ -45,20 +45,16 @@ test("back and forward navigate through history", () => {
   assert.equal(history.canGoForward, false);
 });
 
-test("preserves warning filters and pagination in history", () => {
+test("preserves warning pagination without filters in history", () => {
   const history = new ViewHistory();
   history.push({
     type: "warnings",
-    selectedTypes: ["extra_values", "missing_values"],
-    page: 2,
-    pageSize: 50,
+    itemIndex: 100,
   });
 
   assert.deepEqual(history.current, {
     type: "warnings",
-    selectedTypes: ["extra_values", "missing_values"],
-    page: 2,
-    pageSize: 50,
+    itemIndex: 100,
   });
 });
 

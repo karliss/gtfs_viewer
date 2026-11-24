@@ -109,6 +109,10 @@ app.innerHTML = `
     </section>
     <section id="warnings-view" class="panel viewer" aria-labelledby="warnings-heading" hidden>
       <h2 id="warnings-heading" tabindex="-1">Warnings</h2>
+      <div class="warning-filter-actions">
+        <button id="warning-select-all" type="button">Select all</button>
+        <button id="warning-clear-all" type="button">Clear all</button>
+      </div>
       <div id="warning-types" class="warning-types" aria-label="Warning types"></div>
       <div class="table-scroll" tabindex="0" role="region" aria-label="GTFS warnings">
         <table>
@@ -269,6 +273,8 @@ const agencyDialog = element<HTMLDialogElement>("#agency-dialog");
 const agencyDialogContent = element<HTMLElement>("#agency-dialog-content");
 const warningsView = element<HTMLElement>("#warnings-view");
 const warningTypes = element<HTMLElement>("#warning-types");
+const warningSelectAll = element<HTMLButtonElement>("#warning-select-all");
+const warningClearAll = element<HTMLButtonElement>("#warning-clear-all");
 const warningTableBody = element<HTMLTableSectionElement>("#warning-table-body");
 const warningPrevious = element<HTMLButtonElement>("#warning-previous");
 const warningNext = element<HTMLButtonElement>("#warning-next");
@@ -329,9 +335,7 @@ function tableFilterKey(): string | undefined {
 function captureViewState(): ViewState {
   if (!warningsView.hidden) return {
     type: "warnings",
-    selectedTypes: [...selectedWarningTypes],
-    page: warningPage,
-    pageSize: warningRowsPerPage,
+    itemIndex: warningPage * warningRowsPerPage,
   };
   if (routeDetail && !routeDetail.hidden && currentRoute) {
     return { type: "route", routeId: currentRoute.fields.route_id ?? "" };
@@ -428,10 +432,7 @@ function restoreViewState(state: ViewState): void {
   viewHistoryRestoring = true;
   try {
     if (state.type === "warnings") {
-      selectedWarningTypes = new Set(state.selectedTypes as WarningType[]);
-      warningPage = state.page;
-      warningRowsPerPage = state.pageSize;
-      warningPageSize.value = String(warningRowsPerPage);
+      warningPage = Math.floor(state.itemIndex / warningRowsPerPage);
       showWarnings();
     } else if (state.type === "table") {
       restoreTableState(state);
@@ -1796,13 +1797,12 @@ function showWarnings(): void {
       else selectedWarningTypes.delete(type);
       warningPage = 0;
       renderWarningTable();
-      pushViewState();
     });
     label.append(checkbox, ` ${WARNING_LABELS[type]} (${warnings.filter((warning) => warning.type === type).length})`);
     warningTypes.append(label);
   }
   renderWarningTable();
-  pushViewState();
+  updateHistoryUi();
 }
 
 function renderWarningTable(): void {
@@ -1858,6 +1858,18 @@ historyWarnings.addEventListener("click", () => {
   showWarnings();
 });
 
+warningSelectAll.addEventListener("click", () => {
+  selectedWarningTypes = new Set(WARNING_TYPES);
+  warningPage = 0;
+  showWarnings();
+});
+
+warningClearAll.addEventListener("click", () => {
+  selectedWarningTypes.clear();
+  warningPage = 0;
+  showWarnings();
+});
+
 warningPrevious.addEventListener("click", () => {
   if (warningPage === 0) return;
   warningPage--;
@@ -1872,8 +1884,9 @@ warningNext.addEventListener("click", () => {
 });
 
 warningPageSize.addEventListener("change", () => {
+  const firstItemIndex = warningPage * warningRowsPerPage;
   warningRowsPerPage = Number(warningPageSize.value);
-  warningPage = 0;
+  warningPage = Math.floor(firstItemIndex / warningRowsPerPage);
   renderWarningTable();
   pushViewState();
 });
