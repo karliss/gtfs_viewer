@@ -142,14 +142,14 @@ export function formatTimetableDayRange(days: readonly number[]): string {
 export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable {
   const stopTimes = feed.tables.find((table) => table.kind === "stop_times.txt");
   const calendar = feed.tables.find((table) => table.kind === "calendar.txt");
-  const calendarDates = feed.tables.find((table) => table.kind === "calendar_dates.txt");
   const firstStop = variant.stops[0];
   const tripIds = new Set(variant.trips.flatMap((trip) => trip.fields.trip_id ? [trip.fields.trip_id] : []));
 
   const daySetForService = (serviceId: string | null): number[] | null => {
     if (!serviceId) return null;
     const row = calendar?.rows.find((candidate) => candidate.fields.service_id === serviceId);
-    const days = row ? [
+    if (!row) return null;
+    return [
       row.fields.monday === "1" ? 1 : null,
       row.fields.tuesday === "1" ? 2 : null,
       row.fields.wednesday === "1" ? 3 : null,
@@ -157,40 +157,7 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
       row.fields.friday === "1" ? 5 : null,
       row.fields.saturday === "1" ? 6 : null,
       row.fields.sunday === "1" ? 7 : null,
-    ].filter((day): day is number => day !== null) : [];
-
-    const exceptions = calendarDates?.rows.filter((candidate) =>
-      candidate.fields.service_id === serviceId) ?? [];
-    if (row) {
-      for (const exception of exceptions) {
-        if (!/^\d{8}$/.test(exception.fields.date ?? "")) continue;
-        const date = exception.fields.date!;
-        const parsed = new Date(Date.UTC(
-          Number(date.slice(0, 4)), Number(date.slice(4, 6)) - 1, Number(date.slice(6, 8)),
-        ));
-        if (Number.isNaN(parsed.getTime())) continue;
-        const weekday = parsed.getUTCDay();
-        const day = weekday === 0 ? 7 : weekday;
-        const index = days.indexOf(day);
-        if (exception.fields.exception_type === "1" && index < 0) days.push(day);
-        // Exception type 2 removes a date, not an entire recurring weekday.
-      }
-      return [...new Set(days)].sort((a, b) => a - b);
-    }
-    if (exceptions.length > 0) {
-      for (const exception of exceptions) {
-        if (exception.fields.exception_type !== "1" || !/^\d{8}$/.test(exception.fields.date ?? "")) continue;
-        const date = exception.fields.date!;
-        const parsed = new Date(Date.UTC(
-          Number(date.slice(0, 4)), Number(date.slice(4, 6)) - 1, Number(date.slice(6, 8)),
-        ));
-        if (Number.isNaN(parsed.getTime())) continue;
-        const weekday = parsed.getUTCDay();
-        days.push(weekday === 0 ? 7 : weekday);
-      }
-      return [...new Set(days)].sort((a, b) => a - b);
-    }
-    return null;
+    ].filter((day): day is number => day !== null);
   };
 
   const dayCounts = new Map<string, { days: number[]; count: number }>();
