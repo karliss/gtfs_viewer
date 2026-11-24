@@ -3,7 +3,8 @@ export type WarningType =
   | "missing_values"
   | "unrecognized_columns"
   | "missing_or_duplicate_ids"
-  | "unrecognized_files";
+  | "unrecognized_files"
+  | "invalid_values";
 
 export type WarningSeverity = "error" | "warning" | "info";
 export type WarningScope = "archive" | "table" | "element";
@@ -52,6 +53,13 @@ export const WARNING_DESCRIPTIONS: Readonly<Record<WarningType, WarningDescripti
     scope: "archive",
     parameters: ["file"],
   },
+  invalid_values: {
+    id: "invalid_values",
+    messageTemplate: "{file}, row {row}: invalid value for \"{column}\": {value}",
+    severity: "warning",
+    scope: "element",
+    parameters: ["file", "row", "column", "value"],
+  },
 };
 
 export interface GtfsWarning {
@@ -68,6 +76,7 @@ export const WARNING_TYPES: readonly WarningType[] = [
   "unrecognized_columns",
   "missing_or_duplicate_ids",
   "unrecognized_files",
+  "invalid_values",
 ];
 
 export const WARNING_LABELS: Readonly<Record<WarningType, string>> = {
@@ -76,6 +85,7 @@ export const WARNING_LABELS: Readonly<Record<WarningType, string>> = {
   unrecognized_columns: "Unrecognized CSV columns",
   missing_or_duplicate_ids: "Missing or duplicate IDs",
   unrecognized_files: "Unrecognized files",
+  invalid_values: "Invalid field values",
 };
 
 export class WarningCollector {

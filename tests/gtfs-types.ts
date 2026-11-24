@@ -9,7 +9,7 @@ stop.fields.route_id;
 
 for (const table of feed.tables) {
   if (table.kind === "routes.txt") {
-    const routeType: string | null = table.rows[0].fields.route_type;
+    const routeType: number | null = table.rows[0].fields.route_type;
     // @ts-expect-error Stop fields are not route fields.
     table.rows[0].fields.stop_id;
     void routeType;

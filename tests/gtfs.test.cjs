@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
-  decodeRouteType, formatTimetableDayRange, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
+  decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, indexRoutes, loadGtfs, summarizeTripField,
 } = require("../dist/gtfs.cjs");
 const {
@@ -36,6 +36,7 @@ test("warning collector supports counts, filtering, clearing and replacement", (
 test("warning descriptions cover every warning type with severity and scope", () => {
   assert.deepEqual([...WARNING_TYPES].sort(), [
     "extra_values",
+    "invalid_values",
     "missing_or_duplicate_ids",
     "missing_values",
     "unrecognized_columns",
@@ -53,12 +54,12 @@ test("warning descriptions cover every warning type with severity and scope", ()
 test("loadGtfs attaches all warning types to feed and collector", () => {
   const collector = new WarningCollector();
   const feed = loadGtfs(archive({
-    "routes.txt": "route_id,custom\nR1,one\nR1,two\n",
+    "routes.txt": "route_id,custom,route_type\nR1,one,bad\nR1,two,3\n",
     "stops.txt": "stop_id,stop_name,stop_desc\nS1,Main\nS2,Second,Description,extra\n,Missing\n",
     "readme.md": "documentation",
   }), collector);
-  assert.equal(feed.warnings.length, 7);
-  assert.equal(collector.all.length, 7);
+  assert.equal(feed.warnings.length, 8);
+  assert.equal(collector.all.length, 8);
   for (const type of WARNING_TYPES) {
     assert.ok(feed.warnings.some((warning) => warning.type === type));
   }
@@ -230,7 +231,7 @@ test("loads typed rows while preserving quoted CSV, unknown columns, and ZIP pat
 test("recognizes fields in different GTFS Schedule tables", () => {
   const examples = {
     "agency.txt": ["agency_timezone", "Europe/Riga"],
-    "trips.txt": ["safe_duration_factor", "1.5"],
+    "trips.txt": ["safe_duration_factor", 1.5],
     "stop_times.txt": ["pickup_booking_rule_id", "booking"],
     "fare_leg_join_rules.txt": ["from_network_id", "network"],
     "fare_products.txt": ["fare_media_id", "card"],
@@ -255,7 +256,7 @@ test("preserves short and long rows, distinguishing absent values from empty val
     "stops.txt": 'stop_id,stop_name,custom,another\n1,,x\n2,Name,y,z,"extra, value",\n3\n',
   })).tables;
   assert.equal(table.hasExtraValues, true);
-  assert.equal(table.rows[0].fields.stop_name, "");
+  assert.equal(table.rows[0].fields.stop_name, null);
   assert.equal(table.rows[0].fields.stop_lat, null);
   assert.deepEqual(table.rows[0].unrecognizedColumns, { custom: "x", another: null });
   assert.deepEqual(table.rows[0].extraValues, []);
@@ -332,7 +333,7 @@ test("trims headers and ID values in the sample trips", () => {
   const trips = feed.tables[0];
   assert.equal(trips.rows[0].fields.shape_id, "124085");
   assert.equal(trips.rows[0].fields.trip_id, "210688");
-  assert.equal(trips.rows[0].fields.trip_headsign, " ");
+  assert.equal(trips.rows[0].fields.trip_headsign, null);
   assert.deepEqual(trips.rows[0].unrecognizedColumns, {});
   const { variants, tripsCount, tripsWithoutVariant } = getRouteVariants(feed, "5501720");
   assert.equal(tripsCount, 1);
@@ -340,7 +341,7 @@ test("trims headers and ID values in the sample trips", () => {
   assert.equal(variants[0].shapeId, "124085");
 });
 
-test("trims IDs and route short names without changing unrelated values", () => {
+test("trims recognized fields while preserving unrecognized values except IDs", () => {
   const feed = loadGtfs(archive({
     "routes.txt": "route_id,route_short_name,custom_id,note\n r ,  Name  , ext ,  text  \n",
     "trips.txt": "route_id,trip_id,shape_id\n r , t , s \n r , t2 , s \n",
@@ -360,18 +361,18 @@ test("trims IDs and route short names without changing unrelated values", () => 
   assert.deepEqual(variants[0].trips.map(({ fields }) => fields.trip_id), ["t", "t2"]);
 });
 
-test("summarizes trip accessibility with missing and empty values counted as zero", () => {
+test("summarizes trip accessibility with missing values left unprovided", () => {
   const [table] = loadGtfs(archive({
     "trips.txt": "trip_id,wheelchair_accessible,bikes_allowed\n1,1,2\n2,1,2\n3,2,\n4,,2\n5\n",
   })).tables;
   assert.equal(summarizeTripField([], "bikes_allowed"), "No trips available");
   assert.equal(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), "1");
-  assert.equal(summarizeTripField(table.rows, "wheelchair_accessible"), "1 (40%), 2 (20%), 0 (40%)");
-  assert.equal(summarizeTripField(table.rows, "bikes_allowed"), "2 (60%), 0 (40%)");
-  assert.equal(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), "2 (66.7%), 0 (33.3%)");
+  assert.equal(summarizeTripField(table.rows, "wheelchair_accessible"), "1 (40%), 2 (20%), Not provided (40%)");
+  assert.equal(summarizeTripField(table.rows, "bikes_allowed"), "2 (60%), Not provided (40%)");
+  assert.equal(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), "2 (66.7%), Not provided (33.3%)");
 });
 
-test("defaults only GTFS enums whose empty value is equivalent to zero", () => {
+test("normalizes numeric fields and preserves missing values as null", () => {
   const feed = loadGtfs(archive({
     "stops.txt": "stop_id,location_type,wheelchair_boarding,stop_name,stop_access\ns1,,  ,,\ns2,2,1, Stop ,\n",
     "routes.txt": "route_id,continuous_pickup,continuous_drop_off\nr,,\n",
@@ -382,28 +383,28 @@ test("defaults only GTFS enums whose empty value is equivalent to zero", () => {
     "extension.txt": "pickup_type\n \n",
   }));
   const stops = feed.tables.find((table) => table.kind === "stops.txt");
-  assert.equal(stops.rows[0].fields.location_type, "0");
-  assert.equal(stops.rows[0].fields.wheelchair_boarding, "0");
-  assert.equal(stops.rows[0].fields.stop_name, "");
-  assert.equal(stops.rows[1].fields.location_type, "2");
-  assert.equal(stops.rows[1].fields.stop_name, " Stop ");
-  assert.equal(stops.rows[0].fields.stop_access, "");
+  assert.equal(stops.rows[0].fields.location_type, null);
+  assert.equal(stops.rows[0].fields.wheelchair_boarding, null);
+  assert.equal(stops.rows[0].fields.stop_name, null);
+  assert.equal(stops.rows[1].fields.location_type, 2);
+  assert.equal(stops.rows[1].fields.stop_name, "Stop");
+  assert.equal(stops.rows[0].fields.stop_access, null);
   const routes = feed.tables.find((table) => table.kind === "routes.txt");
-  assert.equal(routes.rows[0].fields.continuous_pickup, "");
-  assert.equal(routes.rows[0].fields.continuous_drop_off, "");
+  assert.equal(routes.rows[0].fields.continuous_pickup, null);
+  assert.equal(routes.rows[0].fields.continuous_drop_off, null);
   const times = feed.tables.find((table) => table.kind === "stop_times.txt");
-  assert.equal(times.rows[0].fields.pickup_type, "2");
-  assert.equal(times.rows[0].fields.timepoint, "");
-  assert.equal(times.rows[0].fields.continuous_pickup, "");
+  assert.equal(times.rows[0].fields.pickup_type, 2);
+  assert.equal(times.rows[0].fields.timepoint, null);
+  assert.equal(times.rows[0].fields.continuous_pickup, null);
   assert.equal(times.rows[1].fields.timepoint, null);
   assert.equal(times.rows[1].fields.continuous_pickup, null);
-  assert.equal(times.rows[1].fields.pickup_type, "0");
+  assert.equal(times.rows[1].fields.pickup_type, null);
   const calendar = feed.tables.find((table) => table.kind === "calendar.txt");
-  assert.equal(calendar.rows[0].fields.monday, "1");
-  assert.equal(calendar.rows[0].fields.tuesday, "");
+  assert.equal(calendar.rows[0].fields.monday, 1);
+  assert.equal(calendar.rows[0].fields.tuesday, null);
   assert.equal(calendar.rows[0].fields.wednesday, null);
-  assert.equal(feed.tables.find((table) => table.kind === "fare_attributes.txt").rows[0].fields.transfers, "");
-  assert.equal(feed.tables.find((table) => table.kind === "translations.txt").rows[0].fields.table_name, "");
+  assert.equal(feed.tables.find((table) => table.kind === "fare_attributes.txt").rows[0].fields.transfers, null);
+  assert.equal(feed.tables.find((table) => table.kind === "translations.txt").rows[0].fields.table_name, null);
   assert.equal(feed.tables.find((table) => table.kind === "unknown").rows[0].unrecognizedColumns.pickup_type, " ");
 });
 
@@ -412,15 +413,45 @@ test("reports invalid UTF-8 in parsed tables", () => {
   assert.throws(() => loadGtfs(zip), /valid UTF-8/);
 });
 
-test("trims route types in routes without altering unrelated fields", () => {
+test("normalizes field values and warns when numeric parsing fails", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "stops.txt": "stop_id,stop_name,stop_lat,stop_lon,location_type\n"
+      + " s1 , Main Street , 56.9 , 24.1 , 2 \n"
+      + "s2,Invalid,west,25,1.5\n"
+      + "s3,,,,\n"
+      + "s4\n",
+  }), collector);
+  const stops = feed.tables[0];
+  assert.deepEqual(stops.rows[0].fields, {
+    stop_id: "s1", stop_code: null, stop_name: "Main Street", tts_stop_name: null, stop_desc: null,
+    stop_lat: 56.9, stop_lon: 24.1, zone_id: null, stop_url: null, location_type: 2,
+    parent_station: null, stop_timezone: null, wheelchair_boarding: null, level_id: null,
+    platform_code: null, stop_access: null,
+  });
+  assert.equal(stops.rows[1].fields.stop_lat, null);
+  assert.equal(stops.rows[1].fields.location_type, null);
+  assert.equal(stops.rows[2].fields.stop_name, null);
+  assert.equal(stops.rows[2].fields.stop_lat, null);
+  assert.equal(stops.rows[3].fields.stop_name, null);
+  assert.deepEqual(feed.warnings.filter(({ type }) => type === "invalid_values").map(({ parameters, csvRowNumber }) => ({
+    parameters, csvRowNumber,
+  })), [
+    { parameters: { file: "stops.txt", row: 3, column: "stop_lat", value: "west" }, csvRowNumber: 3 },
+    { parameters: { file: "stops.txt", row: 3, column: "location_type", value: "1.5" }, csvRowNumber: 3 },
+  ]);
+  assert.equal(collector.count("invalid_values"), 2);
+});
+
+test("normalizes recognized route fields and leaves unknown columns untouched", () => {
   const feed = loadGtfs(archive({
     "routes.txt": "route_id,route_type,route_desc\n r , 3 , description \ns,   ,\nt\n",
     "extension.txt": "route_type\n 3 \n",
   }));
   const routes = feed.tables.find((table) => table.kind === "routes.txt");
-  assert.equal(routes.rows[0].fields.route_type, "3");
-  assert.equal(routes.rows[0].fields.route_desc, " description ");
-  assert.equal(routes.rows[1].fields.route_type, "");
+  assert.equal(routes.rows[0].fields.route_type, 3);
+  assert.equal(routes.rows[0].fields.route_desc, "description");
+  assert.equal(routes.rows[1].fields.route_type, null);
   assert.equal(routes.rows[2].fields.route_type, null);
   assert.equal(feed.tables.find((table) => table.kind === "unknown").rows[0].unrecognizedColumns.route_type, " 3 ");
 });
@@ -474,12 +505,12 @@ test("groups trips by shape, headsign, short name and ordered stops", () => {
   assert.deepEqual(variants.map(({ shapeId, tripHeadsign, tripShortName, directionIds, stops, trips }) => ({
     shapeId, tripHeadsign, tripShortName, directionIds, stops, trips: trips.map((trip) => trip.fields.trip_id),
   })), [
-    { shapeId: "s1", tripHeadsign: "Center", tripShortName: "10", directionIds: ["0", "1"], stops: ["a", "b"], trips: ["t1", "t2"] },
-    { shapeId: "s1", tripHeadsign: "Other", tripShortName: "10", directionIds: ["0"], stops: ["a", "b"], trips: ["t3"] },
-    { shapeId: "s1", tripHeadsign: "Center", tripShortName: "11", directionIds: ["0"], stops: ["a", "b"], trips: ["t4"] },
-    { shapeId: "s1", tripHeadsign: "Center", tripShortName: "10", directionIds: ["0"], stops: ["b", "a"], trips: ["t5"] },
-    { shapeId: "s2", tripHeadsign: "Center", tripShortName: "10", directionIds: ["0"], stops: ["a", "b"], trips: ["t6"] },
-    { shapeId: null, tripHeadsign: "Center", tripShortName: "10", directionIds: ["0"], stops: [], trips: ["t7"] },
+    { shapeId: "s1", tripHeadsign: "Center", tripShortName: "10", directionIds: [0, 1], stops: ["a", "b"], trips: ["t1", "t2"] },
+    { shapeId: "s1", tripHeadsign: "Other", tripShortName: "10", directionIds: [0], stops: ["a", "b"], trips: ["t3"] },
+    { shapeId: "s1", tripHeadsign: "Center", tripShortName: "11", directionIds: [0], stops: ["a", "b"], trips: ["t4"] },
+    { shapeId: "s1", tripHeadsign: "Center", tripShortName: "10", directionIds: [0], stops: ["b", "a"], trips: ["t5"] },
+    { shapeId: "s2", tripHeadsign: "Center", tripShortName: "10", directionIds: [0], stops: ["a", "b"], trips: ["t6"] },
+    { shapeId: null, tripHeadsign: "Center", tripShortName: "10", directionIds: [0], stops: [], trips: ["t7"] },
   ]);
   const shapeRows = getVariantTableRows(feed, variants[0], "shapes.txt");
   const tripRows = getVariantTableRows(feed, variants[0], "trips.txt");
@@ -540,14 +571,13 @@ test("preserves missing stop IDs and variants with no stop times", () => {
   ]);
 });
 
-test("distinguishes empty and absent trip properties and preserves repeated stops", () => {
+test("normalizes empty and absent trip properties to null and preserves repeated stops", () => {
   const feed = loadGtfs(archive({
     "trips.txt": "route_id,trip_id,shape_id,trip_headsign\nr,t1,s,\nr,t2,s\n",
     "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,a,1\nt1,a,2\nt2,a,1\nt2,a,2\n",
   }));
   const { variants } = getRouteVariants(feed, "r");
   assert.deepEqual(variants.map(({ tripHeadsign, stops }) => ({ tripHeadsign, stops })), [
-    { tripHeadsign: "", stops: ["a", "a"] },
     { tripHeadsign: null, stops: ["a", "a"] },
   ]);
 });
@@ -564,9 +594,9 @@ test("forms shape-less variants from any available grouping property", () => {
   assert.deepEqual(variants.map(({ shapeId, tripHeadsign, tripShortName, stops, trips }) => ({
     shapeId, tripHeadsign, tripShortName, stops, trips: trips.map((trip) => trip.fields.trip_id),
   })), [
-    { shapeId: null, tripHeadsign: "North", tripShortName: "", stops: [], trips: ["t1", "t2"] },
-    { shapeId: null, tripHeadsign: "", tripShortName: "X", stops: [], trips: ["t3"] },
-    { shapeId: null, tripHeadsign: "", tripShortName: "", stops: ["a", "b"], trips: ["t4", "t5"] },
+    { shapeId: null, tripHeadsign: "North", tripShortName: null, stops: [], trips: ["t1", "t2"] },
+    { shapeId: null, tripHeadsign: null, tripShortName: "X", stops: [], trips: ["t3"] },
+    { shapeId: null, tripHeadsign: null, tripShortName: null, stops: ["a", "b"], trips: ["t4", "t5"] },
   ]);
 });
 
@@ -587,7 +617,7 @@ test("forms variants from shape IDs in a loaded feed without optional tables or 
     shapeId, stops, trips: trips.map(({ fields }) => fields.trip_id),
   })), [
     { shapeId: "shape-a", stops: [], trips: ["trip-1", "trip-2"] },
-    { shapeId: "shape-b", stops: [], trips: [""] },
+    { shapeId: "shape-b", stops: [], trips: [null] },
   ]);
   assert.deepEqual(getRouteVariants(feed, "1"), {
     variants: [], tripsCount: 0, tripsWithoutVariant: 0,
@@ -638,4 +668,6 @@ test("decodes standard route types for display", () => {
   assert.equal(decodeRouteType("3"), "Bus");
   assert.equal(decodeRouteType("11"), "Trolleybus");
   assert.equal(decodeRouteType("999"), "Unknown route type (999)");
+  const [routes] = loadGtfs(archive({ "routes.txt": "route_id,route_type\nr,0\n" })).tables;
+  assert.equal(getMatchingRows(routes, "tram").length, 1);
 });

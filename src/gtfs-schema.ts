@@ -34,19 +34,43 @@ export const gtfsFields = {
   "attributions.txt": ["attribution_id", "agency_id", "route_id", "trip_id", "organization_name", "is_producer", "is_operator", "is_authority", "attribution_url", "attribution_email", "attribution_phone"],
 } as const;
 
-export const gtfsZeroDefaultEnumFields: Partial<Record<keyof typeof gtfsFields, readonly string[]>> = {
+export const gtfsFloatFields = {
+  "stops.txt": ["stop_lat", "stop_lon"],
+  "trips.txt": ["safe_duration_factor"],
+  "stop_times.txt": ["shape_dist_traveled"],
+  "fare_attributes.txt": ["price"],
+  "fare_products.txt": ["amount"],
+  "shapes.txt": ["shape_pt_lat", "shape_pt_lon", "shape_dist_traveled"],
+  "pathways.txt": ["length", "traversal_time", "max_slope", "min_width"],
+  "levels.txt": ["level_index"],
+} as const;
+
+export const gtfsIntegerFields = {
   "agency.txt": ["cemv_support"],
-  "stops.txt": ["location_type", "wheelchair_boarding"],
-  "routes.txt": ["cemv_support"],
-  "trips.txt": ["wheelchair_accessible", "bikes_allowed", "cars_allowed"],
-  "stop_times.txt": ["pickup_type", "drop_off_type"],
+  "stops.txt": ["location_type", "wheelchair_boarding", "stop_access"],
+  "routes.txt": ["route_type", "route_sort_order", "continuous_pickup", "continuous_drop_off", "cemv_support"],
+  "trips.txt": ["direction_id", "wheelchair_accessible", "bikes_allowed", "cars_allowed", "safe_duration_offset"],
+  "stop_times.txt": ["stop_sequence", "pickup_type", "drop_off_type", "continuous_pickup", "continuous_drop_off", "timepoint"],
+  "calendar.txt": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+  "calendar_dates.txt": ["exception_type"],
+  "fare_attributes.txt": ["payment_method", "transfers", "transfer_duration"],
   "rider_categories.txt": ["is_default_fare_category"],
-  "frequencies.txt": ["exact_times"],
-  "transfers.txt": ["transfer_type"],
+  "fare_media.txt": ["fare_media_type"],
+  "fare_leg_rules.txt": ["rule_priority"],
+  "fare_transfer_rules.txt": ["transfer_count", "duration_limit", "duration_limit_type", "fare_transfer_type"],
+  "shapes.txt": ["shape_pt_sequence"],
+  "frequencies.txt": ["headway_secs", "exact_times"],
+  "transfers.txt": ["transfer_type", "min_transfer_time"],
+  "pathways.txt": ["pathway_mode", "is_bidirectional", "stair_count"],
+  "booking_rules.txt": ["booking_type", "prior_notice_last_day", "prior_notice_start_day"],
   "attributions.txt": ["is_producer", "is_operator", "is_authority"],
-};
+} as const;
 
 export type GtfsTableName = keyof typeof gtfsFields;
 export type GtfsFields<Name extends GtfsTableName> = {
-  [Field in (typeof gtfsFields)[Name][number]]: string | null;
+  [Field in (typeof gtfsFields)[Name][number]]: Field extends
+    (typeof gtfsFloatFields)[keyof typeof gtfsFloatFields][number]
+    | (typeof gtfsIntegerFields)[keyof typeof gtfsIntegerFields][number]
+    ? number | null
+    : string | null;
 };

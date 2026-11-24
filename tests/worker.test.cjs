@@ -28,7 +28,7 @@ test("worker reads and parses a feed asynchronously", async () => {
   finishReading(bytes.buffer);
   await processing;
   const finalMessage = messages.find((message) => message.feed);
-  assert.equal(finalMessage.feed.tables[0].rows[0].fields.route_type, "3");
+  assert.equal(finalMessage.feed.tables[0].rows[0].fields.route_type, 3);
   assert.ok(messages.some((message) => message.progress?.phase === "extracting"));
   assert.ok(messages.some((message) => message.progress?.phase === "parsing"));
 });
