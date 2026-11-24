@@ -1566,20 +1566,8 @@ historyForward.addEventListener("click", () => {
 
 function openHistoryTable(kind: "routes.txt" | "stops.txt"): void {
   if (!feed) return;
-  const index = feed.tables.findIndex((table) => table.kind === kind);
-  if (index < 0) return;
-  tableSelect.selectedIndex = index;
-  resetTableFilter();
-  tableSearch.value = "";
-  page = 0;
-  routeDetail.hidden = true;
-  stopDetail.hidden = true;
-  mapView?.remove();
-  mapView = undefined;
-  mapPanel.hidden = true;
-  viewer.hidden = false;
-  renderSelectedTable();
-  tableSelect.focus();
+  if (!feed.tables.some((table) => table.kind === kind)) return;
+  restoreViewState({ type: "table", table: kind, itemIndex: 0, search: "" });
   pushViewState();
 }
 
