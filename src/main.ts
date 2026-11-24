@@ -38,21 +38,26 @@ app.innerHTML = `
       </form>
       <p id="status" role="status" aria-live="polite"></p>
     </section>
+    <div class="history-controls" aria-label="View history" hidden>
+      <label class="history-select-label">History</label>
+      <button id="history-back" type="button" title="Back" aria-label="Back">←</button>
+      <button id="history-forward" type="button" title="Forward" aria-label="Forward">→</button>
+      <div class="history-dropdown">
+        <button id="history-select" type="button" title="View history" aria-label="View history" aria-haspopup="listbox" aria-expanded="false">▼</button>
+        <div id="history-menu" class="history-menu" role="listbox" hidden></div>
+      </div>
+      <button id="history-routes" type="button">Routes</button>
+      <button id="history-stops" type="button">Stops</button>
+    </div>
     <section id="viewer" class="panel viewer" aria-labelledby="viewer-heading" hidden>
       <h2 id="viewer-heading">Feed tables</h2>
       <p id="feed-summary"></p>
-      <div class="history-controls" aria-label="View history">
-        <button id="history-back" type="button" title="Back">← Back</button>
-        <button id="history-forward" type="button" title="Forward">Forward →</button>
-        <label for="history-select" class="history-select-label">History</label>
-        <select id="history-select"></select>
-      </div>
       <button id="back-to-route" type="button" hidden>Back to route details</button>
       <label for="table-select">Table</label>
       <select id="table-select"></select>
       <p id="table-filter" hidden></p>
       <button id="clear-filter" type="button" hidden>Show all rows</button>
-      <button id="stops-map" type="button" hidden>View stops on map</button>
+      <button id="stops-map" type="button" hidden title="View stops on map" aria-label="View stops on map">🗺️</button>
       <button id="routes-map" type="button" hidden title="View routes on map" aria-label="View routes on map">🗺️</button>
       <div class="table-controls">
         <div>
@@ -84,7 +89,6 @@ app.innerHTML = `
       </div>
     </section>
     <section id="route-detail" class="panel viewer" aria-labelledby="route-heading" hidden>
-      <button id="back-to-tables" type="button">Back to tables</button>
       <h2 id="route-heading" tabindex="-1">Route details</h2>
       <div id="route-properties"></div>
       <p id="route-summary"></p>
@@ -97,13 +101,10 @@ app.innerHTML = `
       </section>
     </section>
     <section id="stop-detail" class="panel viewer" aria-labelledby="stop-heading" hidden>
-      <button id="back-from-stop" type="button">Back</button>
       <h2 id="stop-heading" tabindex="-1">Stop details</h2>
       <div id="stop-properties"></div>
     </section>
     <section id="map-panel" class="panel viewer" aria-labelledby="map-heading" hidden>
-      <button id="back-from-map" type="button">Back</button>
-      <button id="map-to-tables" type="button">Feed tables</button>
       <h2 id="map-heading" tabindex="-1">Map</h2>
       <p id="map-error" role="alert"></p>
       <p id="map-summary" role="status"></p>
@@ -186,7 +187,11 @@ const next = element<HTMLButtonElement>("#next");
 const pageLabel = element<HTMLSpanElement>("#page-label");
 const historyBack = element<HTMLButtonElement>("#history-back");
 const historyForward = element<HTMLButtonElement>("#history-forward");
-const historySelect = element<HTMLSelectElement>("#history-select");
+const historyRoutes = element<HTMLButtonElement>("#history-routes");
+const historyStops = element<HTMLButtonElement>("#history-stops");
+const historyControls = document.querySelector<HTMLElement>(".history-controls");
+const historySelect = element<HTMLButtonElement>("#history-select");
+const historyMenu = element<HTMLElement>("#history-menu");
 const routeDetail = element<HTMLElement>("#route-detail");
 const routeHeading = element<HTMLHeadingElement>("#route-heading");
 const routeProperties = element<HTMLElement>("#route-properties");
@@ -194,7 +199,6 @@ const routeVariants = element<HTMLElement>("#route-variants");
 const routeSummary = element<HTMLParagraphElement>("#route-summary");
 const routeTrips = element<HTMLButtonElement>("#route-trips");
 const routeStopList = element<HTMLOListElement>("#route-stop-list");
-const backToTables = element<HTMLButtonElement>("#back-to-tables");
 const backToRoute = element<HTMLButtonElement>("#back-to-route");
 const tableFilter = element<HTMLParagraphElement>("#table-filter");
 const clearFilter = element<HTMLButtonElement>("#clear-filter");
@@ -204,7 +208,6 @@ const routeMapButton = element<HTMLButtonElement>("#route-map");
 const stopDetail = element<HTMLElement>("#stop-detail");
 const stopHeading = element<HTMLHeadingElement>("#stop-heading");
 const stopProperties = element<HTMLElement>("#stop-properties");
-const backFromStop = element<HTMLButtonElement>("#back-from-stop");
 const mapPanel = element<HTMLElement>("#map-panel");
 const mapHeading = element<HTMLHeadingElement>("#map-heading");
 const mapCanvas = element<HTMLElement>("#map-canvas");
@@ -223,8 +226,6 @@ const mapAllStops = element<HTMLInputElement>("#map-all-stops");
 const mapReducedStops = element<HTMLInputElement>("#map-reduced-stops");
 const mapStopOrder = element<HTMLInputElement>("#map-stop-order");
 const mapClearFilter = element<HTMLButtonElement>("#map-clear-filter");
-const backFromMap = element<HTMLButtonElement>("#back-from-map");
-const mapToTables = element<HTMLButtonElement>("#map-to-tables");
 const agencyDialog = element<HTMLDialogElement>("#agency-dialog");
 const agencyDialogContent = element<HTMLElement>("#agency-dialog-content");
 for (const layer of MAP_BASE_LAYERS) {
@@ -318,15 +319,23 @@ function stateLabel(state: ViewState): string {
 function updateHistoryUi(): void {
   historyBack.disabled = !viewHistory.canGoBack;
   historyForward.disabled = !viewHistory.canGoForward;
-  historySelect.replaceChildren();
+  historyRoutes.disabled = !feed?.tables.some((table) => table.kind === "routes.txt");
+  historyStops.disabled = !feed?.tables.some((table) => table.kind === "stops.txt");
+  historyMenu.replaceChildren();
   viewHistory.states.forEach((state, index) => {
-    const option = document.createElement("option");
-    option.value = String(index);
-    option.textContent = `${index === viewHistory.currentIndex ? "• " : ""}${stateLabel(state)}`;
-    historySelect.append(option);
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "history-menu-item";
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", String(index === viewHistory.currentIndex));
+    option.textContent = stateLabel(state);
+    option.addEventListener("click", () => {
+      const selected = viewHistory.select(index);
+      if (selected) restoreViewState(selected);
+      closeHistoryMenu();
+    });
+    historyMenu.append(option);
   });
-  historySelect.value = String(viewHistory.currentIndex);
-  historySelect.title = "View history";
 }
 
 function pushViewState(): void {
@@ -685,8 +694,6 @@ function showRoute(route: GtfsRow<"routes.txt">, returnTo: "table" | "stop" = "t
     list.append(term, description);
   }
   routeProperties.replaceChildren(list);
-  backToTables.textContent = returnTo === "stop" ? "Back to stop details" : "Back to tables";
-
   const { variants, tripsCount, tripsWithoutVariant } = route.fields.route_id
     ? getRouteVariants(feed, route.fields.route_id)
     : { variants: [], tripsCount: 0, tripsWithoutVariant: 0 };
@@ -1399,6 +1406,7 @@ form.addEventListener("submit", async (event) => {
   routeDetail.hidden = true;
   stopDetail.hidden = true;
   mapPanel.hidden = true;
+  if (historyControls) historyControls.hidden = true;
   mapView?.remove();
   mapView = undefined;
   viewHistory.clear();
@@ -1411,6 +1419,7 @@ form.addEventListener("submit", async (event) => {
 
   try {
     feed = await loadFeed(file);
+    if (historyControls) historyControls.hidden = false;
     routesById = indexRoutes(feed);
     const agencies = feed.tables.find((table) => table.kind === "agency.txt");
     for (const agency of agencies?.rows ?? []) {
@@ -1444,34 +1453,11 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
-backToTables.addEventListener("click", () => {
-  const state = viewHistory.back();
-  if (state) restoreViewState(state);
-  else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
-});
-
 element<HTMLButtonElement>("#agency-dialog-close").addEventListener("click", () => agencyDialog.close());
 stopsMapButton.addEventListener("click", showStopsMap);
 routesMapButton.addEventListener("click", showAllRoutesMap);
 routeMapButton.addEventListener("click", () => {
   if (currentRoute) showRouteMap(currentRoute, "route");
-});
-backFromMap.addEventListener("click", () => {
-  const state = viewHistory.back();
-  if (state) restoreViewState(state);
-  else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
-});
-mapToTables.addEventListener("click", () => {
-  mapView?.remove();
-  mapView = undefined;
-  mapPanel.hidden = true;
-  viewer.hidden = false;
-  tableSelect.focus();
-});
-backFromStop.addEventListener("click", () => {
-  const state = viewHistory.back();
-  if (state) restoreViewState(state);
-  else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
 });
 mapRoute.addEventListener("change", () => {
   populateMapVariants();
@@ -1578,7 +1564,31 @@ historyForward.addEventListener("click", () => {
   if (state) restoreViewState(state);
 });
 
-historySelect.addEventListener("change", () => {
-  const state = viewHistory.select(Number(historySelect.value));
-  if (state) restoreViewState(state);
+function openHistoryTable(kind: "routes.txt" | "stops.txt"): void {
+  if (!feed) return;
+  if (!feed.tables.some((table) => table.kind === kind)) return;
+  restoreViewState({ type: "table", table: kind, itemIndex: 0, search: "" });
+  pushViewState();
+}
+
+historyRoutes.addEventListener("click", () => openHistoryTable("routes.txt"));
+historyStops.addEventListener("click", () => openHistoryTable("stops.txt"));
+
+function closeHistoryMenu(): void {
+  historyMenu.hidden = true;
+  historySelect.setAttribute("aria-expanded", "false");
+}
+
+historySelect.addEventListener("click", () => {
+  const opening = historyMenu.hidden;
+  historyMenu.hidden = !opening;
+  historySelect.setAttribute("aria-expanded", String(opening));
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target instanceof Node && !historySelect.parentElement?.contains(event.target)) closeHistoryMenu();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeHistoryMenu();
 });
