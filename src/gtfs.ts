@@ -111,6 +111,142 @@ export interface RouteVariant {
   trips: GtfsRow<"trips.txt">[];
 }
 
+export interface VariantTimetableDeparture {
+  minute: number;
+  days: number[] | null;
+}
+
+export interface VariantTimetableRow {
+  hour: number;
+  departures: VariantTimetableDeparture[];
+}
+
+export interface VariantTimetable {
+  popularDays: number[][];
+  exceptionDates: string[];
+  rows: VariantTimetableRow[];
+}
+
+export function formatTimetableDayRange(days: readonly number[]): string {
+  if (days.length === 0) return "1-7";
+  const sorted = [...new Set(days)].filter((day) => day >= 1 && day <= 7).sort((a, b) => a - b);
+  const ranges: string[] = [];
+  for (let index = 0; index < sorted.length;) {
+    let end = index;
+    while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1) end++;
+    ranges.push(index === end
+      ? String(sorted[index])
+      : `${sorted[index]}-${sorted[end]}`);
+    index = end + 1;
+  }
+  return ranges.join(", ");
+}
+
+export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable {
+  const stopTimes = feed.tables.find((table) => table.kind === "stop_times.txt");
+  const calendar = feed.tables.find((table) => table.kind === "calendar.txt");
+  const calendarDates = feed.tables.find((table) => table.kind === "calendar_dates.txt");
+  const firstStop = variant.stops[0];
+  const tripIds = new Set(variant.trips.flatMap((trip) => trip.fields.trip_id ? [trip.fields.trip_id] : []));
+
+  const daySetForService = (serviceId: string | null): number[] | null => {
+    const normalizedServiceId = serviceId?.trim();
+    if (!normalizedServiceId) return null;
+    const row = calendar?.rows.find((candidate) =>
+      candidate.fields.service_id?.trim() === normalizedServiceId);
+    if (!row) return null;
+    return [
+      row.fields.monday?.trim() === "1" ? 1 : null,
+      row.fields.tuesday?.trim() === "1" ? 2 : null,
+      row.fields.wednesday?.trim() === "1" ? 3 : null,
+      row.fields.thursday?.trim() === "1" ? 4 : null,
+      row.fields.friday?.trim() === "1" ? 5 : null,
+      row.fields.saturday?.trim() === "1" ? 6 : null,
+      row.fields.sunday?.trim() === "1" ? 7 : null,
+    ].filter((day): day is number => day !== null);
+  };
+
+  const dayCounts = new Map<string, { days: number[]; count: number }>();
+  for (const trip of variant.trips) {
+    const days = daySetForService(trip.fields.service_id);
+    if (!days) continue;
+    const key = days.join(",");
+    const existing = dayCounts.get(key);
+    if (existing) existing.count++;
+    else dayCounts.set(key, { days, count: 1 });
+  }
+  const rankedDays = [...dayCounts.values()].sort((left, right) => right.count - left.count);
+  const popularDays: number[][] = [];
+  if (rankedDays.length > 0) popularDays.push(rankedDays[0].days);
+  if (rankedDays.length > 1 &&
+    rankedDays[1].days.every((day) => !rankedDays[0].days.includes(day))) {
+    popularDays.push(rankedDays[1].days);
+  } else if (rankedDays.length > 1) {
+    popularDays.splice(0);
+    popularDays.push([1, 2, 3, 4, 5], [6, 7]);
+  }
+
+  const grouped = new Map<number, Map<number, Map<string, number>>>();
+  for (const trip of variant.trips) {
+    const tripId = trip.fields.trip_id;
+    if (!tripId || !tripIds.has(tripId)) continue;
+    const rows = stopTimes?.rows.filter((row) =>
+      row.fields.trip_id === tripId && (firstStop === null ? false : row.fields.stop_id === firstStop)) ?? [];
+    const days = daySetForService(trip.fields.service_id);
+    const dayKey = days?.join(",") ?? "";
+    for (const row of rows) {
+      const time = row.fields.departure_time?.trim() || row.fields.arrival_time?.trim();
+      if (!time) continue;
+      const match = /^(\d+):(\d{2})(:\d{2})?$/.exec(time);
+      if (!match) continue;
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
+      let minutes = grouped.get(hour);
+      if (!minutes) {
+        minutes = new Map();
+        grouped.set(hour, minutes);
+      }
+      let dayCounts = minutes.get(minute);
+      if (!dayCounts) {
+        dayCounts = new Map();
+        minutes.set(minute, dayCounts);
+      }
+      dayCounts.set(dayKey, (dayCounts.get(dayKey) ?? 0) + 1);
+    }
+  }
+
+  const rows: VariantTimetableRow[] = [...grouped.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([hour, minuteMap]) => ({
+      hour,
+      departures: [...minuteMap.entries()].sort(([left], [right]) => left - right).flatMap(([minute, dayKeys]) =>
+        [...dayKeys.entries()].map(([dayKey]) => ({
+          minute,
+          days: dayKey ? dayKey.split(",").map(Number) : null,
+        })),
+      ),
+    }));
+  if (rows.length > 0 && popularDays.length === 0) {
+    const knownDays = [...new Set(rows.flatMap((row) => row.departures
+      .flatMap((departure) => departure.days ?? [])))]
+      .sort((left, right) => left - right);
+    popularDays.push(knownDays.length > 0
+      ? knownDays
+      : [1, 2, 3, 4, 5, 6, 7]);
+  }
+  const serviceIds = new Set(variant.trips.flatMap((trip) =>
+    trip.fields.service_id ? [trip.fields.service_id] : []));
+  const exceptionDates = calendarDates
+    ? [...new Set(calendarDates.rows
+      .filter((row) => row.fields.service_id && serviceIds.has(row.fields.service_id))
+      .map((row) => row.fields.date)
+      .filter((date): date is string => date !== null))]
+      .sort()
+    : [];
+  return { popularDays, exceptionDates, rows };
+}
+
 export function getVariantTableRows(
   feed: GtfsFeed, variant: RouteVariant, kind: "shapes.txt" | "trips.txt",
 ): GtfsTable | undefined {
