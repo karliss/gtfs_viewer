@@ -252,7 +252,6 @@ function parseTable(name: string, columns: string[], records: string[][], collec
     "routes.txt": "route_id",
     "trips.txt": "trip_id",
     "calendar.txt": "service_id",
-    "calendar_dates.txt": "service_id",
     "fare_attributes.txt": "fare_id",
     "fare_media.txt": "fare_media_id",
     "fare_products.txt": "fare_product_id",

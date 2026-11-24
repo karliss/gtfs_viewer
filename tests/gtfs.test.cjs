@@ -129,6 +129,16 @@ test("reports missing and duplicate IDs with related object IDs", () => {
   assert.deepEqual(warnings[1].relatedObjectIds, []);
 });
 
+test("does not report duplicate service_id values in calendar_dates.txt", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "calendar_dates.txt": "service_id,date,exception_type\nweekday,20260101,1\nweekday,20260102,2\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "missing_or_duplicate_ids");
+  assert.equal(warnings.length, 0);
+  assert.equal(collector.count("missing_or_duplicate_ids"), 0);
+});
+
 test("reports unrecognized archive files and ignores metadata", () => {
   const collector = new WarningCollector();
   const feed = loadGtfs(archive({
