@@ -62,20 +62,22 @@ test("map hover displays safe labels, prioritizes stops, and clears sidebar high
     { coordinates: [[1, 2], [3, 4]], approximate: false, variantIndex: 2, label: "Variant A" },
   ]);
   map.events.load();
-  assert.deepEqual(map.sources.stops.data.features[0].properties, { stopId: "stop-1", label: "<Stop>" });
+  assert.deepEqual(map.sources.stops.data.features[0].properties, { stopId: "stop-1", stopIndex: 0, label: "<Stop>" });
   assert.equal(map.sources["route-lines"].data.features[0].properties.label, "Variant A");
   map.features = [
     { layer: { id: "route-hit" }, properties: { label: "Variant A" } },
-    { layer: { id: "stops" }, properties: { stopId: "stop-1", label: "<Stop>" } },
+    { layer: { id: "stops" }, properties: { stopId: "stop-1", stopIndex: 0, label: "<Stop>" } },
   ];
   map.events.mousemove({ point: {}, lngLat: [1, 2] });
   assert.equal(popup.text, "<Stop>");
   assert.equal(popup.visible, true);
   assert.deepEqual(hovered, ["stop-1"]);
+  assert.deepEqual(map.paint["stops:circle-color"][1], ["==", ["get", "stopIndex"], 0]);
   map.features = [{ layer: { id: "route-hit" }, properties: { label: "Variant A" } }];
   map.events.mousemove({ point: {}, lngLat: [2, 3] });
   assert.equal(popup.text, "Variant A");
   assert.deepEqual(hovered, ["stop-1", null]);
+  assert.deepEqual(map.paint["stops:circle-color"][1], ["==", ["get", "stopIndex"], -1]);
   map.events.mouseout();
   assert.equal(popup.visible, false);
   assert.equal(map.canvas.style.cursor, "");
@@ -126,7 +128,7 @@ test("variant highlighting colors only its stops and restores the pinned variant
     { coordinates: [[1, 2], [3, 4]], approximate: true, variantIndex: 1, label: "B", stopIds: ["b", "shared"] },
   ]);
   map.events.load();
-  const highlightedStops = () => map.paint["stops:circle-color"][1][2][1];
+  const highlightedStops = () => map.paint["stops:circle-color"][3][2][1];
   assert.deepEqual(highlightedStops(), []);
   view.highlightVariant(0);
   assert.deepEqual(highlightedStops(), ["a", "shared"]);
@@ -157,24 +159,41 @@ test("click opens stop details and pre-load zoom is applied after fit", () => {
 test("route colors are used by default and can be disabled", () => {
   const view = new MapView({}, () => {}, () => {});
   view.update([], [
-    { coordinates: [[1, 2], [3, 4]], approximate: false, variantIndex: 0, label: "Route", routeId: "r", color: "#aabbcc" },
+    { coordinates: [[1, 2], [3, 4]], approximate: false, variantIndex: 0, label: "Route", routeId: "r", color: "#aabbcc", randomColor: "#234567" },
   ]);
   map.events.load();
   assert.equal(map.sources["route-lines"].data.features[0].properties.color, "#aabbcc");
+  assert.equal(map.sources["route-lines"].data.features[0].properties.randomColor, "#234567");
   assert.deepEqual(map.paint["route-lines:line-color"], ["get", "color"]);
   view.setRouteColors(false);
   assert.equal(map.paint["route-lines:line-color"], "#1554a0");
   assert.equal(map.paint["route-approximations:line-color"], "#1554a0");
   view.setRouteColors(true);
   assert.deepEqual(map.paint["route-lines:line-color"], ["get", "color"]);
+  view.setRandomColors(true);
+  assert.deepEqual(map.paint["route-lines:line-color"], ["get", "randomColor"]);
+  assert.deepEqual(map.paint["route-approximations:line-color"], ["get", "randomColor"]);
+  view.setRandomColors(false);
+  assert.deepEqual(map.paint["route-lines:line-color"], ["get", "color"]);
 });
 
 test("clicking a route line opens compact route details", () => {
   const content = {};
-  const view = new MapView({}, () => {}, () => {}, undefined, (id) => id === "r" ? content : null);
+  const view = new MapView({}, () => {}, () => {}, undefined, (id, index) => id === "r" && index === 4 ? content : null);
   map.events.load();
-  map.features = [{ layer: { id: "route-hit" }, properties: { routeId: "r" } }];
+  map.features = [{ layer: { id: "route-hit" }, properties: { routeId: "r", variantIndex: 4 } }];
   map.events.click({ point: {}, lngLat: [1, 2] });
   assert.equal(detailPopup.content, content);
   assert.equal(detailPopup.visible, true);
+});
+
+test("hovering a stop without an ID changes its color and clears it on mouseout", () => {
+  const view = new MapView({}, () => {}, () => {});
+  view.update([{ id: null, name: "Unnamed", coordinate: [1, 2] }], []);
+  map.events.load();
+  map.features = [{ layer: { id: "stops" }, properties: { stopId: "", stopIndex: 0 } }];
+  map.events.mousemove({ point: {}, lngLat: [1, 2] });
+  assert.deepEqual(map.paint["stops:circle-color"][1], ["==", ["get", "stopIndex"], 0]);
+  map.events.mouseout();
+  assert.deepEqual(map.paint["stops:circle-color"][1], ["==", ["get", "stopIndex"], -1]);
 });

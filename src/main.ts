@@ -106,10 +106,23 @@ app.innerHTML = `
           <select id="map-variant"></select>
           <button id="map-variant-reset" type="button" title="Show all variants" aria-label="Show all variants">X</button>
         </div>
-        <label class="map-option" for="map-route-colors">
-          <input id="map-route-colors" type="checkbox" checked />
-          Use route colors
-        </label>
+        <details class="map-settings">
+          <summary title="Map settings" aria-label="Map settings">⚙</summary>
+          <div class="map-settings-menu">
+            <label class="map-option" for="map-route-colors">
+              <input id="map-route-colors" type="checkbox" checked />
+              Use route colors
+            </label>
+            <label class="map-option" for="map-random-colors">
+              <input id="map-random-colors" type="checkbox" />
+              Use random colors
+            </label>
+            <label class="map-option" for="map-all-stops">
+              <input id="map-all-stops" type="checkbox" />
+              Show all stops
+            </label>
+          </div>
+        </details>
       </div>
       <div class="map-layout">
         <div id="map-canvas" aria-label="Map of transit stops and routes"></div>
@@ -176,6 +189,8 @@ const mapRouteReset = element<HTMLButtonElement>("#map-route-reset");
 const mapVariant = element<HTMLSelectElement>("#map-variant");
 const mapVariantReset = element<HTMLButtonElement>("#map-variant-reset");
 const mapRouteColors = element<HTMLInputElement>("#map-route-colors");
+const mapRandomColors = element<HTMLInputElement>("#map-random-colors");
+const mapAllStops = element<HTMLInputElement>("#map-all-stops");
 const mapClearFilter = element<HTMLButtonElement>("#map-clear-filter");
 const backFromMap = element<HTMLButtonElement>("#back-from-map");
 const mapToTables = element<HTMLButtonElement>("#map-to-tables");
@@ -200,6 +215,7 @@ let mapRouteVariants: RouteVariant[] = [];
 let mapVariantLabels: string[] = [];
 let mapVariantRouteIds: string[] = [];
 let mapVariantColors: (string | null)[] = [];
+let mapVariantRandomColors: string[] = [];
 let pinnedVariant: number | null = null;
 let mapStopsIndex = new Map<string, MapStop>();
 let mapShapesIndex = new Map<string, GtfsRow<"shapes.txt">[]>();
@@ -318,7 +334,7 @@ function routeColor(route: GtfsRow<"routes.txt"> | undefined): string | null {
   return value && /^[\da-f]{6}$/i.test(value) ? `#${value}` : null;
 }
 
-function routeCompactContent(route: GtfsRow<"routes.txt">): HTMLElement {
+function routeCompactContent(route: GtfsRow<"routes.txt">, variantIndex: number | null): HTMLElement {
   const content = document.createElement("div");
   const heading = document.createElement("h3");
   heading.textContent = routeListLabel(route);
@@ -359,7 +375,11 @@ function routeCompactContent(route: GtfsRow<"routes.txt">): HTMLElement {
   mapButton.textContent = "🗺️";
   mapButton.title = "Show route on map";
   mapButton.setAttribute("aria-label", "Show route on map");
-  mapButton.addEventListener("click", () => showRouteMap(route, mapReturn, "all"));
+  mapButton.addEventListener("click", () => {
+    const indices = mapVariantRouteIds.flatMap((id, index) => id === route.fields.route_id ? [index] : []);
+    const localIndex = variantIndex === null ? -1 : indices.indexOf(variantIndex);
+    showRouteMap(route, mapReturn, localIndex < 0 ? "all" : localIndex);
+  });
   content.append(" ", mapButton);
   return content;
 }
@@ -842,9 +862,9 @@ function openMap(returnTo: "table" | "route", title: string): void {
         const stop = stopsById.get(id);
         return stop ? stopContent(stop, true) : null;
       },
-      (id) => {
+      (id, variantIndex) => {
         const route = routesById.get(id);
-        return route ? routeCompactContent(route) : null;
+        return route ? routeCompactContent(route, variantIndex) : null;
       },
       (index) => {
         for (const button of mapSidebar.querySelectorAll<HTMLButtonElement>(".map-variant-label")) {
@@ -852,6 +872,8 @@ function openMap(returnTo: "table" | "route", title: string): void {
         }
       },
     );
+    mapView.setRouteColors(mapRouteColors.checked);
+    mapView.setRandomColors(mapRandomColors.checked);
   } catch (error) {
     mapError.textContent = `Could not initialize the map: ${error instanceof Error ? error.message : "unknown error"}`;
   }
@@ -941,6 +963,7 @@ function prepareRouteMap(routes: GtfsRow<"routes.txt">[]): void {
   mapVariantLabels = [];
   mapVariantRouteIds = [];
   mapVariantColors = [];
+  mapVariantRandomColors = [];
   mapRoutes = routes;
   for (const route of routes) {
     const id = route.fields.route_id;
@@ -955,11 +978,13 @@ function prepareRouteMap(routes: GtfsRow<"routes.txt">[]): void {
     };
     const variants = getRouteVariants(routeFeed, id).variants;
     const routeName = route.fields.route_short_name || route.fields.route_long_name || id;
+    const randomColor = `#${Array.from({ length: 3 }, () => Math.floor(Math.random() * 160 + 32).toString(16).padStart(2, "0")).join("")}`;
     for (const [index, variant] of variants.entries()) {
       mapRouteVariants.push(variant);
       mapVariantLabels.push(`${routeName}: ${variantLabel(variant, index, mapStopsIndex)}`);
       mapVariantRouteIds.push(id);
       mapVariantColors.push(routeColor(route));
+      mapVariantRandomColors.push(randomColor);
     }
   }
   mapSidebar.hidden = false;
@@ -973,10 +998,11 @@ function prepareRouteMap(routes: GtfsRow<"routes.txt">[]): void {
   for (const [index, route] of mapRoutes.entries()) {
     const option = document.createElement("option");
     option.value = String(index);
-    option.textContent = routeListLabel(route);
+    const shortName = routeListLabel(route);
+    const longName = route.fields.route_long_name;
+    option.textContent = longName && longName !== shortName ? `${shortName} — ${longName}` : shortName;
     mapRoute.append(option);
   }
-  mapRouteColors.checked = true;
 }
 
 function populateMapVariants(): void {
@@ -1000,15 +1026,12 @@ function renderRouteMap(): void {
   if (!feed) return;
   const selectedRoute = mapRoute.value === "all" ? undefined : mapRoutes[Number(mapRoute.value)];
   mapHeading.textContent = selectedRoute ? `Route map: ${routeListLabel(selectedRoute)}` : "Routes map";
+  mapRouteReset.disabled = mapRoute.value === "all";
+  mapVariantReset.disabled = mapVariant.value === "all";
   mapSidebar.replaceChildren();
   stopListItems.clear();
   highlightedStopItems = [];
   pinnedVariant = null;
-  if (!mapRouteVariants.length) {
-    mapSummary.textContent = "No route variants are available.";
-    mapView?.update([], []);
-    return;
-  }
   const routeId = mapRoute.value === "all" ? null : mapRoutes[Number(mapRoute.value)]?.fields.route_id;
   const selected = mapVariant.value === "all"
     ? mapVariantRouteIds.flatMap((id, index) => routeId === null || id === routeId ? [index] : [])
@@ -1044,6 +1067,7 @@ function renderRouteMap(): void {
       label,
       routeId: mapVariantRouteIds[index],
       color: mapVariantColors[index] ?? undefined,
+      randomColor: mapVariantRandomColors[index],
       stopIds: data.stops.flatMap((stop) => stop.id ? [stop.id] : []),
     });
     if (data.approximate) {
@@ -1076,17 +1100,20 @@ function renderRouteMap(): void {
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "map-stop-list-toggle";
-    toggle.textContent = "V";
-    toggle.title = "Collapse stop list";
-    toggle.setAttribute("aria-label", `Collapse stop list for ${label}`);
+    toggle.textContent = "▾";
+    toggle.title = "Collapse all stop lists";
+    toggle.setAttribute("aria-label", "Collapse all stop lists");
     toggle.setAttribute("aria-expanded", "true");
     toggle.addEventListener("click", () => {
-      list.hidden = !list.hidden;
-      const action = list.hidden ? "Expand" : "Collapse";
-      toggle.textContent = list.hidden ? ">" : "V";
-      toggle.title = `${action} stop list`;
-      toggle.setAttribute("aria-label", `${action} stop list for ${label}`);
-      toggle.setAttribute("aria-expanded", String(!list.hidden));
+      const collapse = [...mapSidebar.querySelectorAll<HTMLOListElement>("section > ol")].some((item) => !item.hidden);
+      for (const item of mapSidebar.querySelectorAll<HTMLOListElement>("section > ol")) item.hidden = collapse;
+      const action = collapse ? "Expand" : "Collapse";
+      for (const button of mapSidebar.querySelectorAll<HTMLButtonElement>(".map-stop-list-toggle")) {
+        button.textContent = collapse ? "▸" : "▾";
+        button.title = `${action} all stop lists`;
+        button.setAttribute("aria-label", `${action} all stop lists`);
+        button.setAttribute("aria-expanded", String(!collapse));
+      }
     });
     heading.append(toggle, variantButton);
     section.append(heading);
@@ -1121,7 +1148,8 @@ function renderRouteMap(): void {
         const details = document.createElement("button");
         details.type = "button";
         details.className = "stop-details-link";
-        details.textContent = "Details";
+        details.textContent = "...";
+        details.title = `Open details for ${stopLabel}`;
         details.setAttribute("aria-label", `Open details for ${stopLabel}`);
         details.addEventListener("click", () => showStop(row, "map"));
         item.append(" ", details);
@@ -1144,8 +1172,13 @@ function renderRouteMap(): void {
   }
   const missing = allStops.filter((stop) => !stop.coordinate).length;
   if (missing) warnings.push(`${missing} stop ${missing === 1 ? "location is" : "locations are"} unavailable.`);
-  mapSummary.textContent = warnings.join(" ") || `${selected.length} ${selected.length === 1 ? "variant" : "variants"} shown.`;
-  mapView?.update(allStops.map((stop) => ({
+  mapSummary.textContent = warnings.join(" ") || (mapRouteVariants.length
+    ? `${selected.length} ${selected.length === 1 ? "variant" : "variants"} shown.`
+    : "No route variants are available.");
+  const displayedStops = mapAllStops.checked
+    ? (feed.tables.find((table) => table.kind === "stops.txt")?.rows ?? []).map(mapStop)
+    : allStops;
+  mapView?.update(displayedStops.map((stop) => ({
     ...stop,
     hoverLabel: stop.id && stopLabels.has(stop.id)
       ? `${stop.name?.trim() || stop.id} — ${stopLabels.get(stop.id)!.length > 5
@@ -1305,7 +1338,17 @@ mapVariantReset.addEventListener("click", () => {
   mapVariant.value = "all";
   renderRouteMap();
 });
-mapRouteColors.addEventListener("change", () => mapView?.setRouteColors(mapRouteColors.checked));
+mapRouteColors.addEventListener("change", () => {
+  if (mapRouteColors.checked) mapRandomColors.checked = false;
+  mapView?.setRouteColors(mapRouteColors.checked);
+  mapView?.setRandomColors(mapRandomColors.checked);
+});
+mapRandomColors.addEventListener("change", () => {
+  if (mapRandomColors.checked) mapRouteColors.checked = false;
+  mapView?.setRouteColors(mapRouteColors.checked);
+  mapView?.setRandomColors(mapRandomColors.checked);
+});
+mapAllStops.addEventListener("change", renderRouteMap);
 mapClearFilter.addEventListener("click", () => {
   tableSearch.value = "";
   page = 0;
