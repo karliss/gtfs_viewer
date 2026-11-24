@@ -1,10 +1,61 @@
-import { LngLatBounds, Map as LibreMap, NavigationControl, Popup, setWorkerUrl, type GeoJSONSource } from "maplibre-gl";
+import {
+  LngLatBounds,
+  Map as LibreMap,
+  NavigationControl,
+  Popup,
+  setWorkerUrl,
+  type GeoJSONSource,
+  type SourceSpecification,
+} from "maplibre-gl";
 import type { Feature, FeatureCollection, LineString, Point } from "geojson";
 import mapWorker from "../dist/map-worker.txt";
 import type { Coordinate, MapStop } from "./map-data";
 
 const workerUrl = URL.createObjectURL(new Blob([mapWorker], { type: "text/javascript" }));
 setWorkerUrl(workerUrl);
+
+export type MapBaseLayerId = "none" | "osm" | "osm-humanitarian";
+
+export interface MapBaseLayerOption {
+  id: MapBaseLayerId;
+  label: string;
+  source?: {
+    tiles: string[];
+    tileSize: number;
+    maxzoom: number;
+    attribution: string;
+  };
+}
+
+export const MAP_BASE_LAYERS: readonly MapBaseLayerOption[] = [
+  { id: "none", label: "None" },
+  {
+    id: "osm",
+    label: "OpenStreetMap",
+    source: {
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    },
+  },
+  {
+    id: "osm-humanitarian",
+    label: "OpenStreetMap Humanitarian",
+    source: {
+      tiles: ["https://tile.openstreetmap.fr/hot/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.hotosm.org/">Humanitarian OpenStreetMap Team</a>',
+    },
+  },
+];
+
+export function defaultMapBaseLayer(hostname: string = typeof window === "undefined" ? "" : window.location.hostname): MapBaseLayerId {
+  const isLocal = hostname === "" || hostname === "localhost" || hostname.endsWith(".localhost")
+    || hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "[::1]";
+  return isLocal ? "none" : "osm";
+}
 
 export interface MapLine {
   coordinates: Coordinate[];
@@ -33,6 +84,8 @@ export class MapView {
   private stopSizeReduced = false;
   private stopOrderEnabled = false;
   private stopOrderVariant: number | null = null;
+  private baseLayer: MapBaseLayerId;
+  private container: HTMLElement;
   private popup: Popup;
   private detailPopup: Popup;
   private pendingZoom: Coordinate | null = null;
@@ -44,23 +97,34 @@ export class MapView {
     stopDetails?: (stopId: string) => HTMLElement | null,
     routeDetails?: (routeId: string, variantIndex: number | null) => HTMLElement | null,
     onVariantHover?: (index: number | null) => void,
+    baseLayer: MapBaseLayerId = defaultMapBaseLayer(),
   ) {
+    this.container = container;
+    this.baseLayer = baseLayer;
+    const baseLayerOption = MAP_BASE_LAYERS.find((option) => option.id === baseLayer);
+    const sources: Record<string, SourceSpecification> = {};
+    for (const layer of MAP_BASE_LAYERS) {
+      if (!layer.source) continue;
+      sources[layer.id] = {
+        type: "raster",
+        tiles: layer.source.tiles,
+        tileSize: layer.source.tileSize,
+        maxzoom: layer.source.maxzoom,
+        attribution: layer.source.attribution,
+      };
+    }
+    const layers = baseLayerOption?.source
+      ? [{ id: "basemap", type: "raster" as const, source: baseLayer }]
+      : [];
+    container.classList?.toggle("map-canvas--no-basemap", baseLayer === "none");
     this.map = new LibreMap({
       container,
       center: [0, 0],
       zoom: 1,
       style: {
         version: 8,
-        sources: {
-          osm: {
-            type: "raster",
-            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-            tileSize: 256,
-            maxzoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-          },
-        },
-        layers: [{ id: "basemap", type: "raster", source: "osm" }],
+        sources,
+        layers,
       },
     });
     this.popup = new Popup({ closeButton: false, closeOnClick: false });
@@ -68,6 +132,12 @@ export class MapView {
     this.map.addControl(new NavigationControl(), "top-right");
     this.map.on("error", (event) => onError(`Map or basemap error: ${event.error.message}`));
     this.map.on("load", () => {
+      this.map.addSource("grid", { type: "geojson", data: this.gridFeatures() });
+      this.map.addLayer({
+        id: "grid", type: "line", source: "grid",
+        layout: { "line-join": "round", "visibility": this.baseLayer === "none" ? "visible" : "none" },
+        paint: { "line-color": "#b7c0cc", "line-width": 1, "line-opacity": 0.75 },
+      });
       this.map.addSource("route-lines", { type: "geojson", data: this.lineFeatures() });
       this.map.addLayer({
         id: "route-lines", type: "line", source: "route-lines", filter: ["==", ["get", "approximate"], false],
@@ -131,6 +201,9 @@ export class MapView {
         this.zoomTo(this.pendingZoom);
         this.pendingZoom = null;
       }
+    });
+    this.map.on("moveend", () => {
+      if (this.loaded) this.updateGrid();
     });
     this.map.on("mousemove", (event) => {
       if (!this.loaded) return;
@@ -247,6 +320,55 @@ export class MapView {
       (this.map.getSource("stops") as GeoJSONSource).setData(this.stopFeatures());
       this.applyStopOrder();
     }
+  }
+
+  setBaseLayer(id: MapBaseLayerId): void {
+    if (id === this.baseLayer) return;
+    const option = MAP_BASE_LAYERS.find((candidate) => candidate.id === id);
+    if (!option) return;
+    this.baseLayer = id;
+    this.container.classList?.toggle("map-canvas--no-basemap", id === "none");
+    if (!this.loaded) return;
+    this.map.setLayoutProperty("grid", "visibility", id === "none" ? "visible" : "none");
+    if (this.map.getLayer("basemap")) this.map.removeLayer("basemap");
+    if (option.source) {
+      this.map.addLayer({ id: "basemap", type: "raster", source: id }, "route-lines");
+    }
+  }
+
+  private updateGrid(): void {
+    if (!this.loaded) return;
+    (this.map.getSource("grid") as GeoJSONSource).setData(this.gridFeatures());
+  }
+
+  private gridFeatures(): FeatureCollection<LineString> {
+    const bounds = typeof this.map.getBounds === "function"
+      ? this.map.getBounds()
+      : null;
+    const west = bounds ? Math.max(-180, bounds.getWest()) : -180;
+    const east = bounds ? Math.min(180, bounds.getEast()) : 180;
+    const south = bounds ? Math.max(-85, bounds.getSouth()) : -85;
+    const north = bounds ? Math.min(85, bounds.getNorth()) : 85;
+    const zoom = this.map.getZoom();
+    let interval = 180 / Math.pow(2, Math.max(0, zoom));
+    if (interval < 0.000001) interval = 0.000001;
+
+    const features: Feature<LineString>[] = [];
+    for (let lon = Math.floor(west / interval) * interval; lon <= east; lon += interval) {
+      features.push({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "LineString", coordinates: [[lon, south], [lon, north]] },
+      });
+    }
+    for (let lat = Math.floor(south / interval) * interval; lat <= north; lat += interval) {
+      features.push({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "LineString", coordinates: [[west, lat], [east, lat]] },
+      });
+    }
+    return { type: "FeatureCollection", features };
   }
 
   hoverVariant(index: number | null): void {
