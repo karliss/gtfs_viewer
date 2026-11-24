@@ -75,6 +75,7 @@ export class MapView {
   private lines: MapLine[] = [];
   private highlighted: Coordinate | null = null;
   private highlightedVariant: number | null = null;
+  private selectedVariant: number | null = null;
   private hoveredVariant: number | null = null;
   private mapHoveredVariant: number | null = null;
   private hoveredStop: string | null = null;
@@ -85,10 +86,13 @@ export class MapView {
   private stopOrderEnabled = false;
   private stopOrderVariant: number | null = null;
   private baseLayer: MapBaseLayerId;
+  private rasterBlackAndWhite = false;
   private container: HTMLElement;
   private popup: Popup;
   private detailPopup: Popup;
   private pendingZoom: Coordinate | null = null;
+  private pendingStopPopup: { coordinate: Coordinate; stopId: string } | null = null;
+  private stopDetailsCallback: ((stopId: string) => HTMLElement | null) | undefined;
 
   constructor(
     container: HTMLElement,
@@ -98,9 +102,12 @@ export class MapView {
     routeDetails?: (routeId: string, variantIndex: number | null) => HTMLElement | null,
     onVariantHover?: (index: number | null) => void,
     baseLayer: MapBaseLayerId = defaultMapBaseLayer(),
+    rasterBlackAndWhite = false,
   ) {
     this.container = container;
     this.baseLayer = baseLayer;
+    this.rasterBlackAndWhite = rasterBlackAndWhite;
+    this.stopDetailsCallback = stopDetails;
     const baseLayerOption = MAP_BASE_LAYERS.find((option) => option.id === baseLayer);
     const sources: Record<string, SourceSpecification> = {};
     for (const layer of MAP_BASE_LAYERS) {
@@ -114,7 +121,12 @@ export class MapView {
       };
     }
     const layers = baseLayerOption?.source
-      ? [{ id: "basemap", type: "raster" as const, source: baseLayer }]
+      ? [{
+        id: "basemap",
+        type: "raster" as const,
+        source: baseLayer,
+        ...(rasterBlackAndWhite ? { paint: { "raster-saturation": -1 } } : {}),
+      }]
       : [];
     container.classList?.toggle("map-canvas--no-basemap", baseLayer === "none");
     this.map = new LibreMap({
@@ -201,6 +213,10 @@ export class MapView {
         this.zoomTo(this.pendingZoom);
         this.pendingZoom = null;
       }
+      if (this.pendingStopPopup) {
+        this.showStopPopup(this.pendingStopPopup.stopId, this.pendingStopPopup.coordinate);
+        this.pendingStopPopup = null;
+      }
     });
     this.map.on("moveend", () => {
       if (this.loaded) this.updateGrid();
@@ -268,6 +284,7 @@ export class MapView {
     this.lines = lines;
     this.highlighted = null;
     this.highlightedVariant = null;
+    this.selectedVariant = null;
     this.hoveredVariant = null;
     this.mapHoveredVariant = null;
     this.pendingZoom = null;
@@ -289,6 +306,11 @@ export class MapView {
 
   highlightVariant(index: number | null): void {
     this.highlightedVariant = index;
+    if (this.loaded) this.applyVariantHighlight();
+  }
+
+  setSelectedVariant(index: number | null): void {
+    this.selectedVariant = index;
     if (this.loaded) this.applyVariantHighlight();
   }
 
@@ -332,7 +354,20 @@ export class MapView {
     this.map.setLayoutProperty("grid", "visibility", id === "none" ? "visible" : "none");
     if (this.map.getLayer("basemap")) this.map.removeLayer("basemap");
     if (option.source) {
-      this.map.addLayer({ id: "basemap", type: "raster", source: id }, "route-lines");
+      this.map.addLayer({
+        id: "basemap",
+        type: "raster",
+        source: id,
+        ...(this.rasterBlackAndWhite ? { paint: { "raster-saturation": -1 } } : {}),
+      }, "route-lines");
+    }
+  }
+
+  setRasterBlackAndWhite(enabled: boolean): void {
+    this.rasterBlackAndWhite = enabled;
+    if (!this.loaded) return;
+    if (this.map.getLayer("basemap")) {
+      this.map.setPaintProperty("basemap", "raster-saturation", enabled ? -1 : 0);
     }
   }
 
@@ -390,6 +425,17 @@ export class MapView {
     this.map.easeTo({ center: coordinate, zoom: Math.max(this.map.getZoom(), 16) });
   }
 
+  showStopPopup(stopId: string, coordinate: Coordinate): void {
+    this.zoomTo(coordinate);
+    const content = this.stopDetailsCallback?.(stopId);
+    if (!content) return;
+    if (!this.loaded) {
+      this.pendingStopPopup = { coordinate, stopId };
+      return;
+    }
+    this.detailPopup.setLngLat(coordinate).setDOMContent(content).addTo(this.map);
+  }
+
   resize(): void {
     this.map.resize();
   }
@@ -441,10 +487,11 @@ export class MapView {
   }
 
   private applyVariantHighlight(): void {
-    const index = this.hoveredVariant ?? this.highlightedVariant ?? -1;
-    this.map.setFilter("route-highlight", ["all", ["==", ["get", "approximate"], false], ["==", ["get", "variantIndex"], index]]);
-    this.map.setFilter("route-approximation-highlight", ["all", ["==", ["get", "approximate"], true], ["==", ["get", "variantIndex"], index]]);
-    const stopIds = [...new Set(this.lines.filter((line) => line.variantIndex === index).flatMap((line) => line.stopIds ?? []))];
+    const highlightedIndex = this.hoveredVariant ?? this.highlightedVariant ?? -1;
+    this.map.setFilter("route-highlight", ["all", ["==", ["get", "approximate"], false], ["==", ["get", "variantIndex"], highlightedIndex]]);
+    this.map.setFilter("route-approximation-highlight", ["all", ["==", ["get", "approximate"], true], ["==", ["get", "variantIndex"], highlightedIndex]]);
+    const stopVariantIndex = this.hoveredVariant ?? this.highlightedVariant ?? this.selectedVariant ?? -1;
+    const stopIds = [...new Set(this.lines.filter((line) => line.variantIndex === stopVariantIndex).flatMap((line) => line.stopIds ?? []))];
     this.map.setPaintProperty("stops", "circle-color", [
       "case", ["==", ["get", "stopIndex"], this.hoveredStopIndex ?? -1], "#fff",
       ["in", ["get", "stopId"], ["literal", stopIds]], "#fff", "#fff",
@@ -453,10 +500,11 @@ export class MapView {
       "case", ["==", ["get", "stopIndex"], this.hoveredStopIndex ?? -1], "#b33a08",
       ["in", ["get", "stopId"], ["literal", stopIds]], "#e95e21", "#1554a0",
     ]);
-    const lastStopId = this.highlightedVariant === null
+    const finalStopVariant = this.hoveredVariant ?? this.highlightedVariant ?? this.selectedVariant;
+    const lastStopId = finalStopVariant === null
       ? null
       : (() => {
-        const stopIds = this.lines.find((line) => line.variantIndex === this.highlightedVariant)?.stopIds;
+        const stopIds = this.lines.find((line) => line.variantIndex === finalStopVariant)?.stopIds;
         return stopIds?.length ? stopIds[stopIds.length - 1] : null;
       })();
     this.map.setFilter("stop-last-dot", ["==", ["get", "stopId"], lastStopId ?? "__no_variant_last_stop__"]);
