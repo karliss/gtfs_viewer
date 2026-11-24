@@ -1,11 +1,11 @@
 import {
-  decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, summarizeTripField,
+  decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, summarizeTripField,
   getVariantTimetable, formatTimetableDayRange,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
 import type { WorkerResponse } from "./gtfs-worker";
-import { indexShapes, indexStopRoutes, indexStops, mapStop, variantLabel, variantMapData, type MapStop } from "./map-data";
+import { mapStop, variantLabel, variantMapData, type MapStop } from "./map-data";
 import {
   defaultMapBaseLayer,
   MAP_BASE_LAYERS,
@@ -803,9 +803,8 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     description.textContent = JSON.stringify(route.extraValues);
     list.append(term, description);
   }
-  const tripsTable = feed.tables.find((candidate) => candidate.kind === "trips.txt");
   const trips = route.fields.route_id
-    ? tripsTable?.rows.filter((trip) => trip.fields.route_id === route.fields.route_id) ?? []
+    ? feed.indexes.tripsByRouteId.get(route.fields.route_id) ?? []
     : [];
   for (const field of ["wheelchair_accessible", "bikes_allowed"] as const) {
     const term = document.createElement("dt");
@@ -822,8 +821,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     `${variants.length} ${variants.length === 1 ? "variant" : "variants"} · `
     + `${tripsCount} ${tripsCount === 1 ? "trip references" : "trips reference"} this route.`;
   routeTrips.hidden = !route.fields.route_id || !feed.tables.some((table) => table.kind === "trips.txt");
-  const stopsTable = feed.tables.find((table) => table.kind === "stops.txt");
-  const stopNames = new Map(stopsTable?.rows.map(({ fields }) => [fields.stop_id, fields.stop_name]));
+  const stopNames = new Map([...stopsById].map(([id, stop]) => [id, stop.fields.stop_name]));
   routeVariants.replaceChildren();
   routeStopList.replaceChildren();
   if (variants.length === 0) {
@@ -1331,28 +1329,22 @@ function showAllRoutesMap(): void {
 
 function prepareRouteMap(routes: GtfsRow<"routes.txt">[]): void {
   if (!feed) return;
-  const trips = feed.tables.find((candidate) => candidate.kind === "trips.txt");
-  const times = feed.tables.find((candidate) => candidate.kind === "stop_times.txt");
-  const tripsByRoute = new Map<string, GtfsRow<"trips.txt">[]>();
-  const routeByTrip = new Map<string, string>();
-  for (const trip of trips?.rows ?? []) {
-    const { route_id, trip_id } = trip.fields;
-    if (!route_id) continue;
-    const rows = tripsByRoute.get(route_id) ?? [];
-    rows.push(trip);
-    tripsByRoute.set(route_id, rows);
-    if (trip_id) routeByTrip.set(trip_id, route_id);
-  }
+  const currentFeed = feed;
   const timesByRoute = new Map<string, GtfsRow<"stop_times.txt">[]>();
-  for (const time of times?.rows ?? []) {
-    const routeId = time.fields.trip_id && routeByTrip.get(time.fields.trip_id);
-    if (!routeId) continue;
-    const rows = timesByRoute.get(routeId) ?? [];
-    rows.push(time);
-    timesByRoute.set(routeId, rows);
+  for (const [routeId, trips] of currentFeed.indexes.tripsByRouteId) {
+    for (const trip of trips) {
+      if (trip.fields.trip_id) {
+        const rows = timesByRoute.get(routeId) ?? [];
+        rows.push(...(currentFeed.indexes.stopTimesByTripId.get(trip.fields.trip_id) ?? []));
+        timesByRoute.set(routeId, rows);
+      }
+    }
   }
-  mapStopsIndex = indexStops(feed);
-  mapShapesIndex = indexShapes(feed);
+  mapStopsIndex = new Map();
+  for (const [stopId, row] of currentFeed.indexes.stopsById) {
+    mapStopsIndex.set(stopId, mapStop(row));
+  }
+  mapShapesIndex = currentFeed.indexes.shapesById;
   mapRouteVariants = [];
   mapVariantLabels = [];
   mapVariantRouteIds = [];
@@ -1363,9 +1355,9 @@ function prepareRouteMap(routes: GtfsRow<"routes.txt">[]): void {
     const id = route.fields.route_id;
     if (!id) continue;
     const routeFeed: GtfsFeed = {
-      ...feed,
-      tables: feed.tables.map((candidate) => {
-        if (candidate.kind === "trips.txt") return { ...candidate, rows: tripsByRoute.get(id) ?? [] };
+      ...currentFeed,
+      tables: currentFeed.tables.map((candidate) => {
+        if (candidate.kind === "trips.txt") return { ...candidate, rows: currentFeed.indexes.tripsByRouteId.get(id) ?? [] };
         if (candidate.kind === "stop_times.txt") return { ...candidate, rows: timesByRoute.get(id) ?? [] };
         return candidate;
       }),
@@ -1604,6 +1596,9 @@ function loadFeed(file: File): Promise<GtfsFeed> {
         if (progress.phase === "extracting") {
           loadingProgress.value = progress.completed ? 10 : 5;
           status.textContent = progress.completed ? "Archive extracted." : "Extracting GTFS archive…";
+        } else if (progress.phase === "indexing") {
+          loadingProgress.value = progress.completed ? 100 : 95;
+          status.textContent = progress.completed ? "GTFS indexes built." : "Building GTFS indexes…";
         } else {
           const percent = progress.total > 0
             ? 10 + Math.round(progress.completed / progress.total * 85)
@@ -1675,19 +1670,10 @@ form.addEventListener("submit", async (event) => {
     warningCollector.replace(feed.warnings ?? []);
     feed.warnings = [...warningCollector.all];
     if (historyControls) historyControls.hidden = false;
-    routesById = indexRoutes(feed);
-    const agencies = feed.tables.find((table) => table.kind === "agency.txt");
-    for (const agency of agencies?.rows ?? []) {
-      if (agency.fields.agency_id && !agenciesById.has(agency.fields.agency_id)) {
-        agenciesById.set(agency.fields.agency_id, agency);
-      }
-    }
-    stopsById = new Map();
-    const stops = feed.tables.find((table) => table.kind === "stops.txt");
-    for (const stop of stops?.rows ?? []) {
-      if (stop.fields.stop_id && !stopsById.has(stop.fields.stop_id)) stopsById.set(stop.fields.stop_id, stop);
-    }
-    routesByStop = indexStopRoutes(feed);
+    routesById = feed.indexes.routesById;
+    agenciesById = feed.indexes.agenciesById;
+    stopsById = feed.indexes.stopsById;
+    routesByStop = feed.indexes.routesByStopId;
     tableSelect.replaceChildren(...feed.tables.map((table) => {
       const option = document.createElement("option");
       option.textContent = table.name;
@@ -1785,7 +1771,7 @@ routeTrips.addEventListener("click", () => {
   if (!table) return;
   const routeId = currentRoute.fields.route_id;
   showFilteredTable(
-    { ...table, rows: table.rows.filter((row) => row.fields.route_id === routeId) },
+    { ...table, rows: feed.indexes.tripsByRouteId.get(routeId) ?? [] },
     `Showing trips for route ${routeId}.`,
   );
 });

@@ -2,7 +2,15 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const { getMatchingRows, getRouteVariants, loadGtfs } = require("../dist/gtfs.cjs");
-const { coordinate, indexShapes, indexStopRoutes, indexStops, mapStop, variantMapData } = require("../dist/map-data.cjs");
+const { coordinate, mapStop, variantMapData } = require("../dist/map-data.cjs");
+
+function shapeIndex(feed) {
+  return feed.indexes.shapesById;
+}
+
+function stopIndex(feed) {
+  return new Map([...feed.indexes.stopsById].map(([id, row]) => [id, mapStop(row)]));
+}
 
 function feedFrom(files) {
   return loadGtfs(zipSync(Object.fromEntries(
@@ -23,7 +31,7 @@ test("stop routes join stop times to trips and deduplicate route IDs", () => {
     "trips.txt": "route_id,trip_id\nr1,t1\nr1,t2\nr2,t3\n",
     "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,s,1\nt1,s,2\nt2,s,1\nt3,s,1\nunknown,s,2\nt3,other,2\n",
   });
-  const routes = indexStopRoutes(feed);
+  const routes = feed.indexes.routesByStopId;
   assert.deepEqual(routes.get("s"), ["r1", "r2"]);
   assert.deepEqual(routes.get("other"), ["r2"]);
   assert.equal(routes.has("unknown"), false);
@@ -48,7 +56,7 @@ test("variant geometry orders shape points and retains repeated and missing stop
     "shapes.txt": "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\ns,12,22,10\ns,10,20,2\ns,99,4,3\ns,11,21,bad\n",
   });
   const variant = getRouteVariants(feed, "r").variants[0];
-  const data = variantMapData(indexShapes(feed), variant, indexStops(feed));
+  const data = variantMapData(shapeIndex(feed), variant, stopIndex(feed));
   assert.deepEqual(data.line, [[20, 10], [22, 12]]);
   assert.equal(data.approximate, false);
   assert.equal(data.invalidShapePoints, 2);
@@ -64,9 +72,9 @@ test("missing or unusable shape uses located stops for a dashed approximation", 
     "shapes.txt": "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\ns,1,2,0\n",
   });
   const variant = getRouteVariants(feed, "r").variants[0];
-  const data = variantMapData(indexShapes(feed), variant, indexStops(feed));
+  const data = variantMapData(shapeIndex(feed), variant, stopIndex(feed));
   assert.equal(data.approximate, true);
   assert.deepEqual(data.line, [[2, 1], [4, 3]]);
   variant.stops = ["c"];
-  assert.deepEqual(variantMapData(indexShapes(feed), variant, indexStops(feed)).line, []);
+  assert.deepEqual(variantMapData(shapeIndex(feed), variant, stopIndex(feed)).line, []);
 });
