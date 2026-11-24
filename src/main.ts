@@ -853,6 +853,10 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
         popular.textContent = `Popular days: ${formatTimetableDayRange(timetable.popularDays)}`;
         timetableDetails.append(popular);
       }
+      const raw = document.createElement("pre");
+      raw.className = "timetable-data";
+      raw.textContent = JSON.stringify(timetable, null, 2);
+      timetableDetails.append(raw);
       if (timetable.rows.length === 0) {
         const message = document.createElement("p");
         message.textContent = "No timetable times found for this variant.";
