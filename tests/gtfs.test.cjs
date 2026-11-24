@@ -79,6 +79,38 @@ test("uses a single 1-5 popular day set for weekday-only trips", () => {
   ]);
 });
 
+test("trims calendar weekday values in a single-trip timetable", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,service_id,shape_id\n"
+      + "r,weekday,weekday-service,s\n",
+    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\n"
+      + "weekday,07:20:00,a,1\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "weekday-service, 1 ,1,1,1,1,0,0,20260101,20261231\n",
+  }));
+  const variant = getRouteVariants(feed, "r").variants[0];
+  const timetable = getVariantTimetable(feed, variant);
+  assert.deepEqual(timetable.popularDays, [[1, 2, 3, 4, 5]]);
+  assert.equal(formatTimetableDayRange(timetable.popularDays[0]), "1-5");
+});
+
+test("preserves valid single-trip masks outside the weekday and weekend splits", () => {
+  for (const [name, monday, tuesday, wednesday, thursday, friday, saturday, sunday, expected] of [
+    ["one-to-six", "1", "1", "1", "1", "1", "1", "0", [1, 2, 3, 4, 5, 6]],
+    ["one-two-seven", "1", "1", "0", "0", "0", "0", "1", [1, 2, 7]],
+  ]) {
+    const feed = loadGtfs(archive({
+      "trips.txt": `route_id,trip_id,service_id,shape_id\nr,trip,service,s\n`,
+      "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\ntrip,07:20:00,a,1\n",
+      "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+        + `service,${monday},${tuesday},${wednesday},${thursday},${friday},${saturday},${sunday},20260101,20261231\n`,
+    }));
+    const variant = getRouteVariants(feed, "r").variants[0];
+    const timetable = getVariantTimetable(feed, variant);
+    assert.deepEqual(timetable.popularDays, [expected], name);
+  }
+});
+
 test("uses all seven days when trips have times but no usable calendar masks", () => {
   const feed = loadGtfs(archive({
     "trips.txt": "route_id,trip_id,service_id,shape_id\n"

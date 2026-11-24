@@ -148,17 +148,19 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
   const tripIds = new Set(variant.trips.flatMap((trip) => trip.fields.trip_id ? [trip.fields.trip_id] : []));
 
   const daySetForService = (serviceId: string | null): number[] | null => {
-    if (!serviceId) return null;
-    const row = calendar?.rows.find((candidate) => candidate.fields.service_id === serviceId);
+    const normalizedServiceId = serviceId?.trim();
+    if (!normalizedServiceId) return null;
+    const row = calendar?.rows.find((candidate) =>
+      candidate.fields.service_id?.trim() === normalizedServiceId);
     if (!row) return null;
     return [
-      row.fields.monday === "1" ? 1 : null,
-      row.fields.tuesday === "1" ? 2 : null,
-      row.fields.wednesday === "1" ? 3 : null,
-      row.fields.thursday === "1" ? 4 : null,
-      row.fields.friday === "1" ? 5 : null,
-      row.fields.saturday === "1" ? 6 : null,
-      row.fields.sunday === "1" ? 7 : null,
+      row.fields.monday?.trim() === "1" ? 1 : null,
+      row.fields.tuesday?.trim() === "1" ? 2 : null,
+      row.fields.wednesday?.trim() === "1" ? 3 : null,
+      row.fields.thursday?.trim() === "1" ? 4 : null,
+      row.fields.friday?.trim() === "1" ? 5 : null,
+      row.fields.saturday?.trim() === "1" ? 6 : null,
+      row.fields.sunday?.trim() === "1" ? 7 : null,
     ].filter((day): day is number => day !== null);
   };
 
