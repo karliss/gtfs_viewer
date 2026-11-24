@@ -13,6 +13,7 @@ export interface MapLine {
   label: string;
   routeId?: string;
   color?: string;
+  randomColor?: string;
   stopIds?: string[];
 }
 
@@ -26,7 +27,9 @@ export class MapView {
   private hoveredVariant: number | null = null;
   private mapHoveredVariant: number | null = null;
   private hoveredStop: string | null = null;
+  private hoveredStopIndex: number | null = null;
   private routeColorsEnabled = true;
+  private randomColorsEnabled = false;
   private popup: Popup;
   private detailPopup: Popup;
   private pendingZoom: Coordinate | null = null;
@@ -36,7 +39,7 @@ export class MapView {
     onError: (message: string) => void,
     onStopHover: (stopId: string | null) => void,
     stopDetails?: (stopId: string) => HTMLElement | null,
-    routeDetails?: (routeId: string) => HTMLElement | null,
+    routeDetails?: (routeId: string, variantIndex: number | null) => HTMLElement | null,
     onVariantHover?: (index: number | null) => void,
   ) {
     this.map = new LibreMap({
@@ -112,6 +115,7 @@ export class MapView {
       const feature = stop ?? line;
       this.map.getCanvas().style.cursor = feature ? "pointer" : "";
       const stopId = stop?.properties?.stopId || null;
+      const stopIndex = typeof stop?.properties?.stopIndex === "number" ? stop.properties.stopIndex : null;
       const variant = !stop && line && typeof line.properties?.variantIndex === "number"
         ? line.properties.variantIndex : null;
       if (variant !== this.mapHoveredVariant) {
@@ -119,6 +123,10 @@ export class MapView {
         onVariantHover?.(variant);
       }
       this.hoverVariant(variant);
+      if (stopIndex !== this.hoveredStopIndex) {
+        this.hoveredStopIndex = stopIndex;
+        this.applyVariantHighlight();
+      }
       if (stopId !== this.hoveredStop) {
         this.hoveredStop = stopId;
         onStopHover(stopId);
@@ -133,11 +141,13 @@ export class MapView {
       this.popup.remove();
       this.map.getCanvas().style.cursor = "";
       this.hoveredStop = null;
+      this.hoveredStopIndex = null;
       if (this.mapHoveredVariant !== null) {
         this.mapHoveredVariant = null;
         onVariantHover?.(null);
       }
       this.hoverVariant(null);
+      if (this.loaded) this.applyVariantHighlight();
       onStopHover(null);
     });
     this.map.on("click", (event) => {
@@ -147,9 +157,10 @@ export class MapView {
       const route = features.find((feature) => feature.layer.id === "route-hit");
       const stopId = stop?.properties?.stopId;
       const routeId = route?.properties?.routeId;
+      const variantIndex = typeof route?.properties?.variantIndex === "number" ? route.properties.variantIndex : null;
       const content = stopId && stopDetails
         ? stopDetails(String(stopId))
-        : routeId && routeDetails ? routeDetails(String(routeId)) : null;
+        : !stop && routeId && routeDetails ? routeDetails(String(routeId), variantIndex) : null;
       if (content) this.detailPopup.setLngLat(event.lngLat).setDOMContent(content).addTo(this.map);
     });
   }
@@ -163,6 +174,7 @@ export class MapView {
     this.mapHoveredVariant = null;
     this.pendingZoom = null;
     this.hoveredStop = null;
+    this.hoveredStopIndex = null;
     this.popup.remove();
     this.detailPopup.remove();
     if (this.loaded) {
@@ -182,6 +194,11 @@ export class MapView {
 
   setRouteColors(enabled: boolean): void {
     this.routeColorsEnabled = enabled;
+    if (this.loaded) this.applyRouteColors();
+  }
+
+  setRandomColors(enabled: boolean): void {
+    this.randomColorsEnabled = enabled;
     if (this.loaded) this.applyRouteColors();
   }
 
@@ -215,9 +232,9 @@ export class MapView {
   }
 
   private stopFeatures(): FeatureCollection<Point> {
-    const features: Feature<Point>[] = this.stops.flatMap((stop) => stop.coordinate
+    const features: Feature<Point>[] = this.stops.flatMap((stop, index) => stop.coordinate
       ? [{
-        type: "Feature", properties: { stopId: stop.id ?? "", label: stop.hoverLabel || stop.name?.trim() || stop.id || "Stop" },
+        type: "Feature", properties: { stopId: stop.id ?? "", stopIndex: index, label: stop.hoverLabel || stop.name?.trim() || stop.id || "Stop" },
         geometry: { type: "Point", coordinates: stop.coordinate },
       }] : []);
     return { type: "FeatureCollection", features };
@@ -234,6 +251,7 @@ export class MapView {
           label: line.label,
           routeId: line.routeId ?? "",
           color: line.color ?? "#1554a0",
+          randomColor: line.randomColor ?? "#1554a0",
         },
         geometry: { type: "LineString", coordinates: line.coordinates },
       })),
@@ -245,12 +263,21 @@ export class MapView {
     this.map.setFilter("route-highlight", ["all", ["==", ["get", "approximate"], false], ["==", ["get", "variantIndex"], index]]);
     this.map.setFilter("route-approximation-highlight", ["all", ["==", ["get", "approximate"], true], ["==", ["get", "variantIndex"], index]]);
     const stopIds = [...new Set(this.lines.filter((line) => line.variantIndex === index).flatMap((line) => line.stopIds ?? []))];
-    this.map.setPaintProperty("stops", "circle-color", ["case", ["in", ["get", "stopId"], ["literal", stopIds]], "#e95e21", "#fff"]);
-    this.map.setPaintProperty("stops", "circle-stroke-color", ["case", ["in", ["get", "stopId"], ["literal", stopIds]], "#e95e21", "#1554a0"]);
+    this.map.setPaintProperty("stops", "circle-color", [
+      "case", ["==", ["get", "stopIndex"], this.hoveredStopIndex ?? -1], "#f5a623",
+      ["in", ["get", "stopId"], ["literal", stopIds]], "#e95e21", "#fff",
+    ]);
+    this.map.setPaintProperty("stops", "circle-stroke-color", [
+      "case", ["==", ["get", "stopIndex"], this.hoveredStopIndex ?? -1], "#b33a08",
+      ["in", ["get", "stopId"], ["literal", stopIds]], "#e95e21", "#1554a0",
+    ]);
   }
 
   private applyRouteColors(): void {
-    if (this.routeColorsEnabled) {
+    if (this.randomColorsEnabled) {
+      this.map.setPaintProperty("route-lines", "line-color", ["get", "randomColor"]);
+      this.map.setPaintProperty("route-approximations", "line-color", ["get", "randomColor"]);
+    } else if (this.routeColorsEnabled) {
       this.map.setPaintProperty("route-lines", "line-color", ["get", "color"]);
       this.map.setPaintProperty("route-approximations", "line-color", ["get", "color"]);
     } else {

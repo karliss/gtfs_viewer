@@ -336,13 +336,44 @@ tbody tr:last-child td {
 }
 
 .map-option {
-  display: inline-flex !important;
+  display: flex;
   align-items: center;
   gap: 0.4rem;
 }
 
 .map-option input {
   margin: 0;
+}
+
+.map-settings {
+  position: relative;
+}
+
+.map-settings summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #aebbd0;
+  border-radius: 0.35rem;
+}
+
+.map-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.map-settings-menu {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  min-width: max-content;
+  padding: 0.75rem;
+  border: 1px solid #aebbd0;
+  border-radius: 0.35rem;
+  background: #fff;
+}
+
+#map-variant-controls .map-settings-menu .map-option + .map-option {
+  margin-top: 0.5rem;
 }
 
 .stop-routes {
@@ -364,6 +395,8 @@ tbody tr:last-child td {
 }
 
 #map-sidebar h3 {
+  display: flex;
+  align-items: flex-start;
   overflow-wrap: anywhere;
 }
 
@@ -372,6 +405,7 @@ tbody tr:last-child td {
 }
 
 .map-variant-label {
+  min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -391,7 +425,9 @@ tbody tr:last-child td {
 .stop-details-link {
   padding: 0;
   border: 0;
+  background: transparent;
   color: #1554a0;
+  line-height: inherit;
   text-decoration: underline;
 }
 
