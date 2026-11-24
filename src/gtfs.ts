@@ -80,10 +80,6 @@ export function getMatchingRows(table: GtfsTable, search: string): GtfsTable["ro
   });
 }
 
-export function indexRoutes(feed: GtfsFeed): Map<string, GtfsRow<"routes.txt">> {
-  return feed.indexes.routesById;
-}
-
 export function getReferencedRoute(
   routes: ReadonlyMap<string, GtfsRow<"routes.txt">>,
   tableKind: GtfsTable["kind"],

@@ -5,7 +5,7 @@ import {
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
 import type { WorkerResponse } from "./gtfs-worker";
-import { indexShapes, indexStops, mapStop, variantLabel, variantMapData, type MapStop } from "./map-data";
+import { mapStop, variantLabel, variantMapData, type MapStop } from "./map-data";
 import {
   defaultMapBaseLayer,
   MAP_BASE_LAYERS,
@@ -1340,8 +1340,11 @@ function prepareRouteMap(routes: GtfsRow<"routes.txt">[]): void {
       }
     }
   }
-  mapStopsIndex = indexStops(feed);
-  mapShapesIndex = indexShapes(feed);
+  mapStopsIndex = new Map();
+  for (const [stopId, row] of currentFeed.indexes.stopsById) {
+    mapStopsIndex.set(stopId, mapStop(row));
+  }
+  mapShapesIndex = currentFeed.indexes.shapesById;
   mapRouteVariants = [];
   mapVariantLabels = [];
   mapVariantRouteIds = [];

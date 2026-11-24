@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
-  getVariantTimetable, indexRoutes, loadGtfs, summarizeTripField,
+  getVariantTimetable, loadGtfs, summarizeTripField,
 } = require("../dist/gtfs.cjs");
 const {
   WarningCollector, WARNING_DESCRIPTIONS, WARNING_TYPES,
@@ -551,7 +551,7 @@ test("resolves route references from other tables without linking missing IDs", 
     "routes.txt": "route_id,route_short_name\nr,First\nr,Duplicate\n,No ID\n",
     "trips.txt": "route_id,trip_id\nr,t\n",
   }));
-  const routes = indexRoutes(feed);
+  const routes = feed.indexes.routesById;
   for (const [table, column] of [
     ["trips.txt", "route_id"],
     ["transfers.txt", "from_route_id"],
@@ -565,7 +565,7 @@ test("resolves route references from other tables without linking missing IDs", 
   assert.equal(getReferencedRoute(routes, "trips.txt", "route_id", "missing"), undefined);
   assert.equal(getReferencedRoute(routes, "trips.txt", "route_id", ""), undefined);
   assert.equal(getReferencedRoute(routes, "trips.txt", "route_id", null), undefined);
-  assert.equal(indexRoutes(loadGtfs(archive({ "trips.txt": "trip_id\nt\n" }))).size, 0);
+  assert.equal(loadGtfs(archive({ "trips.txt": "trip_id\nt\n" })).indexes.routesById.size, 0);
 });
 
 test("preserves missing stop IDs and variants with no stop times", () => {
@@ -620,7 +620,7 @@ test("forms variants from shape IDs in a loaded feed without optional tables or 
       + "shape-b,001,,weekday\r\n"
       + "shape-c,01,trip-3,weekday\r\n",
   }));
-  const routeId = indexRoutes(feed).get("001").fields.route_id;
+  const routeId = feed.indexes.routesById.get("001").fields.route_id;
   const { variants, tripsCount, tripsWithoutVariant } = getRouteVariants(feed, routeId);
   assert.equal(tripsCount, 3);
   assert.equal(tripsWithoutVariant, 0);

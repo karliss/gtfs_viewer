@@ -1,4 +1,4 @@
-import type { GtfsFeed, GtfsRow, RouteVariant } from "./gtfs";
+import type { GtfsRow, RouteVariant } from "./gtfs";
 
 export type Coordinate = [number, number];
 export interface MapStop {
@@ -6,10 +6,6 @@ export interface MapStop {
   name: string | null;
   coordinate: Coordinate | null;
   hoverLabel?: string;
-}
-
-export function indexStopRoutes(feed: GtfsFeed): Map<string, string[]> {
-  return feed.indexes.routesByStopId;
 }
 
 export function coordinate(lon: number | null, lat: number | null): Coordinate | null {
@@ -20,25 +16,12 @@ export function coordinate(lon: number | null, lat: number | null): Coordinate |
     ? [x, y] : null;
 }
 
-export function indexShapes(feed: GtfsFeed): Map<string, GtfsRow<"shapes.txt">[]> {
-  return feed.indexes.shapesById;
-}
-
 export function mapStop(row: GtfsRow<"stops.txt">): MapStop {
   return {
     id: row.fields.stop_id,
     name: row.fields.stop_name,
     coordinate: coordinate(row.fields.stop_lon, row.fields.stop_lat),
   };
-}
-
-export function indexStops(feed: GtfsFeed): Map<string, MapStop> {
-  const index = new Map<string, MapStop>();
-  for (const row of feed.indexes.stopsById.values()) {
-    const stop = mapStop(row);
-    if (stop.id && !index.has(stop.id)) index.set(stop.id, stop);
-  }
-  return index;
 }
 
 export function variantLabel(variant: RouteVariant, index: number, stops: ReadonlyMap<string, MapStop>): string {
