@@ -258,7 +258,6 @@ function parseTable(name: string, columns: string[], records: string[][], collec
     "rider_categories.txt": "rider_category_id",
     "areas.txt": "area_id",
     "networks.txt": "network_id",
-    "shapes.txt": "shape_id",
     "booking_rules.txt": "booking_rule_id",
     "attributions.txt": "attribution_id",
     "levels.txt": "level_id",

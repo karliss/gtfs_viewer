@@ -139,6 +139,16 @@ test("does not report duplicate service_id values in calendar_dates.txt", () => 
   assert.equal(collector.count("missing_or_duplicate_ids"), 0);
 });
 
+test("does not report duplicate IDs in shapes.txt", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "shapes.txt": "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\nshape1,1,2,1\nshape1,1.1,2.1,2\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "missing_or_duplicate_ids");
+  assert.equal(warnings.length, 0);
+  assert.equal(collector.count("missing_or_duplicate_ids"), 0);
+});
+
 test("reports unrecognized archive files and ignores metadata", () => {
   const collector = new WarningCollector();
   const feed = loadGtfs(archive({

@@ -109,17 +109,21 @@ app.innerHTML = `
     </section>
     <section id="warnings-view" class="panel viewer" aria-labelledby="warnings-heading" hidden>
       <h2 id="warnings-heading" tabindex="-1">Warnings</h2>
-      <div class="warning-filter-actions">
-        <button id="warning-select-all" type="button">Select all</button>
-        <button id="warning-clear-all" type="button">Clear all</button>
-      </div>
       <div class="warning-filter-columns">
-        <div>
+        <div class="warning-filter-category">
           <h3>Warning types</h3>
+          <div class="warning-filter-actions">
+            <button id="warning-types-select-all" type="button">Select all</button>
+            <button id="warning-types-clear-all" type="button">Clear all</button>
+          </div>
           <div id="warning-types" class="warning-types" aria-label="Warning types"></div>
         </div>
-        <div>
+        <div class="warning-filter-category">
           <h3>Tables</h3>
+          <div class="warning-filter-actions">
+            <button id="warning-tables-select-all" type="button">Select all</button>
+            <button id="warning-tables-clear-all" type="button">Clear all</button>
+          </div>
           <div id="warning-tables" class="warning-tables" aria-label="Associated tables"></div>
         </div>
       </div>
@@ -283,8 +287,10 @@ const agencyDialogContent = element<HTMLElement>("#agency-dialog-content");
 const warningsView = element<HTMLElement>("#warnings-view");
 const warningTypes = element<HTMLElement>("#warning-types");
 const warningTables = element<HTMLElement>("#warning-tables");
-const warningSelectAll = element<HTMLButtonElement>("#warning-select-all");
-const warningClearAll = element<HTMLButtonElement>("#warning-clear-all");
+const warningTypesSelectAll = element<HTMLButtonElement>("#warning-types-select-all");
+const warningTypesClearAll = element<HTMLButtonElement>("#warning-types-clear-all");
+const warningTablesSelectAll = element<HTMLButtonElement>("#warning-tables-select-all");
+const warningTablesClearAll = element<HTMLButtonElement>("#warning-tables-clear-all");
 const warningTableBody = element<HTMLTableSectionElement>("#warning-table-body");
 const warningPrevious = element<HTMLButtonElement>("#warning-previous");
 const warningNext = element<HTMLButtonElement>("#warning-next");
@@ -1915,15 +1921,28 @@ historyWarnings.addEventListener("click", () => {
   showWarnings();
 });
 
-warningSelectAll.addEventListener("click", () => {
+warningTypesSelectAll.addEventListener("click", () => {
   selectedWarningTypes = new Set(WARNING_TYPES);
-  selectedWarningTables = new Set(["Global", ...(feed?.tables.map((table) => table.name) ?? [])]);
   warningPage = 0;
   showWarnings();
 });
 
-warningClearAll.addEventListener("click", () => {
+warningTypesClearAll.addEventListener("click", () => {
   selectedWarningTypes.clear();
+  warningPage = 0;
+  showWarnings();
+});
+
+warningTablesSelectAll.addEventListener("click", () => {
+  selectedWarningTables = new Set(["Global", ...(feed?.tables.map((table) => table.name) ?? [])]);
+  for (const warning of feed?.warnings ?? []) {
+    if (typeof warning.parameters.file === "string") selectedWarningTables.add(warning.parameters.file);
+  }
+  warningPage = 0;
+  showWarnings();
+});
+
+warningTablesClearAll.addEventListener("click", () => {
   selectedWarningTables.clear();
   warningPage = 0;
   showWarnings();
