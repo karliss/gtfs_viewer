@@ -116,6 +116,19 @@ app.innerHTML = `
           <tbody id="warning-table-body"></tbody>
         </table>
       </div>
+      <div class="pagination">
+        <button id="warning-previous" type="button">Previous</button>
+        <span id="warning-page-label"></span>
+        <button id="warning-next" type="button">Next</button>
+        <label for="warning-page-size">Rows per page</label>
+        <select id="warning-page-size">
+          <option>25</option>
+          <option>50</option>
+          <option selected>100</option>
+          <option>250</option>
+          <option>500</option>
+        </select>
+      </div>
     </section>
     <section id="stop-detail" class="panel viewer" aria-labelledby="stop-heading" hidden>
       <h2 id="stop-heading" tabindex="-1">Stop details</h2>
@@ -257,6 +270,10 @@ const agencyDialogContent = element<HTMLElement>("#agency-dialog-content");
 const warningsView = element<HTMLElement>("#warnings-view");
 const warningTypes = element<HTMLElement>("#warning-types");
 const warningTableBody = element<HTMLTableSectionElement>("#warning-table-body");
+const warningPrevious = element<HTMLButtonElement>("#warning-previous");
+const warningNext = element<HTMLButtonElement>("#warning-next");
+const warningPageLabel = element<HTMLSpanElement>("#warning-page-label");
+const warningPageSize = element<HTMLSelectElement>("#warning-page-size");
 for (const layer of MAP_BASE_LAYERS) {
   const option = document.createElement("option");
   option.value = layer.id;
@@ -289,6 +306,8 @@ const viewHistory = new ViewHistory();
 let viewHistoryRestoring = false;
 let mapMode: "stops" | "routes" | "route" = "routes";
 let selectedWarningTypes = new Set<WarningType>(WARNING_TYPES);
+let warningPage = 0;
+let warningRowsPerPage = 100;
 const warningCollector = new WarningCollector();
 const filteredTableStates = new Map<string, GtfsTable>();
 
@@ -308,7 +327,12 @@ function tableFilterKey(): string | undefined {
 }
 
 function captureViewState(): ViewState {
-  if (!warningsView.hidden) return { type: "warnings", selectedTypes: [...selectedWarningTypes] };
+  if (!warningsView.hidden) return {
+    type: "warnings",
+    selectedTypes: [...selectedWarningTypes],
+    page: warningPage,
+    pageSize: warningRowsPerPage,
+  };
   if (routeDetail && !routeDetail.hidden && currentRoute) {
     return { type: "route", routeId: currentRoute.fields.route_id ?? "" };
   }
@@ -405,6 +429,9 @@ function restoreViewState(state: ViewState): void {
   try {
     if (state.type === "warnings") {
       selectedWarningTypes = new Set(state.selectedTypes as WarningType[]);
+      warningPage = state.page;
+      warningRowsPerPage = state.pageSize;
+      warningPageSize.value = String(warningRowsPerPage);
       showWarnings();
     } else if (state.type === "table") {
       restoreTableState(state);
@@ -1767,6 +1794,7 @@ function showWarnings(): void {
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) selectedWarningTypes.add(type);
       else selectedWarningTypes.delete(type);
+      warningPage = 0;
       renderWarningTable();
       pushViewState();
     });
@@ -1779,8 +1807,11 @@ function showWarnings(): void {
 
 function renderWarningTable(): void {
   const warnings = (feed?.warnings ?? []).filter((warning) => selectedWarningTypes.has(warning.type));
+  const pageCount = Math.max(1, Math.ceil(warnings.length / warningRowsPerPage));
+  warningPage = Math.min(warningPage, pageCount - 1);
+  const start = warningPage * warningRowsPerPage;
   const fragment = document.createDocumentFragment();
-  for (const warning of warnings) {
+  for (const warning of warnings.slice(start, start + warningRowsPerPage)) {
     const row = document.createElement("tr");
     const description = WARNING_DESCRIPTIONS[warning.type];
     const severity = document.createElement("td");
@@ -1817,11 +1848,34 @@ function renderWarningTable(): void {
     fragment.append(row);
   }
   warningTableBody.replaceChildren(fragment);
+  warningPageLabel.textContent = `Page ${warningPage + 1} of ${pageCount}`;
+  warningPrevious.disabled = warningPage === 0;
+  warningNext.disabled = warningPage + 1 >= pageCount;
 }
 
 historyWarnings.addEventListener("click", () => {
   if (!feed) return;
   showWarnings();
+});
+
+warningPrevious.addEventListener("click", () => {
+  if (warningPage === 0) return;
+  warningPage--;
+  renderWarningTable();
+  pushViewState();
+});
+
+warningNext.addEventListener("click", () => {
+  warningPage++;
+  renderWarningTable();
+  pushViewState();
+});
+
+warningPageSize.addEventListener("change", () => {
+  warningRowsPerPage = Number(warningPageSize.value);
+  warningPage = 0;
+  renderWarningTable();
+  pushViewState();
 });
 
 function closeHistoryMenu(): void {
