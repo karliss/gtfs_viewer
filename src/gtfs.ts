@@ -32,10 +32,26 @@ export type GtfsTable = {
   rows: (RowExtras & { fields: Record<string, never> })[];
 });
 
+export interface GtfsIndexes {
+  agenciesById: Map<string, GtfsRow<"agency.txt">>;
+  routesById: Map<string, GtfsRow<"routes.txt">>;
+  stopsById: Map<string, GtfsRow<"stops.txt">>;
+  tripsById: Map<string, GtfsRow<"trips.txt">>;
+  shapesById: Map<string, GtfsRow<"shapes.txt">[]>;
+  tripsByRouteId: Map<string, GtfsRow<"trips.txt">[]>;
+  routesByTripId: Map<string, string>;
+  stopTimesByTripId: Map<string, GtfsRow<"stop_times.txt">[]>;
+  stopTimesByStopId: Map<string, GtfsRow<"stop_times.txt">[]>;
+  calendarByServiceId: Map<string, GtfsRow<"calendar.txt">>;
+  calendarDatesByServiceId: Map<string, GtfsRow<"calendar_dates.txt">[]>;
+  routesByStopId: Map<string, string[]>;
+}
+
 export interface GtfsFeed {
   tables: GtfsTable[];
   unrecognizedFiles: string[];
   warnings?: GtfsWarning[];
+  indexes: GtfsIndexes;
 }
 
 export function getTableColumns(table: GtfsTable): {
@@ -65,14 +81,7 @@ export function getMatchingRows(table: GtfsTable, search: string): GtfsTable["ro
 }
 
 export function indexRoutes(feed: GtfsFeed): Map<string, GtfsRow<"routes.txt">> {
-  const routes = feed.tables.find((table) => table.kind === "routes.txt");
-  const byId = new Map<string, GtfsRow<"routes.txt">>();
-  for (const route of routes?.rows ?? []) {
-    if (route.fields.route_id && !byId.has(route.fields.route_id)) {
-      byId.set(route.fields.route_id, route);
-    }
-  }
-  return byId;
+  return feed.indexes.routesById;
 }
 
 export function getReferencedRoute(
@@ -145,16 +154,12 @@ export function formatTimetableDayRange(days: readonly number[]): string {
 }
 
 export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable {
-  const stopTimes = feed.tables.find((table) => table.kind === "stop_times.txt");
-  const calendar = feed.tables.find((table) => table.kind === "calendar.txt");
-  const calendarDates = feed.tables.find((table) => table.kind === "calendar_dates.txt");
   const firstStop = variant.stops[0];
   const tripIds = new Set(variant.trips.flatMap((trip) => trip.fields.trip_id ? [trip.fields.trip_id] : []));
 
   const daySetForService = (serviceId: string | null): number[] | null => {
     if (!serviceId) return null;
-    const row = calendar?.rows.find((candidate) =>
-      candidate.fields.service_id === serviceId);
+    const row = feed.indexes.calendarByServiceId.get(serviceId);
     if (!row) return null;
     return [
       row.fields.monday === 1 ? 1 : null,
@@ -191,8 +196,8 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
   for (const trip of variant.trips) {
     const tripId = trip.fields.trip_id;
     if (!tripId || !tripIds.has(tripId)) continue;
-    const rows = stopTimes?.rows.filter((row) =>
-      row.fields.trip_id === tripId && (firstStop === null ? false : row.fields.stop_id === firstStop)) ?? [];
+    const rows = feed.indexes.stopTimesByTripId.get(tripId)?.filter((row) =>
+      firstStop !== null && row.fields.stop_id === firstStop) ?? [];
     const days = daySetForService(trip.fields.service_id);
     const dayKey = days?.join(",") ?? "";
     for (const row of rows) {
@@ -238,13 +243,11 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
   }
   const serviceIds = new Set(variant.trips.flatMap((trip) =>
     trip.fields.service_id ? [trip.fields.service_id] : []));
-  const exceptionDates = calendarDates
-    ? [...new Set(calendarDates.rows
-      .filter((row) => row.fields.service_id && serviceIds.has(row.fields.service_id))
+  const exceptionDates = [...new Set(
+    [...serviceIds].flatMap((serviceId) => feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [])
       .map((row) => row.fields.date)
       .filter((date): date is string => date !== null))]
-      .sort()
-    : [];
+    .sort();
   return { popularDays, exceptionDates, rows };
 }
 
@@ -254,7 +257,7 @@ export function getVariantTableRows(
   const table = feed.tables.find((candidate) => candidate.kind === kind);
   if (!table) return undefined;
   if (table.kind === "shapes.txt" && variant.shapeId !== null) {
-    return { ...table, rows: table.rows.filter((row) => row.fields.shape_id === variant.shapeId) };
+    return { ...table, rows: feed.indexes.shapesById.get(variant.shapeId) ?? [] };
   }
   if (table.kind === "trips.txt") {
     const trips = new Set(variant.trips);
@@ -267,22 +270,14 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
   tripsCount: number;
   tripsWithoutVariant: number;
 } {
-  const trips = feed.tables.find((table) => table.kind === "trips.txt");
-  const stopTimes = feed.tables.find((table) => table.kind === "stop_times.txt");
-  const routeTrips = (trips?.rows ?? []).filter(({ fields }) => fields.route_id === routeId);
-  const relevantTrips = new Set(routeTrips.flatMap(({ fields }) => fields.trip_id ? [fields.trip_id] : []));
-  const timesByTrip = new Map<string, GtfsRow<"stop_times.txt">[]>();
-  for (const row of stopTimes?.rows ?? []) {
-    const tripId = row.fields.trip_id;
-    if (!tripId || !relevantTrips.has(tripId)) continue;
-    const times = timesByTrip.get(tripId) ?? [];
-    times.push(row);
-    timesByTrip.set(tripId, times);
-  }
+  const routeTrips = feed.indexes.tripsByRouteId.get(routeId) ?? [];
 
   const sequence = (value: number | null): number => value ?? Infinity;
   const stopsByTrip = new Map<string, (string | null)[]>();
-  for (const [tripId, times] of timesByTrip) {
+  for (const trip of routeTrips) {
+    const tripId = trip.fields.trip_id;
+    if (!tripId) continue;
+    const times = [...(feed.indexes.stopTimesByTripId.get(tripId) ?? [])];
     times.sort((a, b) => sequence(a.fields.stop_sequence) - sequence(b.fields.stop_sequence));
     stopsByTrip.set(tripId, times.map(({ fields }) => fields.stop_id));
   }
@@ -462,6 +457,118 @@ export interface GtfsLoadProgress {
   fileName?: string;
 }
 
+function initializeFeedIndexes(feed: GtfsFeed): void {
+  const getRows = <Name extends GtfsTableName>(kind: Name): GtfsRow<Name>[] =>
+    (feed.tables.find((table) => table.kind === kind)?.rows as GtfsRow<Name>[] | undefined) ?? [];
+
+  const agenciesById = new Map<string, GtfsRow<"agency.txt">>();
+  for (const row of getRows("agency.txt")) {
+    const id = row.fields.agency_id;
+    if (id && !agenciesById.has(id)) agenciesById.set(id, row);
+  }
+
+  const routesById = new Map<string, GtfsRow<"routes.txt">>();
+  for (const row of getRows("routes.txt")) {
+    const id = row.fields.route_id;
+    if (id && !routesById.has(id)) routesById.set(id, row);
+  }
+
+  const stopsById = new Map<string, GtfsRow<"stops.txt">>();
+  for (const row of getRows("stops.txt")) {
+    const id = row.fields.stop_id;
+    if (id && !stopsById.has(id)) stopsById.set(id, row);
+  }
+
+  const tripsById = new Map<string, GtfsRow<"trips.txt">>();
+  const tripsByRouteId = new Map<string, GtfsRow<"trips.txt">[]>();
+  const routesByTripId = new Map<string, string>();
+  for (const row of getRows("trips.txt")) {
+    const tripId = row.fields.trip_id;
+    if (tripId && !tripsById.has(tripId)) tripsById.set(tripId, row);
+    const routeId = row.fields.route_id;
+    if (routeId) {
+      const rows = tripsByRouteId.get(routeId) ?? [];
+      rows.push(row);
+      tripsByRouteId.set(routeId, rows);
+      if (tripId) routesByTripId.set(tripId, routeId);
+    }
+  }
+
+  const shapesById = new Map<string, GtfsRow<"shapes.txt">[]>();
+  for (const row of getRows("shapes.txt")) {
+    const id = row.fields.shape_id;
+    if (id) {
+      const rows = shapesById.get(id) ?? [];
+      rows.push(row);
+      shapesById.set(id, rows);
+    }
+  }
+
+  const stopTimesByTripId = new Map<string, GtfsRow<"stop_times.txt">[]>();
+  const stopTimesByStopId = new Map<string, GtfsRow<"stop_times.txt">[]>();
+  for (const row of getRows("stop_times.txt")) {
+    const tripId = row.fields.trip_id;
+    if (tripId) {
+      const rows = stopTimesByTripId.get(tripId) ?? [];
+      rows.push(row);
+      stopTimesByTripId.set(tripId, rows);
+    }
+    const stopId = row.fields.stop_id;
+    if (stopId) {
+      const rows = stopTimesByStopId.get(stopId) ?? [];
+      rows.push(row);
+      stopTimesByStopId.set(stopId, rows);
+    }
+  }
+
+  const calendarByServiceId = new Map<string, GtfsRow<"calendar.txt">>();
+  for (const row of getRows("calendar.txt")) {
+    const id = row.fields.service_id;
+    if (id && !calendarByServiceId.has(id)) calendarByServiceId.set(id, row);
+  }
+
+  const calendarDatesByServiceId = new Map<string, GtfsRow<"calendar_dates.txt">[]>();
+  for (const row of getRows("calendar_dates.txt")) {
+    const id = row.fields.service_id;
+    if (id) {
+      const rows = calendarDatesByServiceId.get(id) ?? [];
+      rows.push(row);
+      calendarDatesByServiceId.set(id, rows);
+    }
+  }
+
+  const routeIdsByStop = new Map<string, Set<string>>();
+  for (const [tripId, times] of stopTimesByTripId) {
+    const trip = tripsById.get(tripId);
+    const routeId = trip?.fields.route_id;
+    if (!routeId) continue;
+    for (const time of times) {
+      const stopId = time.fields.stop_id;
+      if (!stopId) continue;
+      const routes = routeIdsByStop.get(stopId) ?? new Set<string>();
+      routes.add(routeId);
+      routeIdsByStop.set(stopId, routes);
+    }
+  }
+  const routesByStopId = new Map<string, string[]>(
+    [...routeIdsByStop].map(([stopId, routes]) => [stopId, [...routes]]),
+  );
+  feed.indexes = {
+    agenciesById,
+    routesById,
+    stopsById,
+    tripsById,
+    shapesById,
+    tripsByRouteId,
+    routesByTripId,
+    stopTimesByTripId,
+    stopTimesByStopId,
+    calendarByServiceId,
+    calendarDatesByServiceId,
+    routesByStopId,
+  };
+}
+
 export function loadGtfs(
   data: Uint8Array,
   onProgressOrWarnings?: ((progress: GtfsLoadProgress) => void) | WarningCollector,
@@ -564,5 +671,11 @@ export function loadGtfs(
 
   tables.sort((a, b) => a.name.localeCompare(b.name));
   unrecognizedFiles.sort();
-  return { tables, unrecognizedFiles, warnings: collector ? [...collector.all] : undefined };
+  const feed = {
+    tables,
+    unrecognizedFiles,
+    warnings: collector ? [...collector.all] : undefined,
+  } as GtfsFeed;
+  initializeFeedIndexes(feed);
+  return feed;
 }

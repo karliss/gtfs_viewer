@@ -9,21 +9,7 @@ export interface MapStop {
 }
 
 export function indexStopRoutes(feed: GtfsFeed): Map<string, string[]> {
-  const trips = feed.tables.find((table) => table.kind === "trips.txt");
-  const times = feed.tables.find((table) => table.kind === "stop_times.txt");
-  const routesByTrip = new Map<string, string>();
-  for (const { fields } of trips?.rows ?? []) {
-    if (fields.trip_id && fields.route_id) routesByTrip.set(fields.trip_id, fields.route_id);
-  }
-  const routesByStop = new Map<string, Set<string>>();
-  for (const { fields } of times?.rows ?? []) {
-    const route = fields.trip_id && routesByTrip.get(fields.trip_id);
-    if (!fields.stop_id || !route) continue;
-    const routes = routesByStop.get(fields.stop_id) ?? new Set<string>();
-    routes.add(route);
-    routesByStop.set(fields.stop_id, routes);
-  }
-  return new Map([...routesByStop].map(([stop, routes]) => [stop, [...routes]]));
+  return feed.indexes.routesByStopId;
 }
 
 export function coordinate(lon: number | null, lat: number | null): Coordinate | null {
@@ -35,16 +21,7 @@ export function coordinate(lon: number | null, lat: number | null): Coordinate |
 }
 
 export function indexShapes(feed: GtfsFeed): Map<string, GtfsRow<"shapes.txt">[]> {
-  const index = new Map<string, GtfsRow<"shapes.txt">[]>();
-  const table = feed.tables.find((candidate) => candidate.kind === "shapes.txt");
-  for (const row of table?.rows ?? []) {
-    const id = row.fields.shape_id;
-    if (!id) continue;
-    const rows = index.get(id) ?? [];
-    rows.push(row);
-    index.set(id, rows);
-  }
-  return index;
+  return feed.indexes.shapesById;
 }
 
 export function mapStop(row: GtfsRow<"stops.txt">): MapStop {
@@ -57,8 +34,7 @@ export function mapStop(row: GtfsRow<"stops.txt">): MapStop {
 
 export function indexStops(feed: GtfsFeed): Map<string, MapStop> {
   const index = new Map<string, MapStop>();
-  const table = feed.tables.find((candidate) => candidate.kind === "stops.txt");
-  for (const row of table?.rows ?? []) {
+  for (const row of feed.indexes.stopsById.values()) {
     const stop = mapStop(row);
     if (stop.id && !index.has(stop.id)) index.set(stop.id, stop);
   }
