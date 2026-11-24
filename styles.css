@@ -287,16 +287,16 @@ input[type="file"] {
 
 .timetable-row {
   display: grid;
-  grid-template-columns: 2.5rem repeat(var(--timetable-columns), max-content);
-  column-gap: 0;
+  grid-template-columns: 2.5rem repeat(var(--timetable-columns), 8rem);
+  column-gap: 0.75rem;
   align-items: baseline;
   white-space: nowrap;
 }
 
 .timetable-headings {
   display: grid;
-  grid-template-columns: 2.5rem repeat(var(--timetable-columns), max-content);
-  column-gap: 0;
+  grid-template-columns: 2.5rem repeat(var(--timetable-columns), 8rem);
+  column-gap: 0.75rem;
   margin-bottom: 0.25rem;
 }
 
