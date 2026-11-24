@@ -896,6 +896,9 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       for (const days of timetable.popularDays) {
         const heading = document.createElement("span");
         heading.className = "timetable-popular-days";
+        if (timetable.popularDays.length === 2) {
+          heading.classList.add("timetable-day-column");
+        }
         heading.textContent = formatTimetableDayRange(days);
         headings.append(heading);
       }
@@ -912,6 +915,9 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
         for (const popularDays of columns) {
           const column = document.createElement("span");
           column.className = "timetable-column";
+          if (timetable.popularDays.length === 2) {
+            column.classList.add("timetable-day-column");
+          }
           const groupedMinutes = new Map<number, number[][]>();
           for (const departure of row.departures) {
             if (popularDays &&

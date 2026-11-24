@@ -304,6 +304,12 @@ input[type="file"] {
   display: inline;
 }
 
+.timetable-day-column:nth-child(2) {
+  border-right: 1px solid #d7dbe2;
+  padding-right: 0.75rem;
+  margin-right: 0.75rem;
+}
+
 .timetable-minute {
   margin-right: 0;
 }
