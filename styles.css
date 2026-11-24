@@ -321,6 +321,10 @@ tbody tr:last-child td {
   min-height: 24rem;
 }
 
+#map-canvas.map-canvas--no-basemap {
+  background-color: #f8fafc;
+}
+
 #map-sidebar {
   width: 24rem;
   max-height: 65vh;

@@ -6,10 +6,12 @@ let map;
 let popup;
 let detailPopup;
 class FakeMap {
-  constructor() {
+  constructor(options) {
     map = this;
+    this.style = options?.style;
     this.events = {};
     this.sources = {};
+    this.layers = {};
     this.filters = {};
     this.paint = {};
     this.features = [];
@@ -18,14 +20,19 @@ class FakeMap {
   on(event, handler) { this.events[event] = handler; }
   addControl() {}
   addSource(id, source) { this.sources[id] = { data: source.data, setData(data) { this.data = data; } }; }
-  addLayer() {}
-  setFilter(id, filter) { this.filters[id] = filter; }
-  setPaintProperty(id, name, value) { this.paint[`${id}:${name}`] = value; }
   getSource(id) { return this.sources[id]; }
+  addLayer(layer) { this.layers[layer.id] = layer; }
+  getLayer(id) { return this.layers[id]; }
+  removeLayer(id) { delete this.layers[id]; }
+  removeSource(id) { delete this.sources[id]; }
+  setFilter(id, filter) { this.filters[id] = filter; }
+  setLayoutProperty(id, name, value) { this.layout = this.layout || {}; this.layout[`${id}:${name}`] = value; }
+  setPaintProperty(id, name, value) { this.paint[`${id}:${name}`] = value; }
   queryRenderedFeatures() { return this.features; }
   getCanvas() { return this.canvas; }
   resize() {}
   fitBounds() {}
+  getBounds() { return { getWest: () => -10, getEast: () => 10, getSouth: () => -10, getNorth: () => 10 }; }
   getZoom() { return 3; }
   easeTo(options) { this.lastEase = options; }
   remove() { this.removed = true; }
@@ -49,11 +56,33 @@ Module._load = function(request, ...args) {
   return originalLoad.call(this, request, ...args);
 };
 let MapView;
+let MAP_BASE_LAYERS;
+let defaultMapBaseLayer;
 try {
-  ({ MapView } = require("../dist/map-view.cjs"));
+  ({ MapView, MAP_BASE_LAYERS, defaultMapBaseLayer } = require("../dist/map-view.cjs"));
 } finally {
   Module._load = originalLoad;
 }
+
+test("base map options include none and default locally to none", () => {
+  assert.deepEqual(MAP_BASE_LAYERS.map((layer) => layer.id), ["none", "osm", "osm-humanitarian"]);
+  assert.equal(defaultMapBaseLayer("localhost"), "none");
+  assert.equal(defaultMapBaseLayer("127.0.0.1"), "none");
+  assert.equal(defaultMapBaseLayer("0.0.0.0"), "none");
+  assert.equal(defaultMapBaseLayer("example.com"), "osm");
+  const view = new MapView({ classList: { toggle() {} } }, () => {}, () => {}, undefined, undefined, undefined, "none");
+  assert.deepEqual(Object.keys(map.style.sources), ["osm", "osm-humanitarian"]);
+  assert.deepEqual(map.style.layers, []);
+  map.events.load();
+  view.setBaseLayer("osm");
+  assert.equal(map.layers.basemap.source, "osm");
+  view.setBaseLayer("osm-humanitarian");
+  assert.equal(map.layers.basemap.source, "osm-humanitarian");
+  assert.equal(map.layout["grid:visibility"], "none");
+  view.setBaseLayer("none");
+  assert.equal(map.layers.basemap, undefined);
+  assert.equal(map.layout["grid:visibility"], "visible");
+});
 
 test("map hover displays safe labels, prioritizes stops, and clears sidebar highlight", () => {
   const hovered = [];

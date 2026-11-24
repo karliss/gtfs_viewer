@@ -5,7 +5,13 @@ import {
 import workerSource from "../dist/gtfs-worker.txt";
 import type { WorkerResponse } from "./gtfs-worker";
 import { indexShapes, indexStopRoutes, indexStops, mapStop, variantLabel, variantMapData, type MapStop } from "./map-data";
-import { MapView, type MapLine } from "./map-view";
+import {
+  defaultMapBaseLayer,
+  MAP_BASE_LAYERS,
+  MapView,
+  type MapBaseLayerId,
+  type MapLine,
+} from "./map-view";
 import { DEFAULT_VIEW_STATE, ViewHistory, type ViewState } from "./view-history";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -116,6 +122,10 @@ app.innerHTML = `
         <details class="map-settings">
           <summary title="Map settings" aria-label="Map settings">⚙</summary>
           <div class="map-settings-menu">
+            <label class="map-option" for="map-base-layer">
+              <span>Background map</span>
+              <select id="map-base-layer"></select>
+            </label>
             <label class="map-option" for="map-route-colors">
               <input id="map-route-colors" type="checkbox" checked />
               Use route colors
@@ -206,6 +216,7 @@ const mapRoute = element<HTMLSelectElement>("#map-route");
 const mapRouteReset = element<HTMLButtonElement>("#map-route-reset");
 const mapVariant = element<HTMLSelectElement>("#map-variant");
 const mapVariantReset = element<HTMLButtonElement>("#map-variant-reset");
+const mapBaseLayer = element<HTMLSelectElement>("#map-base-layer");
 const mapRouteColors = element<HTMLInputElement>("#map-route-colors");
 const mapRandomColors = element<HTMLInputElement>("#map-random-colors");
 const mapAllStops = element<HTMLInputElement>("#map-all-stops");
@@ -216,6 +227,13 @@ const backFromMap = element<HTMLButtonElement>("#back-from-map");
 const mapToTables = element<HTMLButtonElement>("#map-to-tables");
 const agencyDialog = element<HTMLDialogElement>("#agency-dialog");
 const agencyDialogContent = element<HTMLElement>("#agency-dialog-content");
+for (const layer of MAP_BASE_LAYERS) {
+  const option = document.createElement("option");
+  option.value = layer.id;
+  option.textContent = layer.label;
+  mapBaseLayer.append(option);
+}
+mapBaseLayer.value = defaultMapBaseLayer();
 let pageSize = 100;
 let feed: GtfsFeed | undefined;
 let page = 0;
@@ -1009,6 +1027,7 @@ function openMap(returnTo: "table" | "route", title: string): void {
           button.classList.toggle("map-variant-hover", button.dataset.variantIndex === String(index));
         }
       },
+      mapBaseLayer.value as MapBaseLayerId,
     );
     mapView.setRouteColors(mapRouteColors.checked);
     mapView.setRandomColors(mapRandomColors.checked);
@@ -1483,6 +1502,9 @@ mapRandomColors.addEventListener("change", () => {
 mapAllStops.addEventListener("change", () => renderRouteMap(true));
 mapReducedStops.addEventListener("change", () => mapView?.setStopSizeReduced(mapReducedStops.checked));
 mapStopOrder.addEventListener("change", () => mapView?.setStopOrderEnabled(mapStopOrder.checked));
+mapBaseLayer.addEventListener("change", () => {
+  mapView?.setBaseLayer(mapBaseLayer.value as MapBaseLayerId);
+});
 mapClearFilter.addEventListener("click", () => {
   tableSearch.value = "";
   page = 0;
