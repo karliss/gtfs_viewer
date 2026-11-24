@@ -895,12 +895,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       headings.append(hourHeading);
       const headingDays = timetable.popularDays.length > 0
         ? timetable.popularDays
-        : (() => {
-          const knownDays = [...new Set(timetable.rows.flatMap((row) => row.departures)
-            .flatMap((departure) => departure.days ?? []))]
-            .sort((left, right) => left - right);
-          return knownDays.length > 0 ? [knownDays] : [[]];
-        })();
+        : [[1, 2, 3, 4, 5, 6, 7]];
       for (const days of headingDays) {
         const heading = document.createElement("span");
         heading.className = "timetable-popular-days";

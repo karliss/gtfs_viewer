@@ -43,6 +43,7 @@ test("formats timetable day ranges and generates first-stop departures", () => {
   ]);
   assert.equal(formatTimetableDayRange([7, 1, 2, 3, 5, 6, 4]), "1-7");
   assert.equal(formatTimetableDayRange([1, 2, 4, 5, 7]), "1-2, 4-5, 7");
+  assert.equal(formatTimetableDayRange([]), "1-7");
 });
 
 test("loads typed rows while preserving quoted CSV, unknown columns, and ZIP paths", () => {

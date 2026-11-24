@@ -126,6 +126,7 @@ export interface VariantTimetable {
 }
 
 export function formatTimetableDayRange(days: readonly number[]): string {
+  if (days.length === 0) return "1-7";
   const sorted = [...new Set(days)].filter((day) => day >= 1 && day <= 7).sort((a, b) => a - b);
   const ranges: string[] = [];
   for (let index = 0; index < sorted.length;) {
