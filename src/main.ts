@@ -40,6 +40,8 @@ app.innerHTML = `
     </section>
     <div class="history-controls" aria-label="View history" hidden>
       <label class="history-select-label">History</label>
+      <button id="history-routes" type="button">Routes</button>
+      <button id="history-stops" type="button">Stops</button>
       <button id="history-back" type="button" title="Back" aria-label="Back">←</button>
       <button id="history-forward" type="button" title="Forward" aria-label="Forward">→</button>
       <div class="history-dropdown">
@@ -185,6 +187,8 @@ const next = element<HTMLButtonElement>("#next");
 const pageLabel = element<HTMLSpanElement>("#page-label");
 const historyBack = element<HTMLButtonElement>("#history-back");
 const historyForward = element<HTMLButtonElement>("#history-forward");
+const historyRoutes = element<HTMLButtonElement>("#history-routes");
+const historyStops = element<HTMLButtonElement>("#history-stops");
 const historyControls = document.querySelector<HTMLElement>(".history-controls");
 const historySelect = element<HTMLButtonElement>("#history-select");
 const historyMenu = element<HTMLElement>("#history-menu");
@@ -315,6 +319,8 @@ function stateLabel(state: ViewState): string {
 function updateHistoryUi(): void {
   historyBack.disabled = !viewHistory.canGoBack;
   historyForward.disabled = !viewHistory.canGoForward;
+  historyRoutes.disabled = !feed?.tables.some((table) => table.kind === "routes.txt");
+  historyStops.disabled = !feed?.tables.some((table) => table.kind === "stops.txt");
   historyMenu.replaceChildren();
   viewHistory.states.forEach((state, index) => {
     const option = document.createElement("button");
@@ -1557,6 +1563,28 @@ historyForward.addEventListener("click", () => {
   const state = viewHistory.forward();
   if (state) restoreViewState(state);
 });
+
+function openHistoryTable(kind: "routes.txt" | "stops.txt"): void {
+  if (!feed) return;
+  const index = feed.tables.findIndex((table) => table.kind === kind);
+  if (index < 0) return;
+  tableSelect.selectedIndex = index;
+  resetTableFilter();
+  tableSearch.value = "";
+  page = 0;
+  routeDetail.hidden = true;
+  stopDetail.hidden = true;
+  mapView?.remove();
+  mapView = undefined;
+  mapPanel.hidden = true;
+  viewer.hidden = false;
+  renderSelectedTable();
+  tableSelect.focus();
+  pushViewState();
+}
+
+historyRoutes.addEventListener("click", () => openHistoryTable("routes.txt"));
+historyStops.addEventListener("click", () => openHistoryTable("stops.txt"));
 
 function closeHistoryMenu(): void {
   historyMenu.hidden = true;
