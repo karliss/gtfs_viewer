@@ -15,12 +15,14 @@ function archive(files) {
 test("formats timetable day ranges and generates first-stop departures", () => {
   const feed = loadGtfs(archive({
     "trips.txt": "route_id,trip_id,service_id,shape_id\n"
-      + "r,weekday,wd,s\nr,saturday,sat,s\n",
+      + "r,weekday,wd,s\nr,weekday-two,wd-two,s\nr,saturday,sat,s\n",
     "stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\n"
       + "weekday,08:05:00,08:10:00,a,1\nweekday,09:20:00,09:25:00,a,2\n"
+      + "weekday-two,08:05:00,08:10:00,a,1\nweekday-two,09:20:00,09:25:00,a,2\n"
       + "saturday,08:10:00,08:10:00,a,1\nsaturday,08:15:00,08:15:00,a,2\n",
     "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
       + "wd,1,1,1,1,1,0,0,20260101,20261231\n"
+      + "wd-two,1,1,1,1,1,0,0,20260101,20261231\n"
       + "sat,0,0,0,0,0,1,0,20260101,20261231\n",
   }));
   const variant = getRouteVariants(feed, "r").variants[0];

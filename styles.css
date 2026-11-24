@@ -282,12 +282,12 @@ input[type="file"] {
 
 .timetable {
   overflow-x: auto;
-  font-variant-numeric: tabular-nums;
 }
 
 .timetable-row {
-  display: grid;
-  grid-template-columns: 2.5rem repeat(3, minmax(3.5rem, auto));
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
   align-items: baseline;
   white-space: nowrap;
 }

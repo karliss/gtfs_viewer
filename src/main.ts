@@ -867,7 +867,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
         line.className = "timetable-row";
         const hour = document.createElement("span");
         hour.className = "timetable-hour";
-        hour.textContent = String(row.hour);
+        hour.textContent = `${String(row.hour)} `;
         line.append(hour);
 
         const groupedMinutes = new Map<number, number[][]>();

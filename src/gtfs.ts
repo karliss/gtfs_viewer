@@ -139,11 +139,6 @@ export function formatTimetableDayRange(days: readonly number[]): string {
   return ranges.join(", ");
 }
 
-function sameDays(left: readonly number[] | null, right: readonly number[] | null): boolean {
-  if (left === null || right === null) return left === right;
-  return left.length === right.length && left.every((day, index) => day === right[index]);
-}
-
 export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable {
   const stopTimes = feed.tables.find((table) => table.kind === "stop_times.txt");
   const calendar = feed.tables.find((table) => table.kind === "calendar.txt");
@@ -178,7 +173,7 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
         const day = weekday === 0 ? 7 : weekday;
         const index = days.indexOf(day);
         if (exception.fields.exception_type === "1" && index < 0) days.push(day);
-        if (exception.fields.exception_type === "2" && index >= 0) days.splice(index, 1);
+        // Exception type 2 removes a date, not an entire recurring weekday.
       }
       return [...new Set(days)].sort((a, b) => a - b);
     }
