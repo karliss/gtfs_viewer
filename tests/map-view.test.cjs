@@ -84,6 +84,20 @@ test("base map options include none and default locally to none", () => {
   assert.equal(map.layout["grid:visibility"], "visible");
 });
 
+test("black and white toggle applies to raster basemaps", () => {
+  const view = new MapView({ classList: { toggle() {} } }, () => {}, () => {}, undefined, undefined, undefined, "none");
+  map.events.load();
+  view.setBaseLayer("osm");
+  assert.equal(map.layers.basemap.source, "osm");
+  view.setRasterBlackAndWhite(true);
+  assert.equal(map.paint["basemap:raster-saturation"], -1);
+  view.setBaseLayer("osm-humanitarian");
+  assert.equal(map.layers.basemap.source, "osm-humanitarian");
+  assert.equal(map.layers.basemap.paint["raster-saturation"], -1);
+  view.setRasterBlackAndWhite(false);
+  assert.equal(map.paint["basemap:raster-saturation"], 0);
+});
+
 test("map hover displays safe labels, prioritizes stops, and clears sidebar highlight", () => {
   const hovered = [];
   const view = new MapView({}, () => {}, (id) => hovered.push(id));
@@ -168,6 +182,32 @@ test("variant highlighting colors only its stops and restores the pinned variant
   view.update([], []);
   assert.deepEqual(highlightedStops(), []);
   assert.equal(map.paint["stops:circle-radius"], undefined);
+});
+
+test("selected variant keeps final-stop effects without highlighting route lines", () => {
+  const view = new MapView({}, () => {}, () => {});
+  view.update([], [
+    { coordinates: [[1, 2], [3, 4]], approximate: false, variantIndex: 0, label: "A", stopIds: ["a", "final-a"] },
+  ]);
+  map.events.load();
+  view.setSelectedVariant(0);
+  assert.deepEqual(map.filters["route-highlight"][2], ["==", ["get", "variantIndex"], -1]);
+  assert.deepEqual(map.filters["stop-last-dot"], ["==", ["get", "stopId"], "final-a"]);
+  view.setSelectedVariant(null);
+  assert.deepEqual(map.filters["stop-last-dot"], ["==", ["get", "stopId"], "__no_variant_last_stop__"]);
+});
+
+test("hovering a route variant displays its final-stop dot", () => {
+  const view = new MapView({}, () => {}, () => {});
+  view.update([], [
+    { coordinates: [[1, 2], [3, 4]], approximate: false, variantIndex: 4, label: "A", stopIds: ["a", "final-a"] },
+  ]);
+  map.events.load();
+  view.hoverVariant(4);
+  assert.deepEqual(map.filters["route-highlight"][2], ["==", ["get", "variantIndex"], 4]);
+  assert.deepEqual(map.filters["stop-last-dot"], ["==", ["get", "stopId"], "final-a"]);
+  view.hoverVariant(null);
+  assert.deepEqual(map.filters["stop-last-dot"], ["==", ["get", "stopId"], "__no_variant_last_stop__"]);
 });
 
 test("click opens stop details and pre-load zoom is applied after fit", () => {

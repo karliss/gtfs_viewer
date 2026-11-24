@@ -49,30 +49,21 @@ app.innerHTML = `
       <button id="history-routes" type="button">Routes</button>
       <button id="history-stops" type="button">Stops</button>
     </div>
-    <section id="viewer" class="panel viewer" aria-labelledby="viewer-heading" hidden>
-      <h2 id="viewer-heading">Feed tables</h2>
-      <p id="feed-summary"></p>
+    <section id="viewer" class="panel viewer" hidden>
       <button id="back-to-route" type="button" hidden>Back to route details</button>
-      <label for="table-select">Table</label>
-      <select id="table-select"></select>
+      <div class="table-selection-row">
+        <label for="table-select">Table</label>
+        <select id="table-select"></select>
+        <button id="stops-map" type="button" hidden title="View stops on map" aria-label="View stops on map">🗺️</button>
+        <button id="routes-map" type="button" hidden title="View routes on map" aria-label="View routes on map">🗺️</button>
+        <span id="feed-summary"></span>
+      </div>
       <p id="table-filter" hidden></p>
       <button id="clear-filter" type="button" hidden>Show all rows</button>
-      <button id="stops-map" type="button" hidden title="View stops on map" aria-label="View stops on map">🗺️</button>
-      <button id="routes-map" type="button" hidden title="View routes on map" aria-label="View routes on map">🗺️</button>
       <div class="table-controls">
         <div>
           <label for="table-search">Search rows</label>
           <input id="table-search" type="search" placeholder="Search all fields" />
-        </div>
-        <div>
-          <label for="page-size">Rows per page</label>
-          <select id="page-size">
-            <option>25</option>
-            <option>50</option>
-            <option selected>100</option>
-            <option>250</option>
-            <option>500</option>
-          </select>
         </div>
       </div>
       <p id="table-summary" aria-live="polite"></p>
@@ -86,6 +77,14 @@ app.innerHTML = `
         <button id="previous" type="button">Previous</button>
         <span id="page-label"></span>
         <button id="next" type="button">Next</button>
+        <label for="page-size">Rows per page</label>
+        <select id="page-size">
+          <option>25</option>
+          <option>50</option>
+          <option selected>100</option>
+          <option>250</option>
+          <option>500</option>
+        </select>
       </div>
     </section>
     <section id="route-detail" class="panel viewer" aria-labelledby="route-heading" hidden>
@@ -126,6 +125,10 @@ app.innerHTML = `
             <label class="map-option" for="map-base-layer">
               <span>Background map</span>
               <select id="map-base-layer"></select>
+            </label>
+            <label class="map-option" for="map-raster-black-and-white">
+              <input id="map-raster-black-and-white" type="checkbox" />
+              Black and white
             </label>
             <label class="map-option" for="map-route-colors">
               <input id="map-route-colors" type="checkbox" checked />
@@ -220,6 +223,7 @@ const mapRouteReset = element<HTMLButtonElement>("#map-route-reset");
 const mapVariant = element<HTMLSelectElement>("#map-variant");
 const mapVariantReset = element<HTMLButtonElement>("#map-variant-reset");
 const mapBaseLayer = element<HTMLSelectElement>("#map-base-layer");
+const mapRasterBlackAndWhite = element<HTMLInputElement>("#map-raster-black-and-white");
 const mapRouteColors = element<HTMLInputElement>("#map-route-colors");
 const mapRandomColors = element<HTMLInputElement>("#map-random-colors");
 const mapAllStops = element<HTMLInputElement>("#map-all-stops");
@@ -581,6 +585,16 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
       button.addEventListener("click", () => showStop(stop, "map"));
       description.append(" ", button);
     }
+    if (!popup && name === "stop_lat" && mapStop(stop).coordinate) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "route-map-icon";
+      button.textContent = "🗺️";
+      button.title = "Show stop on map";
+      button.setAttribute("aria-label", `Show stop ${stop.fields.stop_name || stop.fields.stop_id || "details"} on map`);
+      button.addEventListener("click", () => showStopOnMap(stop));
+      description.append(" ", button);
+    }
     list.append(term, description);
   };
   for (const [name, value] of [...Object.entries(stop.fields), ...Object.entries(stop.unrecognizedColumns)]) {
@@ -639,6 +653,20 @@ function showStop(stop: GtfsRow<"stops.txt">, returnTo: "table" | "map" | "route
   stopDetail.hidden = false;
   stopHeading.focus();
   pushViewState();
+}
+
+function showStopOnMap(stop: GtfsRow<"stops.txt">): void {
+  const position = mapStop(stop).coordinate;
+  if (!position) return;
+  const stopsTable = feed?.tables.find((table) => table.kind === "stops.txt");
+  if (!stopsTable) return;
+  const index = feed?.tables.indexOf(stopsTable) ?? -1;
+  if (index >= 0) tableSelect.selectedIndex = index;
+  filteredTable = undefined;
+  resetTableFilter();
+  tableSearch.value = "";
+  showStopsMap();
+  mapView?.showStopPopup(stop.fields.stop_id ?? "", position);
 }
 
 const tableCellRenderers: Record<string, CellRenderer> = {
@@ -973,7 +1001,7 @@ function renderTable(table: GtfsTable): void {
       button.disabled = !position;
       button.addEventListener("click", () => {
         showStopsMap();
-        if (position) mapView?.zoomTo(position);
+        if (position) mapView?.showStopPopup(stop.fields.stop_id ?? "", position);
       });
       const more = document.createElement("button");
       more.type = "button";
@@ -1009,6 +1037,7 @@ function openMap(returnTo: "table" | "route", title: string): void {
   mapView = undefined;
   viewer.hidden = true;
   routeDetail.hidden = true;
+  stopDetail.hidden = true;
   mapPanel.hidden = false;
   mapHeading.textContent = title;
   mapError.textContent = "";
@@ -1035,6 +1064,7 @@ function openMap(returnTo: "table" | "route", title: string): void {
         }
       },
       mapBaseLayer.value as MapBaseLayerId,
+      mapRasterBlackAndWhite.checked,
     );
     mapView.setRouteColors(mapRouteColors.checked);
     mapView.setRandomColors(mapRandomColors.checked);
@@ -1052,13 +1082,24 @@ function highlightStopList(stopId: string | null): void {
 
 function showStopsMap(): void {
   if (!feed) return;
-  const table = filteredTable ?? feed.tables[tableSelect.selectedIndex];
-  if (table?.kind !== "stops.txt") return;
+  if (!feed.tables.some((table) => table.kind === "stops.txt")) return;
   mapSidebar.hidden = true;
   mapVariantControls.hidden = true;
   mapMode = "stops";
   openMap("table", "Stops map");
-  renderStopsMap();
+  if (filteredTable?.kind === "stops.txt" || feed.tables[tableSelect.selectedIndex]?.kind === "stops.txt") {
+    renderStopsMap();
+  } else {
+    const stopsTable = feed.tables.find((table) => table.kind === "stops.txt");
+    if (stopsTable) {
+      const matching = new Set(getMatchingRows(stopsTable, ""));
+      const stops = stopsTable.rows.filter((row) => matching.has(row)).map(mapStop);
+      const mappable = stops.filter((stop) => stop.coordinate).length;
+      mapSummary.textContent = `${mappable} of ${stops.length} matching stops have valid coordinates.`;
+      mapClearFilter.hidden = true;
+      mapView?.update(stops, []);
+    }
+  }
   pushViewState();
 }
 
@@ -1094,8 +1135,10 @@ function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route",
 
 function showAllRoutesMap(): void {
   if (!feed) return;
-  const table = filteredTable ?? feed.tables[tableSelect.selectedIndex];
-  if (table?.kind !== "routes.txt") return;
+  const table = filteredTable?.kind === "routes.txt"
+    ? filteredTable
+    : feed.tables.find((candidate) => candidate.kind === "routes.txt");
+  if (!table) return;
   prepareRouteMap(getMatchingRows(table, tableSearch.value) as GtfsRow<"routes.txt">[]);
   mapRoute.value = "all";
   populateMapVariants();
@@ -1359,7 +1402,7 @@ function renderRouteMap(preserveMapView = false): void {
       : undefined,
   })), lines, !preserveMapView);
   mapView?.setStopOrderVariant(selected.length === 1 ? selected[0] : null);
-  mapView?.highlightVariant(selected.length === 1 ? selected[0] : null);
+  mapView?.setSelectedVariant(selected.length === 1 ? selected[0] : null);
 }
 
 function loadFeed(file: File): Promise<GtfsFeed> {
@@ -1438,7 +1481,7 @@ form.addEventListener("submit", async (event) => {
       option.textContent = table.name;
       return option;
     }));
-    feedSummary.textContent = `${file.name} · ${feed.tables.length} ${feed.tables.length === 1 ? "table" : "tables"}`;
+    feedSummary.textContent = `${feed.tables.length} ${feed.tables.length === 1 ? "table" : "tables"}`;
     page = 0;
     renderSelectedTable();
     pushViewState();
@@ -1490,6 +1533,9 @@ mapReducedStops.addEventListener("change", () => mapView?.setStopSizeReduced(map
 mapStopOrder.addEventListener("change", () => mapView?.setStopOrderEnabled(mapStopOrder.checked));
 mapBaseLayer.addEventListener("change", () => {
   mapView?.setBaseLayer(mapBaseLayer.value as MapBaseLayerId);
+});
+mapRasterBlackAndWhite.addEventListener("change", () => {
+  mapView?.setRasterBlackAndWhite(mapRasterBlackAndWhite.checked);
 });
 mapClearFilter.addEventListener("click", () => {
   tableSearch.value = "";
