@@ -110,6 +110,47 @@ label {
   display: none;
 }
 
+.warning-filter-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin: 0.75rem 0;
+}
+
+.warning-filter-columns h3 {
+  margin: 0 0 0.25rem;
+}
+
+.warning-filter-category {
+  border: 1px solid #dce2eb;
+  border-radius: 0.35rem;
+  padding: 0.75rem;
+}
+
+.warning-types,
+.warning-tables {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  margin: 0;
+}
+
+.warning-types label,
+.warning-tables label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+}
+
+.warning-filter-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 .history-dropdown {
   position: relative;
 }

@@ -1,6 +1,7 @@
 import { unzipSync } from "fflate";
 import Papa from "papaparse";
 import { gtfsZeroDefaultEnumFields, gtfsFields, type GtfsFields, type GtfsTableName } from "./gtfs-schema";
+import type { GtfsWarning, WarningCollector } from "./warnings";
 
 export type { GtfsFields, GtfsTableName } from "./gtfs-schema";
 
@@ -32,6 +33,7 @@ export type GtfsTable = {
 export interface GtfsFeed {
   tables: GtfsTable[];
   unrecognizedFiles: string[];
+  warnings?: GtfsWarning[];
 }
 
 export function getTableColumns(table: GtfsTable): {
@@ -198,7 +200,7 @@ function isGtfsTableName(name: string): name is GtfsTableName {
   return Object.prototype.hasOwnProperty.call(gtfsFields, name);
 }
 
-function parseTable(name: string, columns: string[], records: string[][]): GtfsTable {
+function parseTable(name: string, columns: string[], records: string[][], collector?: WarningCollector): GtfsTable {
   const key = name.toLowerCase();
   const kind = isGtfsTableName(key) ? key : "unknown";
   const fields: readonly string[] = kind === "unknown" ? [] : gtfsFields[kind];
@@ -214,16 +216,77 @@ function parseTable(name: string, columns: string[], records: string[][]): GtfsT
     return value !== null && (column === "id" || column.endsWith("_id") ||
       (kind === "routes.txt" && (column === "route_type" || column === "route_short_name"))) ? value.trim() : value;
   };
-  const rows = records.map((record) => ({
-    fields: Object.fromEntries(fields.map((field) => {
-      const index = columnIndexes.get(field);
-      return [field, valueAt(record, field, index)];
-    })),
-    unrecognizedColumns: Object.fromEntries(
-      unknownColumns.map(({ column, index }) => [column, valueAt(record, column, index)]),
-    ),
-    extraValues: record.slice(columns.length),
-  }));
+  const rows = records.map((record, index) => {
+    const row = {
+      fields: Object.fromEntries(fields.map((field) => {
+        const columnIndex = columnIndexes.get(field);
+        return [field, valueAt(record, field, columnIndex)];
+      })),
+      unrecognizedColumns: Object.fromEntries(
+        unknownColumns.map(({ column, index }) => [column, valueAt(record, column, index)]),
+      ),
+      extraValues: record.slice(columns.length),
+    };
+    if (row.extraValues.length > 0) {
+      collector?.add({
+        type: "extra_values",
+        parameters: { file: name, row: index + 2, count: row.extraValues.length, values: row.extraValues },
+        relatedObjectIds: [],
+        csvRowNumber: index + 2,
+      });
+    }
+    if (record.length < columns.length) {
+      const count = columns.length - record.length;
+      collector?.add({
+        type: "missing_values",
+        parameters: { file: name, row: index + 2, count },
+        relatedObjectIds: [],
+        csvRowNumber: index + 2,
+      });
+    }
+    return row;
+  });
+  const primaryIdColumns: Partial<Record<GtfsTableName, string>> = {
+    "agency.txt": "agency_id",
+    "stops.txt": "stop_id",
+    "routes.txt": "route_id",
+    "trips.txt": "trip_id",
+    "fare_attributes.txt": "fare_id",
+    "fare_media.txt": "fare_media_id",
+    "rider_categories.txt": "rider_category_id",
+    "areas.txt": "area_id",
+    "networks.txt": "network_id",
+    "route_networks.txt": "route_id",
+    "pathways.txt": "pathway_id",
+    "booking_rules.txt": "booking_rule_id",
+    "attributions.txt": "attribution_id",
+    "levels.txt": "level_id",
+    "location_groups.txt": "location_group_id",
+  };
+  const idColumn = kind === "unknown" ? undefined : primaryIdColumns[kind];
+  if (idColumn) {
+    const seen = new Map<string, number>();
+    for (const [index, row] of rows.entries()) {
+      const id = row.fields[idColumn];
+      if (!id?.trim()) {
+        collector?.add({
+          type: "missing_or_duplicate_ids",
+          parameters: { file: name, row: index + 2, column: idColumn, issue: "missing", idSuffix: "" },
+          relatedObjectIds: [],
+          csvRowNumber: index + 2,
+        });
+      } else if (seen.has(id)) {
+        collector?.add({
+          type: "missing_or_duplicate_ids",
+          parameters: { file: name, row: index + 2, column: idColumn, issue: "duplicate", id, idSuffix: `: ${id}` },
+          relatedObjectIds: [id],
+          csvRowNumber: index + 2,
+        });
+      } else {
+        seen.set(id, index);
+      }
+    }
+  }
   // The chosen schema creates exactly the fields required by its discriminant.
   return { name, kind, columns, rows, hasExtraValues: rows.some((row) => row.extraValues.length > 0) } as GtfsTable;
 }
@@ -235,7 +298,14 @@ export interface GtfsLoadProgress {
   fileName?: string;
 }
 
-export function loadGtfs(data: Uint8Array, onProgress?: (progress: GtfsLoadProgress) => void): GtfsFeed {
+export function loadGtfs(
+  data: Uint8Array,
+  onProgressOrWarnings?: ((progress: GtfsLoadProgress) => void) | WarningCollector,
+  warningCollector?: WarningCollector,
+): GtfsFeed {
+  const onProgress = typeof onProgressOrWarnings === "function" ? onProgressOrWarnings : undefined;
+  const collector = typeof onProgressOrWarnings !== "function" ? onProgressOrWarnings ?? warningCollector : warningCollector;
+  collector?.clear();
   let files: Record<string, Uint8Array>;
   try {
     onProgress?.({ phase: "extracting", completed: 0, total: 1 });
@@ -266,6 +336,13 @@ export function loadGtfs(data: Uint8Array, onProgress?: (progress: GtfsLoadProgr
     const isMetadata = name.startsWith("._") || parts.includes("__MACOSX");
     if (isMetadata || !isGtfsTableName(key)) {
       unrecognizedFiles.push(path);
+      if (!isMetadata) {
+        collector?.add({
+          type: "unrecognized_files",
+          parameters: { file: path },
+          relatedObjectIds: [],
+        });
+      }
     }
     if (!key.endsWith(".txt") || isMetadata) {
       continue;
@@ -303,7 +380,16 @@ export function loadGtfs(data: Uint8Array, onProgress?: (progress: GtfsLoadProgr
     if (new Set(columns).size !== columns.length) {
       throw new Error(`${name} contains duplicate column names.`);
     }
-    tables.push(parseTable(name, columns, rows));
+    const recognizedFields: readonly string[] = isGtfsTableName(key) ? gtfsFields[key] : [];
+    const unrecognized = columns.filter((column) => !recognizedFields.includes(column));
+    for (const column of unrecognized) {
+      collector?.add({
+        type: "unrecognized_columns",
+        parameters: { file: name, column },
+        relatedObjectIds: [],
+      });
+    }
+    tables.push(parseTable(name, columns, rows, collector));
     parsedFiles++;
     onProgress?.({ phase: "parsing", completed: parsedFiles, total: textFiles.length, fileName: name });
   }
@@ -314,5 +400,5 @@ export function loadGtfs(data: Uint8Array, onProgress?: (progress: GtfsLoadProgr
 
   tables.sort((a, b) => a.name.localeCompare(b.name));
   unrecognizedFiles.sort();
-  return { tables, unrecognizedFiles };
+  return { tables, unrecognizedFiles, warnings: collector ? [...collector.all] : undefined };
 }

@@ -4,12 +4,197 @@ const { strToU8, zipSync } = require("fflate");
 const {
   decodeRouteType, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, loadGtfs, summarizeTripField,
 } = require("../dist/gtfs.cjs");
+const {
+  WarningCollector, WARNING_DESCRIPTIONS, WARNING_TYPES,
+} = require("../dist/warnings.cjs");
 
 function archive(files) {
   return zipSync(Object.fromEntries(
     Object.entries(files).map(([name, text]) => [name, strToU8(text)]),
   ));
 }
+
+test("warning collector supports counts, filtering, clearing and replacement", () => {
+  const collector = new WarningCollector();
+  const warning = {
+    type: "unrecognized_files",
+    parameters: { file: "readme.txt" },
+    relatedObjectIds: [],
+  };
+  collector.add(warning);
+  assert.equal(collector.count("unrecognized_files"), 1);
+  assert.equal(collector.count("extra_values"), 0);
+  assert.deepEqual(collector.forTypes(["unrecognized_files"]), [warning]);
+  assert.deepEqual(collector.forTypes(["extra_values"]), []);
+  collector.replace([warning, warning]);
+  assert.equal(collector.all.length, 2);
+  collector.clear();
+  assert.equal(collector.all.length, 0);
+});
+
+test("warning descriptions cover every warning type with severity and scope", () => {
+  assert.deepEqual([...WARNING_TYPES].sort(), [
+    "extra_values",
+    "missing_or_duplicate_ids",
+    "missing_values",
+    "unrecognized_columns",
+    "unrecognized_files",
+  ]);
+  for (const type of WARNING_TYPES) {
+    const description = WARNING_DESCRIPTIONS[type];
+    assert.equal(description.id, type);
+    assert.ok(description.messageTemplate.length > 0);
+    assert.ok(["error", "warning", "info"].includes(description.severity));
+    assert.ok(["archive", "table", "element"].includes(description.scope));
+  }
+});
+
+test("loadGtfs attaches all warning types to feed and collector", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,custom\nR1,one\nR1,two\n",
+    "stops.txt": "stop_id,stop_name,stop_desc\nS1,Main\nS2,Second,Description,extra\n,Missing\n",
+    "readme.md": "documentation",
+  }), collector);
+  assert.equal(feed.warnings.length, 7);
+  assert.equal(collector.all.length, 7);
+  for (const type of WARNING_TYPES) {
+    assert.ok(feed.warnings.some((warning) => warning.type === type));
+  }
+});
+
+test("reports extra values with CSV row numbers and values", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "stops.txt": 'stop_id,stop_name\nS1,Main\nS2,Second,extra,"more extra"\n',
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "extra_values");
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].csvRowNumber, 3);
+  assert.deepEqual(warnings[0].parameters, {
+    file: "stops.txt", row: 3, count: 2, values: ["extra", "more extra"],
+  });
+  assert.deepEqual(warnings[0].relatedObjectIds, []);
+  assert.equal(collector.count("extra_values"), 1);
+});
+
+test("reports missing values with CSV row numbers", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "stops.txt": "stop_id,stop_name,stop_desc\nS1,Main\nS2\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "missing_values");
+  assert.equal(warnings.length, 2);
+  assert.equal(warnings[0].csvRowNumber, 2);
+  assert.deepEqual(warnings[0].parameters, { file: "stops.txt", row: 2, count: 1 });
+  assert.equal(warnings[1].csvRowNumber, 3);
+  assert.deepEqual(warnings[1].parameters, { file: "stops.txt", row: 3, count: 2 });
+  assert.equal(collector.count("missing_values"), 2);
+});
+
+test("reports unrecognized CSV columns globally", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,route_name,custom\nR1,Route,one\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "unrecognized_columns");
+  assert.deepEqual(warnings, [{
+    type: "unrecognized_columns",
+    parameters: { file: "routes.txt", column: "route_name" },
+    relatedObjectIds: [],
+  }, {
+    type: "unrecognized_columns",
+    parameters: { file: "routes.txt", column: "custom" },
+    relatedObjectIds: [],
+  }]);
+  assert.equal(collector.count("unrecognized_columns"), 2);
+});
+
+test("reports missing and duplicate IDs with related object IDs", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,route_short_name\nR1,One\nR1,Duplicate\n,Missing\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "missing_or_duplicate_ids");
+  assert.equal(warnings.length, 2);
+  assert.equal(warnings[0].csvRowNumber, 3);
+  assert.deepEqual(warnings[0].parameters, {
+    file: "routes.txt", row: 3, column: "route_id", issue: "duplicate", id: "R1", idSuffix: ": R1",
+  });
+  assert.deepEqual(warnings[0].relatedObjectIds, ["R1"]);
+  assert.equal(warnings[1].csvRowNumber, 4);
+  assert.deepEqual(warnings[1].parameters, {
+    file: "routes.txt", row: 4, column: "route_id", issue: "missing", idSuffix: "",
+  });
+  assert.deepEqual(warnings[1].relatedObjectIds, []);
+});
+
+test("does not report duplicate service_id values in calendar_dates.txt", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "calendar_dates.txt": "service_id,date,exception_type\nweekday,20260101,1\nweekday,20260102,2\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "missing_or_duplicate_ids");
+  assert.equal(warnings.length, 0);
+  assert.equal(collector.count("missing_or_duplicate_ids"), 0);
+});
+
+test("does not report duplicate IDs in shapes.txt", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "shapes.txt": "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\nshape1,1,2,1\nshape1,1.1,2.1,2\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "missing_or_duplicate_ids");
+  assert.equal(warnings.length, 0);
+  assert.equal(collector.count("missing_or_duplicate_ids"), 0);
+});
+
+test("does not report duplicate service_id or fare_product_id values", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "calendar.txt": "service_id,monday,tuesday\nweekday,1,1\nweekday,1,1\n",
+    "fare_products.txt": "fare_product_id,fare_product_name\nproduct1,First\nproduct1,Second\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "missing_or_duplicate_ids");
+  assert.equal(warnings.length, 0);
+  assert.equal(collector.count("missing_or_duplicate_ids"), 0);
+});
+
+test("reports missing and duplicate IDs in route_networks.txt and pathways.txt", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "route_networks.txt": "network_id,route_id\nn1,r1\nn1,r1\nn1,\n",
+    "pathways.txt": "pathway_id,from_stop_id,to_stop_id\np1,s1,s2\np1,s2,s3\n,\ns1,s2\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "missing_or_duplicate_ids");
+  assert.equal(warnings.filter((warning) => warning.parameters.file === "route_networks.txt").length, 2);
+  assert.equal(warnings.filter((warning) => warning.parameters.file === "pathways.txt").length, 2);
+  assert.ok(warnings.some((warning) =>
+    warning.parameters.file === "route_networks.txt" && warning.parameters.issue === "duplicate"));
+  assert.ok(warnings.some((warning) =>
+    warning.parameters.file === "route_networks.txt" && warning.parameters.issue === "missing"));
+  assert.ok(warnings.some((warning) =>
+    warning.parameters.file === "pathways.txt" && warning.parameters.issue === "duplicate"));
+  assert.ok(warnings.some((warning) =>
+    warning.parameters.file === "pathways.txt" && warning.parameters.issue === "missing"));
+});
+
+test("reports unrecognized archive files and ignores metadata", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id\nR1\n",
+    "readme.md": "documentation",
+    "data.geojson": "{}",
+    "__MACOSX/._routes.txt": "ignored",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "unrecognized_files");
+  assert.deepEqual(new Set(warnings.map((warning) => warning.parameters.file)), new Set([
+    "data.geojson", "readme.md",
+  ]));
+  assert.equal(warnings.some((warning) => warning.parameters.file === "__MACOSX/._routes.txt"), false);
+  assert.equal(warnings.length, 2);
+  assert.equal(collector.count("unrecognized_files"), 2);
+});
 
 test("loads typed rows while preserving quoted CSV, unknown columns, and ZIP paths", () => {
   const feed = loadGtfs(archive({

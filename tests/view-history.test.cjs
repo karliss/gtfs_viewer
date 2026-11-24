@@ -45,6 +45,19 @@ test("back and forward navigate through history", () => {
   assert.equal(history.canGoForward, false);
 });
 
+test("preserves warning pagination without filters in history", () => {
+  const history = new ViewHistory();
+  history.push({
+    type: "warnings",
+    itemIndex: 100,
+  });
+
+  assert.deepEqual(history.current, {
+    type: "warnings",
+    itemIndex: 100,
+  });
+});
+
 test("push truncates forward history", () => {
   const history = new ViewHistory();
   history.push({ type: "route", routeId: "R1" });

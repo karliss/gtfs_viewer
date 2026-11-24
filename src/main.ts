@@ -13,6 +13,11 @@ import {
   type MapLine,
 } from "./map-view";
 import { DEFAULT_VIEW_STATE, ViewHistory, type ViewState } from "./view-history";
+import {
+  WARNING_DESCRIPTIONS, WARNING_LABELS, WARNING_TYPES,
+  WarningCollector,
+  type GtfsWarning, type WarningType,
+} from "./warnings";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 const app = document.querySelector<HTMLElement>("#app");
@@ -50,6 +55,7 @@ app.innerHTML = `
       </div>
       <button id="history-routes" type="button">Routes</button>
       <button id="history-stops" type="button">Stops</button>
+      <button id="history-warnings" type="button">Warnings</button>
     </div>
     <section id="viewer" class="panel viewer" hidden>
       <button id="back-to-route" type="button" hidden>Back to route details</button>
@@ -100,6 +106,46 @@ app.innerHTML = `
       <section id="all-route-stops">
         <ol id="route-stop-list"></ol>
       </section>
+    </section>
+    <section id="warnings-view" class="panel viewer" aria-labelledby="warnings-heading" hidden>
+      <h2 id="warnings-heading" tabindex="-1">Warnings</h2>
+      <div class="warning-filter-columns">
+        <div class="warning-filter-category">
+          <h3>Warning types</h3>
+          <div class="warning-filter-actions">
+            <button id="warning-types-select-all" type="button">Select all</button>
+            <button id="warning-types-clear-all" type="button">Clear all</button>
+          </div>
+          <div id="warning-types" class="warning-types" aria-label="Warning types"></div>
+        </div>
+        <div class="warning-filter-category">
+          <h3>Tables</h3>
+          <div class="warning-filter-actions">
+            <button id="warning-tables-select-all" type="button">Select all</button>
+            <button id="warning-tables-clear-all" type="button">Clear all</button>
+          </div>
+          <div id="warning-tables" class="warning-tables" aria-label="Associated tables"></div>
+        </div>
+      </div>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="GTFS warnings">
+        <table>
+          <thead><tr><th scope="col">Severity</th><th scope="col">Type</th><th scope="col">Row</th><th scope="col">Message</th></tr></thead>
+          <tbody id="warning-table-body"></tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <button id="warning-previous" type="button">Previous</button>
+        <span id="warning-page-label"></span>
+        <button id="warning-next" type="button">Next</button>
+        <label for="warning-page-size">Rows per page</label>
+        <select id="warning-page-size">
+          <option>25</option>
+          <option>50</option>
+          <option selected>100</option>
+          <option>250</option>
+          <option>500</option>
+        </select>
+      </div>
     </section>
     <section id="stop-detail" class="panel viewer" aria-labelledby="stop-heading" hidden>
       <h2 id="stop-heading" tabindex="-1">Stop details</h2>
@@ -196,6 +242,7 @@ const historyBack = element<HTMLButtonElement>("#history-back");
 const historyForward = element<HTMLButtonElement>("#history-forward");
 const historyRoutes = element<HTMLButtonElement>("#history-routes");
 const historyStops = element<HTMLButtonElement>("#history-stops");
+const historyWarnings = element<HTMLButtonElement>("#history-warnings");
 const historyControls = document.querySelector<HTMLElement>(".history-controls");
 const historySelect = element<HTMLButtonElement>("#history-select");
 const historyMenu = element<HTMLElement>("#history-menu");
@@ -237,6 +284,18 @@ const mapClearFilter = element<HTMLButtonElement>("#map-clear-filter");
 const mapSettings = element<HTMLDetailsElement>("#map-settings");
 const agencyDialog = element<HTMLDialogElement>("#agency-dialog");
 const agencyDialogContent = element<HTMLElement>("#agency-dialog-content");
+const warningsView = element<HTMLElement>("#warnings-view");
+const warningTypes = element<HTMLElement>("#warning-types");
+const warningTables = element<HTMLElement>("#warning-tables");
+const warningTypesSelectAll = element<HTMLButtonElement>("#warning-types-select-all");
+const warningTypesClearAll = element<HTMLButtonElement>("#warning-types-clear-all");
+const warningTablesSelectAll = element<HTMLButtonElement>("#warning-tables-select-all");
+const warningTablesClearAll = element<HTMLButtonElement>("#warning-tables-clear-all");
+const warningTableBody = element<HTMLTableSectionElement>("#warning-table-body");
+const warningPrevious = element<HTMLButtonElement>("#warning-previous");
+const warningNext = element<HTMLButtonElement>("#warning-next");
+const warningPageLabel = element<HTMLSpanElement>("#warning-page-label");
+const warningPageSize = element<HTMLSelectElement>("#warning-page-size");
 for (const layer of MAP_BASE_LAYERS) {
   const option = document.createElement("option");
   option.value = layer.id;
@@ -268,6 +327,12 @@ let highlightedStopItems: HTMLElement[] = [];
 const viewHistory = new ViewHistory();
 let viewHistoryRestoring = false;
 let mapMode: "stops" | "routes" | "route" = "routes";
+let selectedWarningTypes = new Set<WarningType>(WARNING_TYPES);
+let selectedWarningTables = new Set<string>();
+let warningTablesInitialized = false;
+let warningPage = 0;
+let warningRowsPerPage = 100;
+const warningCollector = new WarningCollector();
 const filteredTableStates = new Map<string, GtfsTable>();
 
 type CellRenderer = (column: string, value: string | null) => HTMLTableCellElement;
@@ -286,6 +351,10 @@ function tableFilterKey(): string | undefined {
 }
 
 function captureViewState(): ViewState {
+  if (!warningsView.hidden) return {
+    type: "warnings",
+    itemIndex: warningPage * warningRowsPerPage,
+  };
   if (routeDetail && !routeDetail.hidden && currentRoute) {
     return { type: "route", routeId: currentRoute.fields.route_id ?? "" };
   }
@@ -318,6 +387,7 @@ function captureViewState(): ViewState {
 }
 
 function stateLabel(state: ViewState): string {
+  if (state.type === "warnings") return "Warnings";
   if (state.type === "table") return state.filter ? `Table: ${state.filter}` : `Table: ${state.table || "feed"}`;
   if (state.type === "route") return `Route: ${routesById.get(state.routeId)?.fields.route_long_name || routesById.get(state.routeId)?.fields.route_short_name || state.routeId || "details"}`;
   if (state.type === "stop") return `Stop: ${stopsById.get(state.stopId)?.fields.stop_name || state.stopId || "details"}`;
@@ -371,6 +441,7 @@ function restoreTableState(state: Extract<ViewState, { type: "table" }>): void {
   mapView = undefined;
   mapPanel.hidden = true;
   viewer.hidden = false;
+  warningsView.hidden = true;
   renderSelectedTable();
   tableSelect.focus();
 }
@@ -378,7 +449,10 @@ function restoreTableState(state: Extract<ViewState, { type: "table" }>): void {
 function restoreViewState(state: ViewState): void {
   viewHistoryRestoring = true;
   try {
-    if (state.type === "table") {
+    if (state.type === "warnings") {
+      warningPage = Math.floor(state.itemIndex / warningRowsPerPage);
+      showWarnings();
+    } else if (state.type === "table") {
       restoreTableState(state);
     } else if (state.type === "route") {
       const route = routesById.get(state.routeId);
@@ -665,6 +739,7 @@ function showStop(stop: GtfsRow<"stops.txt">): void {
   viewer.hidden = true;
   mapPanel.hidden = true;
   routeDetail.hidden = true;
+  warningsView.hidden = true;
   stopDetail.hidden = false;
   stopHeading.focus();
   pushViewState();
@@ -851,6 +926,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
   viewer.hidden = true;
   routeDetail.hidden = false;
   stopDetail.hidden = true;
+  warningsView.hidden = true;
   mapPanel.hidden = true;
   routeHeading.focus();
   pushViewState();
@@ -1053,6 +1129,7 @@ function openMap(title: string): void {
   viewer.hidden = true;
   routeDetail.hidden = true;
   stopDetail.hidden = true;
+  warningsView.hidden = true;
   mapPanel.hidden = false;
   mapHeading.textContent = title;
   mapError.textContent = "";
@@ -1511,10 +1588,12 @@ form.addEventListener("submit", async (event) => {
   routeDetail.hidden = true;
   stopDetail.hidden = true;
   mapPanel.hidden = true;
+  warningsView.hidden = true;
   if (historyControls) historyControls.hidden = true;
   mapView?.remove();
   mapView = undefined;
   viewHistory.clear();
+  warningTablesInitialized = false;
   resetTableFilter();
   tableSearch.value = "";
   currentRoute = undefined;
@@ -1524,6 +1603,8 @@ form.addEventListener("submit", async (event) => {
 
   try {
     feed = await loadFeed(file);
+    warningCollector.replace(feed.warnings ?? []);
+    feed.warnings = [...warningCollector.all];
     if (historyControls) historyControls.hidden = false;
     routesById = indexRoutes(feed);
     const agencies = feed.tables.find((table) => table.kind === "agency.txt");
@@ -1700,6 +1781,193 @@ function openHistoryTable(kind: "routes.txt" | "stops.txt"): void {
 
 historyRoutes.addEventListener("click", () => openHistoryTable("routes.txt"));
 historyStops.addEventListener("click", () => openHistoryTable("stops.txt"));
+
+function formatWarningMessage(warning: GtfsWarning): string {
+  let message = WARNING_DESCRIPTIONS[warning.type].messageTemplate;
+  const parameters = {
+    ...warning.parameters,
+    row: warning.csvRowNumber ?? warning.parameters.row,
+    values: Array.isArray(warning.parameters.values)
+      ? warning.parameters.values.map((value) => JSON.stringify(value)).join(", ")
+      : warning.parameters.values,
+  };
+  for (const [key, value] of Object.entries(parameters)) {
+    message = message.split(`{${key}}`).join(String(value ?? ""));
+  }
+  return message;
+}
+
+function showWarnings(): void {
+  viewer.hidden = true;
+  routeDetail.hidden = true;
+  stopDetail.hidden = true;
+  mapPanel.hidden = true;
+  warningsView.hidden = false;
+
+  const warnings = feed?.warnings ?? [];
+  if (!warningTablesInitialized) {
+    const tableKeys = new Set(["Global"]);
+    for (const table of feed?.tables ?? []) tableKeys.add(table.name);
+    for (const warning of warnings) {
+      if (typeof warning.parameters.file === "string") tableKeys.add(warning.parameters.file);
+    }
+    selectedWarningTables = tableKeys;
+    warningTablesInitialized = true;
+  }
+  renderWarningFilters();
+  renderWarningTable();
+  updateHistoryUi();
+}
+
+function warningTableKey(warning: GtfsWarning): string {
+  if (WARNING_DESCRIPTIONS[warning.type].scope === "archive") return "Global";
+  return typeof warning.parameters.file === "string" ? warning.parameters.file : "Global";
+}
+
+function renderWarningFilters(): void {
+  const warnings = feed?.warnings ?? [];
+
+  const selectedByType = warnings.filter((warning) => selectedWarningTables.has(warningTableKey(warning)));
+  warningTypes.replaceChildren();
+  for (const type of WARNING_TYPES) {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedWarningTypes.has(type);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedWarningTypes.add(type);
+      else selectedWarningTypes.delete(type);
+      warningPage = 0;
+      renderWarningFilters();
+      renderWarningTable();
+    });
+    label.append(checkbox, ` ${WARNING_LABELS[type]} (${selectedByType.filter((warning) => warning.type === type).length})`);
+    warningTypes.append(label);
+  }
+
+  const selectedByTables = warnings.filter((warning) => selectedWarningTypes.has(warning.type));
+  const tableKeys = ["Global", ...[...new Set(warnings
+    .map(warningTableKey)
+    .filter((key) => key !== "Global"))].sort()];
+  warningTables.replaceChildren();
+  for (const table of tableKeys) {
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedWarningTables.has(table);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedWarningTables.add(table);
+      else selectedWarningTables.delete(table);
+      warningPage = 0;
+      renderWarningFilters();
+      renderWarningTable();
+    });
+    label.append(checkbox, ` ${table} (${selectedByTables.filter((warning) => warningTableKey(warning) === table).length})`);
+    warningTables.append(label);
+  }
+}
+
+function renderWarningTable(): void {
+  const warnings = (feed?.warnings ?? []).filter((warning) =>
+    selectedWarningTypes.has(warning.type) && selectedWarningTables.has(warningTableKey(warning)));
+  const pageCount = Math.max(1, Math.ceil(warnings.length / warningRowsPerPage));
+  warningPage = Math.min(warningPage, pageCount - 1);
+  const start = warningPage * warningRowsPerPage;
+  const fragment = document.createDocumentFragment();
+  for (const warning of warnings.slice(start, start + warningRowsPerPage)) {
+    const row = document.createElement("tr");
+    const description = WARNING_DESCRIPTIONS[warning.type];
+    const severity = document.createElement("td");
+    severity.textContent = description.severity;
+    const type = document.createElement("td");
+    type.textContent = WARNING_LABELS[warning.type];
+    const rowNumber = document.createElement("td");
+    rowNumber.textContent = warning.csvRowNumber ? String(warning.csvRowNumber) : "";
+    const message = document.createElement("td");
+    const text = formatWarningMessage(warning);
+
+    for (const id of warning.relatedObjectIds) {
+      const index = text.indexOf(id);
+      if (index < 0) continue;
+      message.append(text.slice(0, index));
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "route-link";
+      button.textContent = id;
+      button.addEventListener("click", () => {
+        const route = routesById.get(id);
+        if (route) showRoute(route);
+        else {
+          const stop = stopsById.get(id);
+          if (stop) showStop(stop);
+        }
+      });
+      message.append(button, text.slice(index + id.length));
+      break;
+    }
+    if (!warning.relatedObjectIds.length) message.textContent = text;
+
+    row.append(severity, type, rowNumber, message);
+    fragment.append(row);
+  }
+  warningTableBody.replaceChildren(fragment);
+  warningPageLabel.textContent = `Page ${warningPage + 1} of ${pageCount}`;
+  warningPrevious.disabled = warningPage === 0;
+  warningNext.disabled = warningPage + 1 >= pageCount;
+}
+
+historyWarnings.addEventListener("click", () => {
+  if (!feed) return;
+  showWarnings();
+});
+
+warningTypesSelectAll.addEventListener("click", () => {
+  selectedWarningTypes = new Set(WARNING_TYPES);
+  warningPage = 0;
+  showWarnings();
+});
+
+warningTypesClearAll.addEventListener("click", () => {
+  selectedWarningTypes.clear();
+  warningPage = 0;
+  showWarnings();
+});
+
+warningTablesSelectAll.addEventListener("click", () => {
+  selectedWarningTables = new Set(["Global", ...(feed?.tables.map((table) => table.name) ?? [])]);
+  for (const warning of feed?.warnings ?? []) {
+    if (typeof warning.parameters.file === "string") selectedWarningTables.add(warning.parameters.file);
+  }
+  warningPage = 0;
+  showWarnings();
+});
+
+warningTablesClearAll.addEventListener("click", () => {
+  selectedWarningTables.clear();
+  warningPage = 0;
+  showWarnings();
+});
+
+warningPrevious.addEventListener("click", () => {
+  if (warningPage === 0) return;
+  warningPage--;
+  renderWarningTable();
+  pushViewState();
+});
+
+warningNext.addEventListener("click", () => {
+  warningPage++;
+  renderWarningTable();
+  pushViewState();
+});
+
+warningPageSize.addEventListener("change", () => {
+  const firstItemIndex = warningPage * warningRowsPerPage;
+  warningRowsPerPage = Number(warningPageSize.value);
+  warningPage = Math.floor(firstItemIndex / warningRowsPerPage);
+  renderWarningTable();
+  pushViewState();
+});
 
 function closeHistoryMenu(): void {
   historyMenu.hidden = true;
