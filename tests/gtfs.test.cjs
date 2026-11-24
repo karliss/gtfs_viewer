@@ -149,6 +149,36 @@ test("does not report duplicate IDs in shapes.txt", () => {
   assert.equal(collector.count("missing_or_duplicate_ids"), 0);
 });
 
+test("does not report duplicate service_id or fare_product_id values", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "calendar.txt": "service_id,monday,tuesday\nweekday,1,1\nweekday,1,1\n",
+    "fare_products.txt": "fare_product_id,fare_product_name\nproduct1,First\nproduct1,Second\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "missing_or_duplicate_ids");
+  assert.equal(warnings.length, 0);
+  assert.equal(collector.count("missing_or_duplicate_ids"), 0);
+});
+
+test("reports missing and duplicate IDs in route_networks.txt and pathways.txt", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "route_networks.txt": "network_id,route_id\nn1,r1\nn1,r1\nn1,\n",
+    "pathways.txt": "pathway_id,from_stop_id,to_stop_id\np1,s1,s2\np1,s2,s3\n,\ns1,s2\n",
+  }), collector);
+  const warnings = feed.warnings.filter((warning) => warning.type === "missing_or_duplicate_ids");
+  assert.equal(warnings.filter((warning) => warning.parameters.file === "route_networks.txt").length, 2);
+  assert.equal(warnings.filter((warning) => warning.parameters.file === "pathways.txt").length, 2);
+  assert.ok(warnings.some((warning) =>
+    warning.parameters.file === "route_networks.txt" && warning.parameters.issue === "duplicate"));
+  assert.ok(warnings.some((warning) =>
+    warning.parameters.file === "route_networks.txt" && warning.parameters.issue === "missing"));
+  assert.ok(warnings.some((warning) =>
+    warning.parameters.file === "pathways.txt" && warning.parameters.issue === "duplicate"));
+  assert.ok(warnings.some((warning) =>
+    warning.parameters.file === "pathways.txt" && warning.parameters.issue === "missing"));
+});
+
 test("reports unrecognized archive files and ignores metadata", () => {
   const collector = new WarningCollector();
   const feed = loadGtfs(archive({
