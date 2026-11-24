@@ -57,7 +57,7 @@ app.innerHTML = `
       <select id="table-select"></select>
       <p id="table-filter" hidden></p>
       <button id="clear-filter" type="button" hidden>Show all rows</button>
-      <button id="stops-map" type="button" hidden>View stops on map</button>
+      <button id="stops-map" type="button" hidden title="View stops on map" aria-label="View stops on map">🗺️</button>
       <button id="routes-map" type="button" hidden title="View routes on map" aria-label="View routes on map">🗺️</button>
       <div class="table-controls">
         <div>
