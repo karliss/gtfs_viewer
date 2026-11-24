@@ -8,6 +8,7 @@ let detailPopup;
 class FakeMap {
   constructor(options) {
     map = this;
+    this.options = options;
     this.style = options?.style;
     this.events = {};
     this.sources = {};
@@ -65,19 +66,22 @@ try {
 }
 
 test("base map options include none and default locally to none", () => {
-  assert.deepEqual(MAP_BASE_LAYERS.map((layer) => layer.id), ["none", "osm", "osm-humanitarian"]);
+  assert.deepEqual(MAP_BASE_LAYERS.map((layer) => layer.id), ["none", "osm", "osm-humanitarian", "opentopomap"]);
   assert.equal(defaultMapBaseLayer("localhost"), "none");
   assert.equal(defaultMapBaseLayer("127.0.0.1"), "none");
   assert.equal(defaultMapBaseLayer("0.0.0.0"), "none");
   assert.equal(defaultMapBaseLayer("example.com"), "osm");
   const view = new MapView({ classList: { toggle() {} } }, () => {}, () => {}, undefined, undefined, undefined, "none");
-  assert.deepEqual(Object.keys(map.style.sources), ["osm", "osm-humanitarian"]);
+  assert.deepEqual(map.options.attributionControl, { compact: false });
+  assert.deepEqual(Object.keys(map.style.sources), ["osm", "osm-humanitarian", "opentopomap"]);
   assert.deepEqual(map.style.layers, []);
   map.events.load();
   view.setBaseLayer("osm");
   assert.equal(map.layers.basemap.source, "osm");
   view.setBaseLayer("osm-humanitarian");
   assert.equal(map.layers.basemap.source, "osm-humanitarian");
+  view.setBaseLayer("opentopomap");
+  assert.equal(map.layers.basemap.source, "opentopomap");
   assert.equal(map.layout["grid:visibility"], "none");
   view.setBaseLayer("none");
   assert.equal(map.layers.basemap, undefined);
@@ -85,10 +89,13 @@ test("base map options include none and default locally to none", () => {
 });
 
 test("black and white toggle applies to raster basemaps", () => {
-  const view = new MapView({ classList: { toggle() {} } }, () => {}, () => {}, undefined, undefined, undefined, "none");
+  const view = new MapView({ classList: { toggle() {} } }, () => {}, () => {}, undefined, undefined, undefined, "none", true);
   map.events.load();
   view.setBaseLayer("osm");
   assert.equal(map.layers.basemap.source, "osm");
+  assert.equal(map.layers.basemap.paint["raster-saturation"], -1);
+  view.setRasterBlackAndWhite(false);
+  assert.equal(map.paint["basemap:raster-saturation"], 0);
   view.setRasterBlackAndWhite(true);
   assert.equal(map.paint["basemap:raster-saturation"], -1);
   view.setBaseLayer("osm-humanitarian");
