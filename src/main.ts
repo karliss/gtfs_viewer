@@ -40,14 +40,14 @@ app.innerHTML = `
     </section>
     <div class="history-controls" aria-label="View history" hidden>
       <label class="history-select-label">History</label>
-      <button id="history-routes" type="button">Routes</button>
-      <button id="history-stops" type="button">Stops</button>
       <button id="history-back" type="button" title="Back" aria-label="Back">←</button>
       <button id="history-forward" type="button" title="Forward" aria-label="Forward">→</button>
       <div class="history-dropdown">
         <button id="history-select" type="button" title="View history" aria-label="View history" aria-haspopup="listbox" aria-expanded="false">▼</button>
         <div id="history-menu" class="history-menu" role="listbox" hidden></div>
       </div>
+      <button id="history-routes" type="button">Routes</button>
+      <button id="history-stops" type="button">Stops</button>
     </div>
     <section id="viewer" class="panel viewer" aria-labelledby="viewer-heading" hidden>
       <h2 id="viewer-heading">Feed tables</h2>
