@@ -198,6 +198,17 @@ test("reports unrecognized archive files and ignores metadata", () => {
   assert.equal(collector.count("unrecognized_files"), 2);
 });
 
+test("reports feed index initialization progress", () => {
+  const progress = [];
+  loadGtfs(archive({
+    "routes.txt": "route_id\nR1\n",
+  }), (update) => progress.push(update));
+  assert.deepEqual(progress.filter((update) => update.phase === "indexing"), [
+    { phase: "indexing", completed: 0, total: 1 },
+    { phase: "indexing", completed: 1, total: 1 },
+  ]);
+});
+
 test("loads typed rows while preserving quoted CSV, unknown columns, and ZIP paths", () => {
   const feed = loadGtfs(archive({
     "feed/STOPS.TXT": '\ufeffstop_id,stop_name,description\r\n001,"Main, Street","First\nSecond"\r\n',

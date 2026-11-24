@@ -1593,6 +1593,9 @@ function loadFeed(file: File): Promise<GtfsFeed> {
         if (progress.phase === "extracting") {
           loadingProgress.value = progress.completed ? 10 : 5;
           status.textContent = progress.completed ? "Archive extracted." : "Extracting GTFS archive…";
+        } else if (progress.phase === "indexing") {
+          loadingProgress.value = progress.completed ? 100 : 95;
+          status.textContent = progress.completed ? "GTFS indexes built." : "Building GTFS indexes…";
         } else {
           const percent = progress.total > 0
             ? 10 + Math.round(progress.completed / progress.total * 85)

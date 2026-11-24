@@ -451,7 +451,7 @@ function parseTable(name: string, columns: string[], records: string[][], collec
 }
 
 export interface GtfsLoadProgress {
-  phase: "extracting" | "parsing";
+  phase: "extracting" | "parsing" | "indexing";
   completed: number;
   total: number;
   fileName?: string;
@@ -676,6 +676,8 @@ export function loadGtfs(
     unrecognizedFiles,
     warnings: collector ? [...collector.all] : undefined,
   } as GtfsFeed;
+  onProgress?.({ phase: "indexing", completed: 0, total: 1 });
   initializeFeedIndexes(feed);
+  onProgress?.({ phase: "indexing", completed: 1, total: 1 });
   return feed;
 }
