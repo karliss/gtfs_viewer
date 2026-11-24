@@ -30,6 +30,9 @@ export class MapView {
   private hoveredStopIndex: number | null = null;
   private routeColorsEnabled = true;
   private randomColorsEnabled = false;
+  private stopSizeReduced = false;
+  private stopOrderEnabled = false;
+  private stopOrderVariant: number | null = null;
   private popup: Popup;
   private detailPopup: Popup;
   private pendingZoom: Coordinate | null = null;
@@ -93,6 +96,26 @@ export class MapView {
         id: "stops", type: "circle", source: "stops",
         paint: { "circle-radius": 5, "circle-color": "#fff", "circle-stroke-color": "#1554a0", "circle-stroke-width": 2 },
       });
+      this.map.addLayer({
+        id: "stop-last-dot", type: "circle", source: "stops",
+        filter: ["==", ["get", "stopId"], ""],
+        paint: { "circle-radius": 2.5, "circle-color": "#e95e21", "circle-stroke-width": 0 },
+      });
+      this.map.addLayer({
+        id: "stop-order", type: "symbol", source: "stops",
+        layout: {
+          "text-field": ["to-string", ["get", "stopOrder"]],
+          "text-size": 10,
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
+          "visibility": "none",
+        },
+        paint: {
+          "text-color": "#111",
+          "text-halo-color": "#fff",
+          "text-halo-width": 1,
+        },
+      });
       this.map.addSource("highlight", { type: "geojson", data: this.highlightFeatures() });
       this.map.addLayer({
         id: "highlight", type: "circle", source: "highlight",
@@ -101,6 +124,8 @@ export class MapView {
       this.loaded = true;
       this.applyVariantHighlight();
       this.applyRouteColors();
+      this.applyStopSize();
+      this.applyStopOrder();
       this.fit();
       if (this.pendingZoom) {
         this.zoomTo(this.pendingZoom);
@@ -165,7 +190,7 @@ export class MapView {
     });
   }
 
-  update(stops: MapStop[], lines: MapLine[]): void {
+  update(stops: MapStop[], lines: MapLine[], fitView = true): void {
     this.stops = stops;
     this.lines = lines;
     this.highlighted = null;
@@ -183,7 +208,9 @@ export class MapView {
       (this.map.getSource("highlight") as GeoJSONSource).setData(this.highlightFeatures());
       this.applyVariantHighlight();
       this.applyRouteColors();
-      this.fit();
+      this.applyStopSize();
+      this.applyStopOrder();
+      if (fitView) this.fit();
     }
   }
 
@@ -200,6 +227,26 @@ export class MapView {
   setRandomColors(enabled: boolean): void {
     this.randomColorsEnabled = enabled;
     if (this.loaded) this.applyRouteColors();
+  }
+
+  setStopSizeReduced(enabled: boolean): void {
+    this.stopSizeReduced = enabled;
+    if (this.loaded) {
+      this.map.setPaintProperty("stops", "circle-radius", enabled ? 3 : 5);
+    }
+  }
+
+  setStopOrderEnabled(enabled: boolean): void {
+    this.stopOrderEnabled = enabled;
+    if (this.loaded) this.applyStopOrder();
+  }
+
+  setStopOrderVariant(index: number | null): void {
+    this.stopOrderVariant = index;
+    if (this.loaded) {
+      (this.map.getSource("stops") as GeoJSONSource).setData(this.stopFeatures());
+      this.applyStopOrder();
+    }
   }
 
   hoverVariant(index: number | null): void {
@@ -232,9 +279,22 @@ export class MapView {
   }
 
   private stopFeatures(): FeatureCollection<Point> {
+    const orderLine = this.stopOrderVariant === null
+      ? null
+      : this.lines.find((line) => line.variantIndex === this.stopOrderVariant);
+    const stopOrders = new Map<string, number>();
+    for (const [index, stopId] of (orderLine?.stopIds ?? []).entries()) {
+      if (stopId) stopOrders.set(stopId, index + 1);
+    }
     const features: Feature<Point>[] = this.stops.flatMap((stop, index) => stop.coordinate
       ? [{
-        type: "Feature", properties: { stopId: stop.id ?? "", stopIndex: index, label: stop.hoverLabel || stop.name?.trim() || stop.id || "Stop" },
+        type: "Feature",
+        properties: {
+          stopId: stop.id ?? "",
+          stopIndex: index,
+          label: stop.hoverLabel || stop.name?.trim() || stop.id || "Stop",
+          ...(stop.id && stopOrders.has(stop.id) ? { stopOrder: stopOrders.get(stop.id) } : {}),
+        },
         geometry: { type: "Point", coordinates: stop.coordinate },
       }] : []);
     return { type: "FeatureCollection", features };
@@ -264,13 +324,41 @@ export class MapView {
     this.map.setFilter("route-approximation-highlight", ["all", ["==", ["get", "approximate"], true], ["==", ["get", "variantIndex"], index]]);
     const stopIds = [...new Set(this.lines.filter((line) => line.variantIndex === index).flatMap((line) => line.stopIds ?? []))];
     this.map.setPaintProperty("stops", "circle-color", [
-      "case", ["==", ["get", "stopIndex"], this.hoveredStopIndex ?? -1], "#f5a623",
-      ["in", ["get", "stopId"], ["literal", stopIds]], "#e95e21", "#fff",
+      "case", ["==", ["get", "stopIndex"], this.hoveredStopIndex ?? -1], "#fff",
+      ["in", ["get", "stopId"], ["literal", stopIds]], "#fff", "#fff",
     ]);
     this.map.setPaintProperty("stops", "circle-stroke-color", [
       "case", ["==", ["get", "stopIndex"], this.hoveredStopIndex ?? -1], "#b33a08",
       ["in", ["get", "stopId"], ["literal", stopIds]], "#e95e21", "#1554a0",
     ]);
+    const lastStopId = this.highlightedVariant === null
+      ? null
+      : (() => {
+        const stopIds = this.lines.find((line) => line.variantIndex === this.highlightedVariant)?.stopIds;
+        return stopIds?.length ? stopIds[stopIds.length - 1] : null;
+      })();
+    this.map.setFilter("stop-last-dot", ["==", ["get", "stopId"], lastStopId ?? "__no_variant_last_stop__"]);
+
+    if (typeof (this.map as LibreMap & { moveLayer?: (id: string) => void }).moveLayer === "function") {
+      this.map.moveLayer("route-highlight");
+      this.map.moveLayer("route-approximation-highlight");
+      this.map.moveLayer("stops");
+      this.map.moveLayer("stop-last-dot");
+      this.map.moveLayer("stop-order");
+    }
+  }
+
+  private applyStopSize(): void {
+    if (this.stopSizeReduced) {
+      this.map.setPaintProperty("stops", "circle-radius", 3);
+    }
+  }
+
+  private applyStopOrder(): void {
+    const visible = this.stopOrderEnabled && this.stopOrderVariant !== null;
+    if (typeof (this.map as LibreMap & { setLayoutProperty?: (id: string, name: string, value: unknown) => void }).setLayoutProperty === "function") {
+      this.map.setLayoutProperty("stop-order", "visibility", visible ? "visible" : "none");
+    }
   }
 
   private applyRouteColors(): void {
