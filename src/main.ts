@@ -131,7 +131,7 @@ app.innerHTML = `
               Black and white
             </label>
             <label class="map-option" for="map-route-colors">
-              <input id="map-route-colors" type="checkbox" checked />
+              <input id="map-route-colors" type="checkbox" />
               Use route colors
             </label>
             <label class="map-option" for="map-random-colors">
@@ -1064,10 +1064,13 @@ function openMap(returnTo: "table" | "route", title: string): void {
         }
       },
       mapBaseLayer.value as MapBaseLayerId,
-      mapRasterBlackAndWhite.checked,
     );
-    mapView.setRouteColors(mapRouteColors.checked);
-    mapView.setRandomColors(mapRandomColors.checked);
+    mapRasterBlackAndWhite.checked = mapView.rasterBlackAndWhiteEnabled;
+    mapRouteColors.checked = mapView.routeColorsEnabledState;
+    mapRandomColors.checked = mapView.randomColorsEnabledState;
+    mapAllStops.checked = mapView.allStopsEnabledState;
+    mapReducedStops.checked = mapView.reducedStopSizeEnabled;
+    mapStopOrder.checked = mapView.stopOrderEnabledState;
   } catch (error) {
     mapError.textContent = `Could not initialize the map: ${error instanceof Error ? error.message : "unknown error"}`;
   }
@@ -1390,7 +1393,7 @@ function renderRouteMap(preserveMapView = false): void {
   mapSummary.textContent = warnings.join(" ") || (mapRouteVariants.length
     ? `${selected.length} ${selected.length === 1 ? "variant" : "variants"} shown.`
     : "No route variants are available.");
-  const displayedStops = mapAllStops.checked
+  const displayedStops = mapView?.allStopsEnabledState
     ? (feed.tables.find((table) => table.kind === "stops.txt")?.rows ?? []).map(mapStop)
     : allStops;
   mapView?.update(displayedStops.map((stop) => ({
@@ -1528,7 +1531,10 @@ mapRandomColors.addEventListener("change", () => {
   mapView?.setRouteColors(mapRouteColors.checked);
   mapView?.setRandomColors(mapRandomColors.checked);
 });
-mapAllStops.addEventListener("change", () => renderRouteMap(true));
+mapAllStops.addEventListener("change", () => {
+  mapView?.setAllStopsEnabled(mapAllStops.checked);
+  renderRouteMap(true);
+});
 mapReducedStops.addEventListener("change", () => mapView?.setStopSizeReduced(mapReducedStops.checked));
 mapStopOrder.addEventListener("change", () => mapView?.setStopOrderEnabled(mapStopOrder.checked));
 mapBaseLayer.addEventListener("change", () => {

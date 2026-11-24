@@ -14,7 +14,7 @@ import type { Coordinate, MapStop } from "./map-data";
 const workerUrl = URL.createObjectURL(new Blob([mapWorker], { type: "text/javascript" }));
 setWorkerUrl(workerUrl);
 
-export type MapBaseLayerId = "none" | "osm" | "osm-humanitarian";
+export type MapBaseLayerId = "none" | "osm" | "osm-humanitarian" | "opentopomap";
 
 export interface MapBaseLayerOption {
   id: MapBaseLayerId;
@@ -43,10 +43,20 @@ export const MAP_BASE_LAYERS: readonly MapBaseLayerOption[] = [
     id: "osm-humanitarian",
     label: "OpenStreetMap Humanitarian",
     source: {
-      tiles: ["https://tile.openstreetmap.fr/hot/{z}/{x}/{y}.png"],
+      tiles: ["https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png"],
       tileSize: 256,
       maxzoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://www.hotosm.org/">Humanitarian OpenStreetMap Team</a>',
+    },
+  },
+  {
+    id: "opentopomap",
+    label: "OpenTopoMap",
+    source: {
+      tiles: ["https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      maxzoom: 17,
+      attribution: 'Kartendaten: © <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende, SRTM | Kartendarstellung: © <a href="http://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
     },
   },
 ];
@@ -80,10 +90,11 @@ export class MapView {
   private mapHoveredVariant: number | null = null;
   private hoveredStop: string | null = null;
   private hoveredStopIndex: number | null = null;
-  private routeColorsEnabled = true;
-  private randomColorsEnabled = false;
-  private stopSizeReduced = false;
-  private stopOrderEnabled = false;
+  private routeColorsEnabled: boolean;
+  private randomColorsEnabled: boolean;
+  private stopSizeReduced: boolean;
+  private stopOrderEnabled: boolean;
+  private allStopsEnabled = false;
   private stopOrderVariant: number | null = null;
   private baseLayer: MapBaseLayerId;
   private rasterBlackAndWhite = false;
@@ -102,11 +113,21 @@ export class MapView {
     routeDetails?: (routeId: string, variantIndex: number | null) => HTMLElement | null,
     onVariantHover?: (index: number | null) => void,
     baseLayer: MapBaseLayerId = defaultMapBaseLayer(),
-    rasterBlackAndWhite = false,
+    rasterBlackAndWhite = true,
+    routeColors = true,
+    randomColors = false,
+    stopSizeReduced = false,
+    stopOrder = false,
+    allStops = false,
   ) {
     this.container = container;
     this.baseLayer = baseLayer;
     this.rasterBlackAndWhite = rasterBlackAndWhite;
+    this.routeColorsEnabled = routeColors;
+    this.randomColorsEnabled = randomColors;
+    this.stopSizeReduced = stopSizeReduced;
+    this.stopOrderEnabled = stopOrder;
+    this.allStopsEnabled = allStops;
     this.stopDetailsCallback = stopDetails;
     const baseLayerOption = MAP_BASE_LAYERS.find((option) => option.id === baseLayer);
     const sources: Record<string, SourceSpecification> = {};
@@ -133,6 +154,7 @@ export class MapView {
       container,
       center: [0, 0],
       zoom: 1,
+      attributionControl: { compact: false },
       style: {
         version: 8,
         sources,
@@ -334,6 +356,34 @@ export class MapView {
   setStopOrderEnabled(enabled: boolean): void {
     this.stopOrderEnabled = enabled;
     if (this.loaded) this.applyStopOrder();
+  }
+
+  get rasterBlackAndWhiteEnabled(): boolean {
+    return this.rasterBlackAndWhite;
+  }
+
+  get routeColorsEnabledState(): boolean {
+    return this.routeColorsEnabled;
+  }
+
+  get randomColorsEnabledState(): boolean {
+    return this.randomColorsEnabled;
+  }
+
+  get reducedStopSizeEnabled(): boolean {
+    return this.stopSizeReduced;
+  }
+
+  get stopOrderEnabledState(): boolean {
+    return this.stopOrderEnabled;
+  }
+
+  get allStopsEnabledState(): boolean {
+    return this.allStopsEnabled;
+  }
+
+  setAllStopsEnabled(enabled: boolean): void {
+    this.allStopsEnabled = enabled;
   }
 
   setStopOrderVariant(index: number | null): void {
