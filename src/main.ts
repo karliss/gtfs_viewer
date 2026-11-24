@@ -121,6 +121,14 @@ app.innerHTML = `
               <input id="map-all-stops" type="checkbox" />
               Show all stops
             </label>
+            <label class="map-option" for="map-reduced-stops">
+              <input id="map-reduced-stops" type="checkbox" />
+              Reduce stop size
+            </label>
+            <label class="map-option" for="map-stop-order">
+              <input id="map-stop-order" type="checkbox" />
+              Display stop order numbers
+            </label>
           </div>
         </details>
       </div>
@@ -191,6 +199,8 @@ const mapVariantReset = element<HTMLButtonElement>("#map-variant-reset");
 const mapRouteColors = element<HTMLInputElement>("#map-route-colors");
 const mapRandomColors = element<HTMLInputElement>("#map-random-colors");
 const mapAllStops = element<HTMLInputElement>("#map-all-stops");
+const mapReducedStops = element<HTMLInputElement>("#map-reduced-stops");
+const mapStopOrder = element<HTMLInputElement>("#map-stop-order");
 const mapClearFilter = element<HTMLButtonElement>("#map-clear-filter");
 const backFromMap = element<HTMLButtonElement>("#back-from-map");
 const mapToTables = element<HTMLButtonElement>("#map-to-tables");
@@ -1022,7 +1032,7 @@ function populateMapVariants(): void {
   mapVariant.value = "all";
 }
 
-function renderRouteMap(): void {
+function renderRouteMap(preserveMapView = false): void {
   if (!feed) return;
   const selectedRoute = mapRoute.value === "all" ? undefined : mapRoutes[Number(mapRoute.value)];
   mapHeading.textContent = selectedRoute ? `Route map: ${routeListLabel(selectedRoute)}` : "Routes map";
@@ -1053,6 +1063,7 @@ function renderRouteMap(): void {
       button.setAttribute("aria-pressed", "false");
     }
     mapView?.highlightVariant(null);
+    mapView?.setStopOrderVariant(null);
   });
   mapSidebar.append(clearHighlight);
   for (const index of selected) {
@@ -1095,6 +1106,7 @@ function renderRouteMap(): void {
         button.setAttribute("aria-pressed", String(button === variantButton && pinnedVariant !== null));
       }
       mapView?.highlightVariant(pinnedVariant);
+      mapView?.setStopOrderVariant(pinnedVariant);
     });
     const list = document.createElement("ol");
     const toggle = document.createElement("button");
@@ -1185,7 +1197,9 @@ function renderRouteMap(): void {
         ? `${stopLabels.get(stop.id)!.length} stops`
         : `stop ${stopLabels.get(stop.id)!.join(", ")}`}`
       : undefined,
-  })), lines);
+  })), lines, !preserveMapView);
+  mapView?.setStopOrderVariant(selected.length === 1 ? selected[0] : null);
+  mapView?.highlightVariant(selected.length === 1 ? selected[0] : null);
 }
 
 function loadFeed(file: File): Promise<GtfsFeed> {
@@ -1333,7 +1347,7 @@ mapRouteReset.addEventListener("click", () => {
   populateMapVariants();
   renderRouteMap();
 });
-mapVariant.addEventListener("change", renderRouteMap);
+mapVariant.addEventListener("change", () => renderRouteMap());
 mapVariantReset.addEventListener("click", () => {
   mapVariant.value = "all";
   renderRouteMap();
@@ -1348,7 +1362,9 @@ mapRandomColors.addEventListener("change", () => {
   mapView?.setRouteColors(mapRouteColors.checked);
   mapView?.setRandomColors(mapRandomColors.checked);
 });
-mapAllStops.addEventListener("change", renderRouteMap);
+mapAllStops.addEventListener("change", () => renderRouteMap(true));
+mapReducedStops.addEventListener("change", () => mapView?.setStopSizeReduced(mapReducedStops.checked));
+mapStopOrder.addEventListener("change", () => mapView?.setStopOrderEnabled(mapStopOrder.checked));
 mapClearFilter.addEventListener("click", () => {
   tableSearch.value = "";
   page = 0;
