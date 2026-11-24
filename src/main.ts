@@ -36,6 +36,8 @@ app.innerHTML = `
           <button type="submit">Load feed</button>
         </div>
       </form>
+      <span id="loading-spinner" class="loading-spinner" aria-label="Loading feed" hidden></span>
+      <progress id="loading-progress" max="100" value="0" hidden></progress>
       <p id="status" role="status" aria-live="polite"></p>
     </section>
     <div class="history-controls" aria-label="View history" hidden>
@@ -119,7 +121,7 @@ app.innerHTML = `
           <select id="map-variant"></select>
           <button id="map-variant-reset" type="button" title="Show all variants" aria-label="Show all variants">X</button>
         </div>
-        <details class="map-settings">
+        <details id="map-settings" class="map-settings">
           <summary title="Map settings" aria-label="Map settings">⚙</summary>
           <div class="map-settings-menu">
             <label class="map-option" for="map-base-layer">
@@ -177,6 +179,8 @@ const loadPanel = element<HTMLElement>("#load-panel");
 const input = element<HTMLInputElement>("#feed-file");
 const submit = element<HTMLButtonElement>("#load-form button");
 const status = element<HTMLParagraphElement>("#status");
+const loadingSpinner = element<HTMLSpanElement>("#loading-spinner");
+const loadingProgress = element<HTMLProgressElement>("#loading-progress");
 const viewer = element<HTMLElement>("#viewer");
 const feedSummary = element<HTMLParagraphElement>("#feed-summary");
 const tableSelect = element<HTMLSelectElement>("#table-select");
@@ -230,6 +234,7 @@ const mapAllStops = element<HTMLInputElement>("#map-all-stops");
 const mapReducedStops = element<HTMLInputElement>("#map-reduced-stops");
 const mapStopOrder = element<HTMLInputElement>("#map-stop-order");
 const mapClearFilter = element<HTMLButtonElement>("#map-clear-filter");
+const mapSettings = element<HTMLDetailsElement>("#map-settings");
 const agencyDialog = element<HTMLDialogElement>("#agency-dialog");
 const agencyDialogContent = element<HTMLElement>("#agency-dialog-content");
 for (const layer of MAP_BASE_LAYERS) {
@@ -381,14 +386,14 @@ function restoreViewState(state: ViewState): void {
       else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
     } else if (state.type === "stop") {
       const stop = stopsById.get(state.stopId);
-      if (stop) showStop(stop, "table");
+      if (stop) showStop(stop);
       else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
     } else if (state.type === "map") {
       if (state.mode === "stops") showStopsMap();
       else if (state.mode === "routes") showAllRoutesMap();
       else {
         const route = state.routeId ? routesById.get(state.routeId) : undefined;
-        if (route) showRouteMap(route, "table", state.variantIndex ?? "all");
+        if (route) showRouteMap(route, state.variantIndex ?? "all");
         else showAllRoutesMap();
       }
     }
@@ -551,7 +556,7 @@ function routeCompactContent(route: GtfsRow<"routes.txt">, variantIndex: number 
   mapButton.addEventListener("click", () => {
     const indices = mapVariantRouteIds.flatMap((id, index) => id === route.fields.route_id ? [index] : []);
     const localIndex = variantIndex === null ? -1 : indices.indexOf(variantIndex);
-    showRouteMap(route, "table", localIndex < 0 ? "all" : localIndex);
+    showRouteMap(route, localIndex < 0 ? "all" : localIndex);
   });
   content.append(" ", mapButton);
   return content;
@@ -582,7 +587,7 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
       button.className = "route-link";
       button.textContent = "more";
       button.setAttribute("aria-label", "Open stop details");
-      button.addEventListener("click", () => showStop(stop, "map"));
+      button.addEventListener("click", () => showStop(stop));
       description.append(" ", button);
     }
     if (!popup && name === "stop_lat" && mapStop(stop).coordinate) {
@@ -630,10 +635,20 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
         const label = !popup && longName && longName !== shortName ? `${shortName} — ${longName}` : shortName;
         button.append(document.createTextNode(label));
         button.setAttribute("aria-label", popup ? `Show route ${label} on map` : `Open route ${label}`);
-        button.addEventListener("click", () => popup ? showRouteMap(route, "table", "all") : showRoute(route, "stop"));
+        button.addEventListener("click", () => popup ? showRouteMap(route, "all") : showRoute(route));
         item.append(button);
       } else {
         item.textContent = route ? routeListLabel(route) : id;
+      }
+      if (route) {
+        const mapButton = document.createElement("button");
+        mapButton.type = "button";
+        mapButton.className = "route-map-icon";
+        mapButton.textContent = "🗺️";
+        mapButton.title = `Show route ${routeListLabel(route)} on map`;
+        mapButton.setAttribute("aria-label", `Show route ${routeListLabel(route)} on map`);
+        mapButton.addEventListener("click", () => showRouteMap(route, "all"));
+        item.append(" ", mapButton);
       }
       routeList.append(item);
     }
@@ -644,7 +659,7 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
   return content;
 }
 
-function showStop(stop: GtfsRow<"stops.txt">, returnTo: "table" | "map" | "route"): void {
+function showStop(stop: GtfsRow<"stops.txt">): void {
   stopHeading.textContent = `Stop details: ${stop.fields.stop_name || stop.fields.stop_id || "Stop"}`;
   stopProperties.replaceChildren(stopContent(stop));
   viewer.hidden = true;
@@ -677,7 +692,7 @@ const tableCellRenderers: Record<string, CellRenderer> = {
     ? renderUrlCell(column, value) : renderGenericCell(column, value),
 };
 
-function showRoute(route: GtfsRow<"routes.txt">, returnTo: "table" | "stop" = "table"): void {
+function showRoute(route: GtfsRow<"routes.txt">): void {
   if (!feed) return;
   currentRoute = route;
   const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
@@ -756,7 +771,7 @@ function showRoute(route: GtfsRow<"routes.txt">, returnTo: "table" | "stop" = "t
     mapButton.textContent = "🗺️";
     mapButton.title = "View variant on map";
     mapButton.setAttribute("aria-label", `View ${heading.textContent} on map`);
-    mapButton.addEventListener("click", () => showRouteMap(route, "route", index));
+    mapButton.addEventListener("click", () => showRouteMap(route, index));
     heading.append(" ", mapButton);
     section.append(heading);
     const properties = document.createElement("dl");
@@ -854,7 +869,7 @@ function routeStopLink(stopId: string | null, stopNames: Map<string | null, stri
   button.type = "button";
   button.className = "route-link";
   button.textContent = label;
-  button.addEventListener("click", () => showStop(stop, "route"));
+  button.addEventListener("click", () => showStop(stop));
   return button;
 }
 
@@ -981,7 +996,7 @@ function renderTable(table: GtfsTable): void {
       button.textContent = "🗺️";
       button.title = "View route on map";
       button.setAttribute("aria-label", `View route ${route.fields.route_short_name || route.fields.route_id || "details"} on map`);
-      button.addEventListener("click", () => showRouteMap(route, "table"));
+      button.addEventListener("click", () => showRouteMap(route));
       const more = document.createElement("button");
       more.type = "button";
       more.textContent = "...";
@@ -1008,7 +1023,7 @@ function renderTable(table: GtfsTable): void {
       more.className = "route-link";
       more.textContent = "More";
       more.setAttribute("aria-label", `Open stop ${stop.fields.stop_name || stop.fields.stop_id || "details"}`);
-      more.addEventListener("click", () => showStop(stop, "table"));
+      more.addEventListener("click", () => showStop(stop));
       row.firstElementChild?.prepend(button, " (", more, ") ");
     }
     rows.append(row);
@@ -1032,7 +1047,7 @@ function renderSelectedTable(): void {
   if (table) renderTable(table);
 }
 
-function openMap(returnTo: "table" | "route", title: string): void {
+function openMap(title: string): void {
   mapView?.remove();
   mapView = undefined;
   viewer.hidden = true;
@@ -1064,6 +1079,23 @@ function openMap(returnTo: "table" | "route", title: string): void {
         }
       },
       mapBaseLayer.value as MapBaseLayerId,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      () => {
+        if (mapMode !== "route") {
+          mapView?.focusSelection(null, null);
+          return;
+        }
+        const routeId = mapRoute.value === "all"
+          ? null
+          : mapRoutes[Number(mapRoute.value)]?.fields.route_id ?? null;
+        const variantIndex = mapVariant.value === "all" ? null : Number(mapVariant.value);
+        mapView?.focusSelection(routeId, variantIndex);
+      },
     );
     mapRasterBlackAndWhite.checked = mapView.rasterBlackAndWhiteEnabled;
     mapRouteColors.checked = mapView.routeColorsEnabledState;
@@ -1089,7 +1121,7 @@ function showStopsMap(): void {
   mapSidebar.hidden = true;
   mapVariantControls.hidden = true;
   mapMode = "stops";
-  openMap("table", "Stops map");
+  openMap("Stops map");
   if (filteredTable?.kind === "stops.txt" || feed.tables[tableSelect.selectedIndex]?.kind === "stops.txt") {
     renderStopsMap();
   } else {
@@ -1118,7 +1150,7 @@ function renderStopsMap(): void {
   mapView?.update(stops, []);
 }
 
-function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route", variantIndex: number | "all" = 0): void {
+function showRouteMap(route: GtfsRow<"routes.txt">, variantIndex: number | "all" = 0): void {
   if (!feed) return;
   const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
   const routes = feed.tables.find((table) => table.kind === "routes.txt")?.rows ?? [];
@@ -1130,7 +1162,7 @@ function showRouteMap(route: GtfsRow<"routes.txt">, returnTo: "table" | "route",
     const indices = mapVariantRouteIds.flatMap((id, index) => id === route.fields.route_id ? [index] : []);
     if (indices[variantIndex] !== undefined) mapVariant.value = String(indices[variantIndex]);
   }
-  openMap(returnTo, title ? `Route map: ${title}` : "Route map");
+  openMap(title ? `Route map: ${title}` : "Route map");
   renderRouteMap();
   mapMode = "route";
   pushViewState();
@@ -1145,7 +1177,7 @@ function showAllRoutesMap(): void {
   prepareRouteMap(getMatchingRows(table, tableSearch.value) as GtfsRow<"routes.txt">[]);
   mapRoute.value = "all";
   populateMapVariants();
-  openMap("table", "Routes map");
+  openMap("Routes map");
   renderRouteMap();
   mapMode = "routes";
   pushViewState();
@@ -1294,6 +1326,7 @@ function renderRouteMap(preserveMapView = false): void {
       warnings.push(`${label}: ${data.invalidShapePoints} invalid shape points omitted.`);
     }
     const section = document.createElement("section");
+    section.dataset.variantIndex = String(index);
     const heading = document.createElement("h3");
     const variantButton = document.createElement("button");
     variantButton.type = "button";
@@ -1306,6 +1339,7 @@ function renderRouteMap(preserveMapView = false): void {
     variantButton.addEventListener("focus", () => mapView?.hoverVariant(index));
     variantButton.addEventListener("blur", () => mapView?.hoverVariant(null));
     variantButton.addEventListener("click", () => {
+      mapSettings.open = false;
       pinnedVariant = pinnedVariant === index ? null : index;
       clearHighlight.hidden = pinnedVariant === null;
       for (const button of mapSidebar.querySelectorAll<HTMLButtonElement>(".map-variant-label")) {
@@ -1313,6 +1347,7 @@ function renderRouteMap(preserveMapView = false): void {
       }
       mapView?.highlightVariant(pinnedVariant);
       mapView?.setStopOrderVariant(pinnedVariant);
+      section.scrollIntoView({ block: "nearest", behavior: "smooth" });
     });
     const list = document.createElement("ol");
     const toggle = document.createElement("button");
@@ -1369,7 +1404,7 @@ function renderRouteMap(preserveMapView = false): void {
         details.textContent = "...";
         details.title = `Open details for ${stopLabel}`;
         details.setAttribute("aria-label", `Open details for ${stopLabel}`);
-        details.addEventListener("click", () => showStop(row, "map"));
+        details.addEventListener("click", () => showStop(row));
         item.append(" ", details);
       }
       list.append(item);
@@ -1418,9 +1453,30 @@ function loadFeed(file: File): Promise<GtfsFeed> {
   }
   return new Promise((resolve, reject) => {
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+      if ("progress" in event.data) {
+        const progress = event.data.progress;
+        if (progress.phase === "extracting") {
+          loadingProgress.value = progress.completed ? 10 : 5;
+          status.textContent = progress.completed ? "Archive extracted." : "Extracting GTFS archive…";
+        } else {
+          const percent = progress.total > 0
+            ? 10 + Math.round(progress.completed / progress.total * 85)
+            : 10;
+          loadingProgress.value = percent;
+          status.textContent = progress.fileName
+            ? `Loading ${progress.fileName}… (${progress.completed}/${progress.total})`
+            : "Parsing GTFS files…";
+        }
+        return;
+      }
+      if ("error" in event.data) {
+        worker.terminate();
+        reject(new Error(event.data.error));
+        return;
+      }
+      loadingProgress.value = 100;
       worker.terminate();
-      if ("error" in event.data) reject(new Error(event.data.error));
-      else resolve(event.data.feed);
+      resolve(event.data.feed);
     };
     worker.onerror = (event) => {
       worker.terminate();
@@ -1446,6 +1502,9 @@ form.addEventListener("submit", async (event) => {
 
   input.disabled = true;
   submit.disabled = true;
+  loadingSpinner.hidden = false;
+  loadingProgress.hidden = false;
+  loadingProgress.value = 0;
   status.textContent = "Loading feed…";
   loadPanel.classList.remove("loaded");
   viewer.hidden = true;
@@ -1494,6 +1553,8 @@ form.addEventListener("submit", async (event) => {
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : "Could not load the feed.";
   } finally {
+    loadingSpinner.hidden = true;
+    loadingProgress.hidden = true;
     input.disabled = false;
     submit.disabled = false;
   }
@@ -1503,21 +1564,32 @@ element<HTMLButtonElement>("#agency-dialog-close").addEventListener("click", () 
 stopsMapButton.addEventListener("click", showStopsMap);
 routesMapButton.addEventListener("click", showAllRoutesMap);
 routeMapButton.addEventListener("click", () => {
-  if (currentRoute) showRouteMap(currentRoute, "route");
+  if (currentRoute) showRouteMap(currentRoute);
 });
 mapRoute.addEventListener("change", () => {
+  mapSettings.open = false;
   populateMapVariants();
   renderRouteMap();
   pushViewState();
 });
 mapRouteReset.addEventListener("click", () => {
+  mapSettings.open = false;
   mapRoute.value = "all";
   populateMapVariants();
   renderRouteMap();
 });
-mapVariant.addEventListener("change", () => renderRouteMap());
-mapVariant.addEventListener("change", () => pushViewState());
+mapVariant.addEventListener("change", () => {
+  renderRouteMap();
+  mapSettings.open = false;
+  if (mapVariant.value !== "all") {
+    const section = [...mapSidebar.querySelectorAll<HTMLElement>("section[data-variant-index]")]
+      .find((candidate) => candidate.dataset.variantIndex === mapVariant.value);
+    section?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  pushViewState();
+});
 mapVariantReset.addEventListener("click", () => {
+  mapSettings.open = false;
   mapVariant.value = "all";
   renderRouteMap();
 });
@@ -1542,6 +1614,9 @@ mapBaseLayer.addEventListener("change", () => {
 });
 mapRasterBlackAndWhite.addEventListener("change", () => {
   mapView?.setRasterBlackAndWhite(mapRasterBlackAndWhite.checked);
+});
+mapCanvas.addEventListener("pointerdown", () => {
+  mapSettings.open = false;
 });
 mapClearFilter.addEventListener("click", () => {
   tableSearch.value = "";

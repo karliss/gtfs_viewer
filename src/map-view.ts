@@ -112,6 +112,7 @@ export class MapView {
   private pendingZoom: Coordinate | null = null;
   private pendingStopPopup: { coordinate: Coordinate; stopId: string } | null = null;
   private stopDetailsCallback: ((stopId: string) => HTMLElement | null) | undefined;
+  private focusSelectionCallback?: () => void;
 
   constructor(
     container: HTMLElement,
@@ -127,6 +128,7 @@ export class MapView {
     stopSizeReduced = false,
     stopOrder = false,
     allStops = false,
+    focusSelection?: () => void,
   ) {
     this.container = container;
     this.baseLayer = baseLayer;
@@ -137,6 +139,7 @@ export class MapView {
     this.stopOrderEnabled = stopOrder;
     this.allStopsEnabled = allStops;
     this.stopDetailsCallback = stopDetails;
+    this.focusSelectionCallback = focusSelection;
     const baseLayerOption = MAP_BASE_LAYERS.find((option) => option.id === baseLayer);
     const sources: Record<string, SourceSpecification> = {};
     for (const layer of MAP_BASE_LAYERS) {
@@ -172,6 +175,22 @@ export class MapView {
     this.popup = new Popup({ closeButton: false, closeOnClick: false });
     this.detailPopup = new Popup({ closeButton: true, closeOnClick: true });
     this.map.addControl(new NavigationControl(), "top-right");
+    this.map.addControl({
+      onAdd: (map: LibreMap) => {
+        const container = document.createElement("div");
+        container.className = "maplibregl-ctrl maplibregl-ctrl-group";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "maplibregl-ctrl-icon";
+        button.textContent = "⌖";
+        button.title = "Focus selected routes or all routes and stops";
+        button.setAttribute("aria-label", "Focus selected routes or all routes and stops");
+        button.addEventListener("click", () => this.focusSelectionCallback?.());
+        container.append(button);
+        return container;
+      },
+      onRemove: (_map: LibreMap) => {},
+    }, "top-right");
     this.map.on("error", (event) => onError(`Map or basemap error: ${event.error.message}`));
     this.map.on("load", () => {
       this.map.addSource("grid", { type: "geojson", data: this.gridFeatures() });
@@ -483,6 +502,29 @@ export class MapView {
     this.map.easeTo({ center: coordinate, zoom: Math.max(this.map.getZoom(), 16) });
   }
 
+  focusSelection(routeId: string | null = null, variantIndex: number | null = null): void {
+    if (!this.loaded) return;
+    const selectedLines = this.lines.filter((line) =>
+      variantIndex !== null
+        ? line.variantIndex === variantIndex
+        : routeId === null || line.routeId === routeId
+    );
+    const points = selectedLines.flatMap((line) => line.coordinates);
+    if (points.length) {
+      this.fitPoints(points);
+      return;
+    }
+    const selectedStopIds = new Set(selectedLines.flatMap((line) => line.stopIds ?? []));
+    const stopPoints = this.stops.flatMap((stop) =>
+      stop.coordinate && (selectedLines.length === 0
+        ? routeId === null && variantIndex === null
+        : stop.id !== null && selectedStopIds.has(stop.id))
+        ? [stop.coordinate]
+        : []
+    );
+    this.fitPoints(stopPoints);
+  }
+
   showStopPopup(stopId: string, coordinate: Coordinate): void {
     this.zoomTo(coordinate);
     const content = this.stopDetailsCallback?.(stopId);
@@ -616,6 +658,10 @@ export class MapView {
       ...this.stops.flatMap((stop) => stop.coordinate ? [stop.coordinate] : []),
       ...this.lines.flatMap((line) => line.coordinates),
     ];
+    this.fitPoints(points);
+  }
+
+  private fitPoints(points: Coordinate[]): void {
     if (!points.length) return;
     const bounds = new LngLatBounds(points[0], points[0]);
     for (const point of points.slice(1)) bounds.extend(point);

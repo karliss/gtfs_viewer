@@ -228,18 +228,34 @@ function parseTable(name: string, columns: string[], records: string[][]): GtfsT
   return { name, kind, columns, rows, hasExtraValues: rows.some((row) => row.extraValues.length > 0) } as GtfsTable;
 }
 
-export function loadGtfs(data: Uint8Array): GtfsFeed {
+export interface GtfsLoadProgress {
+  phase: "extracting" | "parsing";
+  completed: number;
+  total: number;
+  fileName?: string;
+}
+
+export function loadGtfs(data: Uint8Array, onProgress?: (progress: GtfsLoadProgress) => void): GtfsFeed {
   let files: Record<string, Uint8Array>;
   try {
+    onProgress?.({ phase: "extracting", completed: 0, total: 1 });
     files = unzipSync(data);
   } catch {
     throw new Error("Could not read the ZIP file. Make sure it is a valid, unencrypted ZIP archive.");
   }
+  onProgress?.({ phase: "extracting", completed: 1, total: 1 });
 
   const tables: GtfsTable[] = [];
   const unrecognizedFiles: string[] = [];
   const names = new Set<string>();
   const decoder = new TextDecoder("utf-8", { fatal: true });
+  const textFiles = Object.entries(files).filter(([path]) => {
+    if (path.endsWith("/")) return false;
+    const name = path.split("/").pop() ?? "";
+    return name.toLowerCase().endsWith(".txt") && !name.startsWith("._")
+      && !path.split("/").includes("__MACOSX");
+  });
+  let parsedFiles = 0;
 
   for (const [path, bytes] of Object.entries(files)) {
     if (path.endsWith("/")) continue;
@@ -259,6 +275,7 @@ export function loadGtfs(data: Uint8Array): GtfsFeed {
       throw new Error(`The ZIP contains multiple files named ${name}.`);
     }
     names.add(key);
+    onProgress?.({ phase: "parsing", completed: parsedFiles, total: textFiles.length, fileName: name });
 
     let text: string;
     try {
@@ -287,6 +304,8 @@ export function loadGtfs(data: Uint8Array): GtfsFeed {
       throw new Error(`${name} contains duplicate column names.`);
     }
     tables.push(parseTable(name, columns, rows));
+    parsedFiles++;
+    onProgress?.({ phase: "parsing", completed: parsedFiles, total: textFiles.length, fileName: name });
   }
 
   if (tables.length === 0) {
