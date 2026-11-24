@@ -2,7 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
-  decodeRouteType, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, indexRoutes, loadGtfs, summarizeTripField,
+  decodeRouteType, formatTimetableDayRange, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
+  getVariantTimetable, indexRoutes, loadGtfs, summarizeTripField,
 } = require("../dist/gtfs.cjs");
 
 function archive(files) {
@@ -10,6 +11,34 @@ function archive(files) {
     Object.entries(files).map(([name, text]) => [name, strToU8(text)]),
   ));
 }
+
+test("formats timetable day ranges and generates first-stop departures", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,service_id,shape_id\n"
+      + "r,weekday,wd,s\nr,saturday,sat,s\n",
+    "stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\n"
+      + "weekday,08:05:00,08:10:00,a,1\nweekday,09:20:00,09:25:00,a,2\n"
+      + "saturday,08:10:00,08:10:00,a,1\nsaturday,08:15:00,08:15:00,a,2\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "wd,1,1,1,1,1,0,0,20260101,20261231\n"
+      + "sat,0,0,0,0,0,1,0,20260101,20261231\n",
+  }));
+  const variant = getRouteVariants(feed, "r").variants[0];
+  const timetable = getVariantTimetable(feed, variant);
+  assert.deepEqual(timetable.popularDays, [1, 2, 3, 4, 5]);
+  assert.deepEqual(timetable.rows, [
+    { hour: 8, departures: [
+      { minute: 10, days: [1, 2, 3, 4, 5] },
+      { minute: 10, days: [6] },
+      { minute: 15, days: [6] },
+    ] },
+    { hour: 9, departures: [
+      { minute: 25, days: [1, 2, 3, 4, 5] },
+    ] },
+  ]);
+  assert.equal(formatTimetableDayRange([7, 1, 2, 3, 5, 6, 4]), "I-VII");
+  assert.equal(formatTimetableDayRange([1, 2, 4, 5, 7]), "I-II, IV-V, VII");
+});
 
 test("loads typed rows while preserving quoted CSV, unknown columns, and ZIP paths", () => {
   const feed = loadGtfs(archive({

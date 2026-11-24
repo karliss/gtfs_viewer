@@ -259,6 +259,43 @@ input[type="file"] {
   margin-top: 0.5rem;
 }
 
+.variant-expanders {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  margin-top: 0.5rem;
+}
+
+.variant-expanders .variant-expander {
+  margin-top: 0;
+}
+
+.variant-timetable[open] {
+  min-width: min(24rem, 100%);
+}
+
+.timetable-popular-days {
+  margin: 0.5rem 0;
+  font-weight: 600;
+}
+
+.timetable {
+  overflow-x: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.timetable-row {
+  display: grid;
+  grid-template-columns: 2.5rem repeat(3, minmax(3.5rem, auto));
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.timetable-minute {
+  margin-right: 0.5rem;
+}
+
 #route-variants summary {
   cursor: pointer;
   font-weight: 600;
