@@ -120,20 +120,20 @@ export interface VariantTimetableRow {
 }
 
 export interface VariantTimetable {
-  popularDays: number[] | null;
+  popularDays: number[][];
+  exceptionDates: string[];
   rows: VariantTimetableRow[];
 }
 
 export function formatTimetableDayRange(days: readonly number[]): string {
   const sorted = [...new Set(days)].filter((day) => day >= 1 && day <= 7).sort((a, b) => a - b);
-  const roman = ["I", "II", "III", "IV", "V", "VI", "VII"];
   const ranges: string[] = [];
   for (let index = 0; index < sorted.length;) {
     let end = index;
     while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1) end++;
     ranges.push(index === end
-      ? roman[sorted[index] - 1]
-      : `${roman[sorted[index] - 1]}-${roman[sorted[end] - 1]}`);
+      ? String(sorted[index])
+      : `${sorted[index]}-${sorted[end]}`);
     index = end + 1;
   }
   return ranges.join(", ");
@@ -142,6 +142,7 @@ export function formatTimetableDayRange(days: readonly number[]): string {
 export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable {
   const stopTimes = feed.tables.find((table) => table.kind === "stop_times.txt");
   const calendar = feed.tables.find((table) => table.kind === "calendar.txt");
+  const calendarDates = feed.tables.find((table) => table.kind === "calendar_dates.txt");
   const firstStop = variant.stops[0];
   const tripIds = new Set(variant.trips.flatMap((trip) => trip.fields.trip_id ? [trip.fields.trip_id] : []));
 
@@ -169,13 +170,12 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
     if (existing) existing.count++;
     else dayCounts.set(key, { days, count: 1 });
   }
-  let popularDays: number[] | null = null;
-  let popularCount = -1;
-  for (const { days, count } of dayCounts.values()) {
-    if (count > popularCount) {
-      popularDays = days;
-      popularCount = count;
-    }
+  const rankedDays = [...dayCounts.values()].sort((left, right) => right.count - left.count);
+  const popularDays: number[][] = [];
+  if (rankedDays.length > 0) popularDays.push(rankedDays[0].days);
+  if (rankedDays.length > 1 &&
+    rankedDays[1].days.every((day) => !rankedDays[0].days.includes(day))) {
+    popularDays.push(rankedDays[1].days);
   }
 
   const grouped = new Map<number, Map<number, Map<string, number>>>();
@@ -219,7 +219,16 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
         })),
       ),
     }));
-  return { popularDays, rows };
+  const serviceIds = new Set(variant.trips.flatMap((trip) =>
+    trip.fields.service_id ? [trip.fields.service_id] : []));
+  const exceptionDates = calendarDates
+    ? [...new Set(calendarDates.rows
+      .filter((row) => row.fields.service_id && serviceIds.has(row.fields.service_id))
+      .map((row) => row.fields.date)
+      .filter((date): date is string => date !== null))]
+      .sort()
+    : [];
+  return { popularDays, exceptionDates, rows };
 }
 
 export function getVariantTableRows(

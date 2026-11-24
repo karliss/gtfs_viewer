@@ -24,10 +24,13 @@ test("formats timetable day ranges and generates first-stop departures", () => {
       + "wd,1,1,1,1,1,0,0,20260101,20261231\n"
       + "wd-two,1,1,1,1,1,0,0,20260101,20261231\n"
       + "sat,0,0,0,0,0,1,0,20260101,20261231\n",
+    "calendar_dates.txt": "service_id,date,exception_type\n"
+      + "wd,20261225,1\nsat,20261226,2\n",
   }));
   const variant = getRouteVariants(feed, "r").variants[0];
   const timetable = getVariantTimetable(feed, variant);
-  assert.deepEqual(timetable.popularDays, [1, 2, 3, 4, 5]);
+  assert.deepEqual(timetable.popularDays, [[1, 2, 3, 4, 5], [6]]);
+  assert.deepEqual(timetable.exceptionDates, ["20261225", "20261226"]);
   assert.deepEqual(timetable.rows, [
     { hour: 8, departures: [
       { minute: 10, days: [1, 2, 3, 4, 5] },
@@ -38,8 +41,8 @@ test("formats timetable day ranges and generates first-stop departures", () => {
       { minute: 25, days: [1, 2, 3, 4, 5] },
     ] },
   ]);
-  assert.equal(formatTimetableDayRange([7, 1, 2, 3, 5, 6, 4]), "I-VII");
-  assert.equal(formatTimetableDayRange([1, 2, 4, 5, 7]), "I-II, IV-V, VII");
+  assert.equal(formatTimetableDayRange([7, 1, 2, 3, 5, 6, 4]), "1-7");
+  assert.equal(formatTimetableDayRange([1, 2, 4, 5, 7]), "1-2, 4-5, 7");
 });
 
 test("loads typed rows while preserving quoted CSV, unknown columns, and ZIP paths", () => {

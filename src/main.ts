@@ -847,25 +847,34 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       timetableLoaded = true;
       const timetable = getVariantTimetable(activeFeed, variant);
 
-      if (timetable.popularDays) {
-        const popular = document.createElement("p");
-        popular.className = "timetable-popular-days";
-        popular.textContent = `Popular days: ${formatTimetableDayRange(timetable.popularDays)}`;
-        timetableDetails.append(popular);
-      }
-      const raw = document.createElement("pre");
-      raw.className = "timetable-data";
-      raw.textContent = JSON.stringify(timetable, null, 2);
-      timetableDetails.append(raw);
       if (timetable.rows.length === 0) {
         const message = document.createElement("p");
         message.textContent = "No timetable times found for this variant.";
         timetableDetails.append(message);
+        if (timetable.exceptionDates.length > 0) {
+          const exceptions = document.createElement("p");
+          exceptions.className = "timetable-exception-dates";
+          exceptions.textContent = `Exception dates: ${timetable.exceptionDates.join(", ")}`;
+          timetableDetails.append(exceptions);
+        }
         return;
       }
 
       const table = document.createElement("div");
       table.className = "timetable";
+      table.style.setProperty("--timetable-columns", String(Math.max(timetable.popularDays.length, 1)));
+      const headings = document.createElement("div");
+      headings.className = "timetable-headings";
+      const hourHeading = document.createElement("span");
+      hourHeading.textContent = "";
+      headings.append(hourHeading);
+      for (const days of timetable.popularDays) {
+        const heading = document.createElement("span");
+        heading.className = "timetable-popular-days";
+        heading.textContent = formatTimetableDayRange(days);
+        headings.append(heading);
+      }
+      table.append(headings);
       for (const row of timetable.rows) {
         const line = document.createElement("div");
         line.className = "timetable-row";
@@ -874,33 +883,53 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
         hour.textContent = `${String(row.hour)} `;
         line.append(hour);
 
-        const groupedMinutes = new Map<number, number[][]>();
-        for (const departure of row.departures) {
-          const sets = groupedMinutes.get(departure.minute) ?? [];
-          if (departure.days && !sets.some((days) =>
-            days.length === departure.days!.length && days.every((day, index) => day === departure.days![index]))) {
-            sets.push(departure.days);
-          } else if (!departure.days && !sets.length) {
-            sets.push([]);
-          }
-          groupedMinutes.set(departure.minute, sets);
-        }
-        for (const [minute, daySets] of [...groupedMinutes.entries()].sort(([left], [right]) => left - right)) {
-          const departure = document.createElement("span");
-          departure.className = "timetable-minute";
-          departure.textContent = String(minute).padStart(2, "0");
-          if (daySets.length > 0) {
-            const differingSets = daySets.filter((days) => days.length > 0 &&
-              (!timetable.popularDays || !sameTimetableDays(days, timetable.popularDays)));
-            if (differingSets.length > 0) {
-              departure.textContent += ` (${differingSets.map(formatTimetableDayRange).join(", ")})`;
+        const columns = timetable.popularDays.length > 0 ? timetable.popularDays : [null];
+        for (const popularDays of columns) {
+          const column = document.createElement("span");
+          column.className = "timetable-column";
+          const groupedMinutes = new Map<number, number[][]>();
+          for (const departure of row.departures) {
+            if (popularDays &&
+              departure.days &&
+              !departure.days.some((day) => popularDays.includes(day))) continue;
+            const sets = groupedMinutes.get(departure.minute) ?? [];
+            if (departure.days) {
+              const departureDays = departure.days;
+              if (!sets.some((days) => sameTimetableDays(days, departureDays))) {
+                sets.push(departureDays);
+              }
+            } else if (!departure.days && !sets.length) {
+              sets.push([]);
             }
+            groupedMinutes.set(departure.minute, sets);
           }
-          line.append(departure);
+          for (const [minute, daySets] of [...groupedMinutes.entries()].sort(([left], [right]) => left - right)) {
+            const departure = document.createElement("span");
+            departure.className = "timetable-minute";
+            departure.textContent = String(minute).padStart(2, "0");
+            const differingSets = daySets.filter((days) =>
+              days.length > 0 && !timetable.popularDays.some((popular) =>
+                sameTimetableDays(days, popular)));
+            if (differingSets.length > 0) {
+              const labels = differingSets.map((days) =>
+                days.some((day) => day >= 1 && day <= 5)
+                  ? "1-5"
+                  : "6-7");
+              departure.textContent += ` (${[...new Set(labels)].join(", ")})`;
+            }
+            column.append(departure, " ");
+          }
+          line.append(column);
         }
         table.append(line);
       }
       timetableDetails.append(table);
+      if (timetable.exceptionDates.length > 0) {
+        const exceptions = document.createElement("p");
+        exceptions.className = "timetable-exception-dates";
+        exceptions.textContent = `Exception dates: ${timetable.exceptionDates.join(", ")}`;
+        timetableDetails.append(exceptions);
+      }
     });
     expanders.append(timetableDetails);
     section.append(expanders);

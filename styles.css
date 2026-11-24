@@ -285,27 +285,24 @@ input[type="file"] {
 }
 
 .timetable-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 0.5rem;
+  display: grid;
+  grid-template-columns: 2.5rem repeat(var(--timetable-columns), minmax(7rem, 1fr));
   align-items: baseline;
   white-space: nowrap;
 }
 
-.timetable-minute {
-  margin-right: 0.5rem;
+.timetable-headings {
+  display: grid;
+  grid-template-columns: 2.5rem repeat(var(--timetable-columns), minmax(7rem, 1fr));
+  margin-bottom: 0.25rem;
 }
 
-.timetable-data {
-  margin: 0.75rem 0 0;
-  padding: 0.75rem;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  border: 1px solid #d7dbe2;
-  border-radius: 0.25rem;
-  background: #f7f8fa;
-  font-size: 0.875rem;
+.timetable-column {
+  display: inline;
+}
+
+.timetable-minute {
+  margin-right: 0.5rem;
 }
 
 #route-variants summary {
