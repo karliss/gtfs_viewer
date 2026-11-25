@@ -1535,30 +1535,39 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       ["Trip short name", variant.tripShortName, variant.tripShortName === null || variant.tripShortName === ""],
       ["Direction ID", variant.directionIds.map((id) => id === null ? "Not provided" : String(id)).join(", "),
         variant.directionIds.every((id) => id === null)],
+      ["Trips", `${variant.trips.length} ${variant.trips.length === 1 ? "trip" : "trips"}`, false],
     ] as const) {
       const term = document.createElement("dt");
       term.textContent = name;
       const description = document.createElement("dd");
-      description.textContent = value === null ? "Not provided" : value === "" ? "(empty)" : String(value);
+      if (name === "Shape ID" && variant.shapeId && feed.tables.some((table) => table.kind === "shapes.txt")) {
+        const shapeButton = document.createElement("button");
+        shapeButton.type = "button";
+        shapeButton.className = "route-link";
+        shapeButton.textContent = variant.shapeId;
+        shapeButton.title = "View shape rows";
+        shapeButton.setAttribute("aria-label", `View rows for shape ${variant.shapeId}`);
+        shapeButton.addEventListener("click", () => showVariantTable(variant, "shapes.txt"));
+        description.append(shapeButton);
+      } else {
+        description.textContent = value === null ? "Not provided" : value === "" ? "(empty)" : String(value);
+      }
       if (missing) {
         description.className = "not-provided";
+      }
+      if (name === "Trips" && feed.tables.some((table) => table.kind === "trips.txt")) {
+        const tripsButton = document.createElement("button");
+        tripsButton.type = "button";
+        tripsButton.className = "route-map-icon";
+        tripsButton.textContent = "📄";
+        tripsButton.title = "View variant trips";
+        tripsButton.setAttribute("aria-label", `View ${variant.trips.length} trips for this variant`);
+        tripsButton.addEventListener("click", () => showVariantTable(variant, "trips.txt"));
+        description.append(" ", tripsButton);
       }
       properties.append(term, description);
     }
     section.append(properties);
-    const tableLinks: (readonly ["shapes.txt" | "trips.txt", string])[] = [
-      ...(variant.shapeId ? [["shapes.txt", "View shape rows"] as const] : []),
-      ["trips.txt", "View variant trips"],
-    ];
-    for (const [kind, label] of tableLinks) {
-      if (!feed.tables.some((table) => table.kind === kind)) continue;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "route-link variant-link";
-      button.textContent = label;
-      button.addEventListener("click", () => showVariantTable(variant, kind));
-      section.append(button);
-    }
     const expanders = document.createElement("div");
     expanders.className = "variant-expanders";
     const stopDetails = document.createElement("details");
