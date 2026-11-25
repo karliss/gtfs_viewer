@@ -475,11 +475,42 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
   }
   const serviceIds = new Set(variant.trips.flatMap((trip) =>
     trip.fields.service_id ? [trip.fields.service_id] : []));
-  const exceptionDates = [...new Set(
-    [...serviceIds].flatMap((serviceId) => feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [])
+  const exceptionsForDays = (targetDays: number[] | null): string[] => {
+    const matchingServices = [...serviceIds].filter((serviceId) =>
+      daySetsForService(serviceId)?.some((days) =>
+        targetDays ? days.join(",") === targetDays.join(",") : true));
+    const exceptions = matchingServices.flatMap((serviceId) =>
+      feed.indexes.calendarDatesByServiceId.get(serviceId) ?? []);
+    if (targetDays) {
+      const matchingRanges = matchingServices.flatMap((serviceId) =>
+        (feed.indexes.calendarByServiceId.get(serviceId) ?? []).filter((calendar) => {
+          const days = [
+            calendar.fields.monday === 1 ? 1 : null,
+            calendar.fields.tuesday === 1 ? 2 : null,
+            calendar.fields.wednesday === 1 ? 3 : null,
+            calendar.fields.thursday === 1 ? 4 : null,
+            calendar.fields.friday === 1 ? 5 : null,
+            calendar.fields.saturday === 1 ? 6 : null,
+            calendar.fields.sunday === 1 ? 7 : null,
+          ].filter((day): day is number => day !== null);
+          return days.join(",") === targetDays.join(",");
+        }));
+      return [...new Set(exceptions
+        .filter((exception) => matchingRanges.some((calendar) =>
+          exception.fields.date !== null
+          && calendar.fields.start_date !== null
+          && calendar.fields.end_date !== null
+          && exception.fields.date >= calendar.fields.start_date
+          && exception.fields.date <= calendar.fields.end_date))
+        .map((exception) => exception.fields.date)
+        .filter((date): date is string => date !== null))]
+        .sort();
+    }
+    return [...new Set(exceptions
       .map((row) => row.fields.date)
       .filter((date): date is string => date !== null))]
-    .sort();
+      .sort();
+  };
 
   const buildTimetable = (targetDays: number[] | null): VariantTimetable => {
     const grouped = new Map<number, Map<number, Map<string, number>>>();
@@ -522,6 +553,7 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
         }]),
       }));
     const popularDays = targetDays ? [targetDays] : [[1, 2, 3, 4, 5, 6, 7]];
+    const exceptionDates = exceptionsForDays(targetDays);
     return { popularDays, exceptionDates, rows };
   };
 

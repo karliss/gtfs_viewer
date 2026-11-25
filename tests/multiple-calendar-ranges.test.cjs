@@ -26,7 +26,9 @@ test("single service ID supports separate calendar ranges and weekday masks", ()
 
   assert.equal(feed.indexes.calendarByServiceId.get("weekday").length, 2);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-05"), true);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-06"), true);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-06-06"), true);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-06-08"), false);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-07"), false);
 
   const variant = getRouteVariants(feed, "R1").variants[0];
@@ -39,5 +41,9 @@ test("single service ID supports separate calendar ranges and weekday masks", ()
   assert.deepEqual(
     timetables.map((timetable) => timetable.rows[0].departures[0].days),
     [[1], [6, 7]],
+  );
+  assert.deepEqual(
+    timetables.map((timetable) => timetable.exceptionDates),
+    [["20260106"], ["20260608"]],
   );
 });
