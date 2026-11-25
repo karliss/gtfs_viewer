@@ -190,7 +190,8 @@ app.innerHTML = `
       <div id="schedule-variants"></div>
       <section id="date-schedule-rules">
         <h3>Active rules</h3>
-        <table id="date-schedule-rule-table"></table>
+        <table id="date-schedule-rule-table" class="trip-calendar-table"></table>
+        <div id="date-schedule-exceptions"></div>
       </section>
     </section>
     <section id="map-panel" class="panel viewer" aria-labelledby="map-heading" hidden>
@@ -327,6 +328,7 @@ const scheduleDatePrev = element<HTMLButtonElement>("#schedule-date-prev");
 const scheduleDateNext = element<HTMLButtonElement>("#schedule-date-next");
 const dateScheduleRoute = element<HTMLParagraphElement>("#date-schedule-route");
 const dateScheduleRuleTable = element<HTMLTableElement>("#date-schedule-rule-table");
+const dateScheduleExceptions = element<HTMLElement>("#date-schedule-exceptions");
 const scheduleSummary = element<HTMLParagraphElement>("#schedule-summary");
 const scheduleVariants = element<HTMLElement>("#schedule-variants");
 const routeDateSchedule = element<HTMLButtonElement>("#route-date-schedule");
@@ -652,33 +654,39 @@ function getWeekdayCells(
   });
 }
 
+function appendWeekdayHeader(table: HTMLTableElement, firstName: string, includeRange = false): void {
+  const head = document.createElement("tr");
+  const names = includeRange
+    ? [firstName, "Date range", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+    : [firstName, "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+  for (const name of names) {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = name;
+    head.append(th);
+  }
+  table.append(head);
+}
+
 function appendWeekdayRow(
   table: HTMLTableElement,
+  firstColumn: Node,
   calendar: GtfsRow<"calendar.txt"> | undefined,
-  serviceId: string,
   currentDayIndex: number | null = null,
   selectedException: GtfsRow<"calendar_dates.txt"> | undefined = undefined,
+  includeRange = false,
 ): void {
   const row = document.createElement("tr");
-  const service = document.createElement("td");
-  const calendarLink = document.createElement("button");
-  calendarLink.type = "button";
-  calendarLink.className = "route-link";
-  calendarLink.textContent = "calendar.txt";
-  calendarLink.addEventListener("click", () => showServiceTable(serviceId));
-  service.append(calendarLink, document.createTextNode(" · "));
-  const serviceLink = document.createElement("button");
-  serviceLink.type = "button";
-  serviceLink.className = "route-link";
-  serviceLink.textContent = serviceId;
-  serviceLink.addEventListener("click", () => showServiceTable(serviceId));
-  service.append(serviceLink);
-  row.append(service);
-  const range = document.createElement("td");
-  const start = gtfsDateToIso(calendar?.fields.start_date ?? null);
-  const end = gtfsDateToIso(calendar?.fields.end_date ?? null);
-  range.textContent = `${start || "Not provided"} — ${end || "Not provided"}`;
-  row.append(range);
+  const first = document.createElement("td");
+  first.append(firstColumn);
+  row.append(first);
+  if (includeRange) {
+    const range = document.createElement("td");
+    const start = gtfsDateToIso(calendar?.fields.start_date ?? null);
+    const end = gtfsDateToIso(calendar?.fields.end_date ?? null);
+    range.textContent = `${start || "Not provided"} — ${end || "Not provided"}`;
+    row.append(range);
+  }
   for (const cellData of getWeekdayCells(calendar, currentDayIndex, selectedException)) {
     const cell = document.createElement("td");
     cell.textContent = cellData.symbol;
@@ -687,37 +695,6 @@ function appendWeekdayRow(
     if (cellData.active) cell.classList.add("trip-calendar-active");
     if (cellData.exceptionType !== null) cell.classList.add("trip-calendar-exception");
     row.append(cell);
-  }
-  if (selectedException) {
-    const exception = document.createElement("td");
-    const exceptionsTableLink = document.createElement("button");
-    exceptionsTableLink.type = "button";
-    exceptionsTableLink.className = "route-link";
-    exceptionsTableLink.textContent = "calendar_dates.txt";
-    exceptionsTableLink.addEventListener("click", () => showCalendarDatesTable(serviceId));
-    const exceptionType = selectedException.fields.exception_type === 1
-      ? "Added"
-      : selectedException.fields.exception_type === 2 ? "Removed" : "Unknown";
-    const exceptionDate = selectedException.fields.date
-      ? gtfsDateToIso(selectedException.fields.date) || selectedException.fields.date
-      : "";
-    const exceptionDateLink = document.createElement("button");
-    exceptionDateLink.type = "button";
-    exceptionDateLink.className = "schedule-exception-button";
-    exceptionDateLink.textContent = exceptionDate;
-    const scheduleRoute = currentScheduleRoute;
-    if (exceptionDate && scheduleRoute) {
-      exceptionDateLink.addEventListener("click", () => showDateSchedule(scheduleRoute, exceptionDate));
-    }
-    exception.append(
-      exceptionsTableLink,
-      document.createTextNode(" · "),
-      exceptionDateLink,
-      document.createTextNode(` · ${exceptionType}`),
-    );
-    row.append(exception);
-  } else {
-    row.append(document.createElement("td"));
   }
   table.append(row);
 }
@@ -1252,30 +1229,14 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     const exceptions = feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [];
     const calendarList = document.createElement("table");
     calendarList.className = "trip-calendar-table";
-    const head = document.createElement("tr");
-    for (const name of ["Date range", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]) {
-      const th = document.createElement("th");
-      th.scope = "col";
-      th.textContent = name;
-      head.append(th);
-    }
-    calendarList.append(head);
+    appendWeekdayHeader(calendarList, "Date range");
 
     if (calendar) {
       const start = gtfsDateToIso(calendar.fields.start_date);
       const end = gtfsDateToIso(calendar.fields.end_date);
-      const row = document.createElement("tr");
       const range = document.createElement("td");
       range.textContent = `${start || "Not provided"} — ${end || "Not provided"}`;
-      row.append(range);
-      for (const day of getWeekdayCells(calendar)) {
-        const cell = document.createElement("td");
-        cell.textContent = day.symbol;
-        cell.title = day.title;
-        cell.className = day.active ? "trip-calendar-active" : "";
-        row.append(cell);
-      }
-      calendarList.append(row);
+      appendWeekdayRow(calendarList, range, calendar);
     }
     if (!calendar) {
       const row = document.createElement("tr");
@@ -1288,23 +1249,7 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     tripCalendar.append(calendarList);
 
     if (exceptions.length) {
-      const heading = document.createElement("h4");
-      heading.textContent = "Exceptions";
-      const list = document.createElement("ul");
-      const sortedExceptions = [...exceptions].sort((left, right) =>
-        String(left.fields.date ?? "").localeCompare(String(right.fields.date ?? "")));
-      for (const exception of sortedExceptions) {
-        const item = document.createElement("li");
-        const date = gtfsDateToIso(exception.fields.date);
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "schedule-exception-button";
-        button.textContent = `${date ? formatDateWithWeekday(date) : exception.fields.date} — ${exception.fields.exception_type === 1 ? "Added" : exception.fields.exception_type === 2 ? "Removed" : "Unknown"}`;
-        if (route && date) button.addEventListener("click", () => showDateSchedule(route, date));
-        item.append(button);
-        list.append(item);
-      }
-      tripExceptions.append(heading, list);
+      appendCalendarExceptions(tripExceptions, exceptions, route);
     }
   } else {
     tripCalendar.textContent = "No service_id provided";
@@ -1492,6 +1437,52 @@ function showCalendarDatesTable(serviceId: string): void {
   );
 }
 
+function appendCalendarExceptions(
+  container: HTMLElement,
+  exceptions: readonly GtfsRow<"calendar_dates.txt">[],
+  route: GtfsRow<"routes.txt"> | undefined,
+  serviceId?: string,
+): void {
+  const sorted = [...exceptions].sort((left, right) =>
+    String(left.fields.date ?? "").localeCompare(String(right.fields.date ?? "")));
+  if (!sorted.length) return;
+  const heading = document.createElement("h4");
+  heading.textContent = "Exceptions";
+  container.append(heading);
+  if (serviceId) {
+    const tableLink = document.createElement("button");
+    tableLink.type = "button";
+    tableLink.className = "route-link";
+    tableLink.textContent = "calendar_dates.txt";
+    tableLink.addEventListener("click", () => showCalendarDatesTable(serviceId));
+    container.append(tableLink);
+  }
+  const list = document.createElement("ul");
+  for (const exception of sorted) {
+    const item = document.createElement("li");
+    const date = gtfsDateToIso(exception.fields.date);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "schedule-exception-button";
+    const type = exception.fields.exception_type === 1
+      ? "Added"
+      : exception.fields.exception_type === 2 ? "Removed" : "Unknown";
+    button.textContent = `${date ? formatDateWithWeekday(date) : exception.fields.date} — ${type}`;
+    if (route && date) button.addEventListener("click", () => showDateSchedule(route, date));
+    item.append(button);
+    if (exception.fields.service_id) {
+      const serviceLink = document.createElement("button");
+      serviceLink.type = "button";
+      serviceLink.className = "route-link";
+      serviceLink.textContent = exception.fields.service_id;
+      serviceLink.addEventListener("click", () => showServiceTable(exception.fields.service_id!));
+      item.append(document.createTextNode(" — "), serviceLink);
+    }
+    list.append(item);
+  }
+  container.append(list);
+}
+
 function routeStopRouteButton(route: GtfsRow<"routes.txt">): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
@@ -1595,6 +1586,7 @@ function renderDateSchedule(): void {
     scheduleVariants.replaceChildren();
     dateScheduleRuleTable.replaceChildren();
     dateScheduleRuleTable.hidden = true;
+    dateScheduleExceptions.replaceChildren();
     return;
   }
   const date = scheduleDate.value;
@@ -1666,36 +1658,44 @@ function renderDateSchedule(): void {
   dateScheduleRuleTable.replaceChildren();
   if (!gtfsDate) {
     dateScheduleRuleTable.hidden = true;
+    dateScheduleExceptions.replaceChildren();
   } else {
     let ruleCount = 0;
     const gtfsDate = isoDateToGtfs(date);
     const weekday = gtfsDate ? new Date(`${date}T12:00:00Z`).getUTCDay() : -1;
     const weekdayIndex = weekday === 0 ? 6 : weekday - 1;
     dateScheduleRuleTable.hidden = false;
-    const head = document.createElement("tr");
-    for (const name of ["Service", "Date range", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su", "Exception"]) {
-      const th = document.createElement("th");
-      th.scope = "col";
-      th.textContent = name;
-      head.append(th);
-    }
-    dateScheduleRuleTable.append(head);
+    appendWeekdayHeader(dateScheduleRuleTable, "Service", true);
     for (const serviceId of routeServiceIds) {
       const exceptions = feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [];
       const selectedException = exceptions.find((row) => row.fields.date === gtfsDate);
       const calendar = feed.indexes.calendarByServiceId.get(serviceId);
       if (!calendar && !selectedException) continue;
-      appendWeekdayRow(dateScheduleRuleTable, calendar, serviceId, weekdayIndex, selectedException);
+      const serviceLink = document.createElement("button");
+      serviceLink.type = "button";
+      serviceLink.className = "route-link";
+      serviceLink.textContent = serviceId;
+      serviceLink.addEventListener("click", () => showServiceTable(serviceId));
+      appendWeekdayRow(dateScheduleRuleTable, serviceLink, calendar, weekdayIndex, selectedException, true);
       ruleCount++;
     }
     if (!ruleCount) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
-      cell.colSpan = 11;
+      cell.colSpan = 9;
       cell.textContent = "No active calendar or exception rule.";
       row.append(cell);
       dateScheduleRuleTable.append(row);
     }
+    dateScheduleExceptions.replaceChildren();
+    const selectedExceptions: GtfsRow<"calendar_dates.txt">[] = [];
+    for (const serviceId of routeServiceIds) {
+      for (const exception of feed.indexes.calendarDatesByServiceId.get(serviceId) ?? []) {
+        if (exception.fields.date === gtfsDate) selectedExceptions.push(exception);
+      }
+    }
+    appendCalendarExceptions(dateScheduleExceptions, selectedExceptions, currentScheduleRoute ?? undefined,
+      selectedExceptions[0]?.fields.service_id ?? undefined);
   }
 }
 
