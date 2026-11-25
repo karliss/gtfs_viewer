@@ -19,15 +19,24 @@ export const BIKES_ALLOWED_VALUES = {
   NO: 2,
 } as const;
 
+export const CARS_ALLOWED_VALUES = {
+  UNKNOWN: 0,
+  YES: 1,
+  NO: 2,
+} as const;
+
 export function decodeTripFieldValue(
   value: number | null,
 ): "Unknown" | "Yes" | "No" | "Unrecognized" {
   if (value === null || value === WHEELCHAIR_ACCESSIBLE_VALUES.UNKNOWN
-    || value === BIKES_ALLOWED_VALUES.UNKNOWN) return "Unknown";
+    || value === BIKES_ALLOWED_VALUES.UNKNOWN
+    || value === CARS_ALLOWED_VALUES.UNKNOWN) return "Unknown";
   if (value === WHEELCHAIR_ACCESSIBLE_VALUES.YES
-    || value === BIKES_ALLOWED_VALUES.YES) return "Yes";
+    || value === BIKES_ALLOWED_VALUES.YES
+    || value === CARS_ALLOWED_VALUES.YES) return "Yes";
   if (value === WHEELCHAIR_ACCESSIBLE_VALUES.NO
-    || value === BIKES_ALLOWED_VALUES.NO) return "No";
+    || value === BIKES_ALLOWED_VALUES.NO
+    || value === CARS_ALLOWED_VALUES.NO) return "No";
   return "Unrecognized";
 }
 
@@ -133,7 +142,7 @@ export interface TripFieldSummary {
 
 export function summarizeTripField(
   trips: readonly GtfsRow<"trips.txt">[],
-  field: "wheelchair_accessible" | "bikes_allowed",
+  field: "wheelchair_accessible" | "bikes_allowed" | "cars_allowed",
 ): TripFieldSummary[] {
   if (!trips.length) return [];
   const counts = new Map<number | null, number>();

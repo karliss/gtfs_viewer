@@ -1,7 +1,7 @@
 import {
   decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, summarizeTripField,
   getVariantTimetable, formatTimetableDayRange, getDateSchedule, getTripFares, isServiceActiveOnDate,
-  gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES,
+  gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
@@ -729,10 +729,20 @@ function bikesIcon(value: number | null): HTMLElement | null {
   return icon;
 }
 
+function carsIcon(value: number | null): HTMLElement | null {
+  if (value !== CARS_ALLOWED_VALUES.YES) return null;
+  const icon = document.createElement("span");
+  icon.className = "cars-icon";
+  icon.textContent = "🚗";
+  icon.title = "Cars allowed";
+  icon.setAttribute("aria-label", icon.title);
+  return icon;
+}
+
 function appendTripFieldSummary(
   description: HTMLElement,
   trips: readonly GtfsRow<"trips.txt">[],
-  field: "wheelchair_accessible" | "bikes_allowed",
+  field: "wheelchair_accessible" | "bikes_allowed" | "cars_allowed",
 ): void {
   const summary = summarizeTripField(trips, field);
   if (!summary.length) {
@@ -743,7 +753,9 @@ function appendTripFieldSummary(
     if (index > 0) description.append(", ");
     const icon = field === "wheelchair_accessible"
       ? wheelchairIcon(item.value)
-      : bikesIcon(item.value);
+      : field === "bikes_allowed"
+        ? bikesIcon(item.value)
+        : carsIcon(item.value);
     if (icon) description.append(icon, " ");
     const word = decodeTripFieldValue(item.value);
     const rawValue = item.value === null ? "null" : String(item.value);
@@ -1024,6 +1036,13 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       const rawValue = numericValue === null ? "null" : String(numericValue);
       description.textContent = `${word} (${rawValue})`;
       const icon = bikesIcon(numericValue);
+      if (icon) description.prepend(icon, document.createTextNode(" "));
+    } else if (name === "cars_allowed") {
+      const numericValue = typeof value === "number" ? value : null;
+      const word = decodeTripFieldValue(numericValue);
+      const rawValue = numericValue === null ? "null" : String(numericValue);
+      description.textContent = `${word} (${rawValue})`;
+      const icon = carsIcon(numericValue);
       if (icon) description.prepend(icon, document.createTextNode(" "));
     }
     properties.append(term, description);
@@ -1503,7 +1522,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
   const trips = route.fields.route_id
     ? feed.indexes.tripsByRouteId.get(route.fields.route_id) ?? []
     : [];
-  for (const field of ["wheelchair_accessible", "bikes_allowed"] as const) {
+  for (const field of ["wheelchair_accessible", "bikes_allowed", "cars_allowed"] as const) {
     const term = document.createElement("dt");
     const description = document.createElement("dd");
     term.textContent = field;

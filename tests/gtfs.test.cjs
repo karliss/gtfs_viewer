@@ -4,7 +4,7 @@ const { strToU8, zipSync } = require("fflate");
 const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, summarizeTripField,
-  decodeTripFieldValue, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES,
+  decodeTripFieldValue, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES,
 } = require("../dist/gtfs.cjs");
 const {
   WarningCollector, WARNING_DESCRIPTIONS, WARNING_TYPES,
@@ -375,7 +375,7 @@ test("trims recognized fields while preserving unrecognized values except IDs", 
 
 test("summarizes trip accessibility with missing values left unprovided", () => {
   const [table] = loadGtfs(archive({
-    "trips.txt": "trip_id,wheelchair_accessible,bikes_allowed\n1,1,2\n2,1,2\n3,2,\n4,,2\n5\n",
+    "trips.txt": "trip_id,wheelchair_accessible,bikes_allowed,cars_allowed\n1,1,2,1\n2,1,2,0\n3,2,,2\n4,,2,\n5\n",
   })).tables;
   assert.equal(WHEELCHAIR_ACCESSIBLE_VALUES.UNKNOWN, 0);
   assert.equal(WHEELCHAIR_ACCESSIBLE_VALUES.YES, 1);
@@ -383,6 +383,9 @@ test("summarizes trip accessibility with missing values left unprovided", () => 
   assert.equal(BIKES_ALLOWED_VALUES.UNKNOWN, 0);
   assert.equal(BIKES_ALLOWED_VALUES.YES, 1);
   assert.equal(BIKES_ALLOWED_VALUES.NO, 2);
+  assert.equal(CARS_ALLOWED_VALUES.UNKNOWN, 0);
+  assert.equal(CARS_ALLOWED_VALUES.YES, 1);
+  assert.equal(CARS_ALLOWED_VALUES.NO, 2);
   assert.equal(decodeTripFieldValue(null), "Unknown");
   assert.equal(decodeTripFieldValue(0), "Unknown");
   assert.equal(decodeTripFieldValue(1), "Yes");
@@ -404,6 +407,12 @@ test("summarizes trip accessibility with missing values left unprovided", () => 
   assert.deepEqual(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), [
     { value: 2, count: 2, percent: 66.7 },
     { value: null, count: 1, percent: 33.3 },
+  ]);
+  assert.deepEqual(summarizeTripField(table.rows, "cars_allowed"), [
+    { value: 1, count: 1, percent: 20 },
+    { value: 0, count: 1, percent: 20 },
+    { value: 2, count: 1, percent: 20 },
+    { value: null, count: 2, percent: 40 },
   ]);
 });
 
