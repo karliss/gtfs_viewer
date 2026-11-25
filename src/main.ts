@@ -1,8 +1,8 @@
 import {
   decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, summarizeTripField,
   getVariantTimetable, formatTimetableDayRange, getDateSchedule, getTripFares, isServiceActiveOnDate,
-  gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, processGtfsColor,
-  WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES,
+  gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
+  WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
@@ -22,34 +22,6 @@ import {
   type GtfsWarning, type WarningType,
 } from "./warnings";
 import "maplibre-gl/dist/maplibre-gl.css";
-
-const PICKUP_TYPES = {
-  REGULAR: 0,
-  NO_SERVICE: 1,
-  PHONE_AGENCY: 2,
-  COORDINATE: 3,
-} as const;
-
-const DROP_OFF_TYPES = {
-  REGULAR: 0,
-  NO_SERVICE: 1,
-  PHONE_AGENCY: 2,
-  COORDINATE: 3,
-} as const;
-
-const PICKUP_TYPE_LABELS: Record<number, string> = {
-  [PICKUP_TYPES.REGULAR]: "regular pickup",
-  [PICKUP_TYPES.NO_SERVICE]: "no pickup",
-  [PICKUP_TYPES.PHONE_AGENCY]: "pickup by phone",
-  [PICKUP_TYPES.COORDINATE]: "pickup by coordinate",
-};
-
-const DROP_OFF_TYPE_LABELS: Record<number, string> = {
-  [DROP_OFF_TYPES.REGULAR]: "regular drop-off",
-  [DROP_OFF_TYPES.NO_SERVICE]: "no drop-off",
-  [DROP_OFF_TYPES.PHONE_AGENCY]: "drop-off by phone",
-  [DROP_OFF_TYPES.COORDINATE]: "drop-off by coordinate",
-};
 
 const app = document.querySelector<HTMLElement>("#app");
 
@@ -1271,12 +1243,8 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       const hand = document.createElement("span");
       hand.className = "pickup-dropoff-icon";
       hand.textContent = "🤚";
-      const pickupLabel = pickup === null || pickup === PICKUP_TYPES.REGULAR
-        ? PICKUP_TYPE_LABELS[PICKUP_TYPES.REGULAR]
-        : pickupLabelText(pickup);
-      const dropOffLabel = dropOff === null || dropOff === DROP_OFF_TYPES.REGULAR
-        ? DROP_OFF_TYPE_LABELS[DROP_OFF_TYPES.REGULAR]
-        : dropOffLabelText(dropOff);
+      const pickupLabel = decodePickupType(pickup);
+      const dropOffLabel = decodeDropOffType(dropOff);
       hand.title = `Non-default stop access: ${pickupLabel}; ${dropOffLabel}`;
       hand.setAttribute("aria-label", hand.title);
       stopLink.append(" ", hand);
@@ -1369,14 +1337,6 @@ function routeStopRouteButton(route: GtfsRow<"routes.txt">): HTMLButtonElement {
     ? ` (${route.fields.route_short_name || route.fields.route_long_name})` : ""}`.replace(/^\s*\(\)/, "");
   button.addEventListener("click", () => showRoute(route));
   return button;
-}
-
-function pickupLabelText(value: number): string {
-  return PICKUP_TYPE_LABELS[value] ?? `pickup type ${value}`;
-}
-
-function dropOffLabelText(value: number): string {
-  return DROP_OFF_TYPE_LABELS[value] ?? `drop-off type ${value}`;
 }
 
 function selectTripStop(

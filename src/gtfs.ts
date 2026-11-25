@@ -38,6 +38,36 @@ export const CARS_ALLOWED_VALUES = {
   NO: 2,
 } as const;
 
+export const PICKUP_TYPES = {
+  REGULAR: 0,
+  NO_SERVICE: 1,
+  PHONE_AGENCY: 2,
+  COORDINATE: 3,
+} as const;
+
+export const DROP_OFF_TYPES = {
+  REGULAR: 0,
+  NO_SERVICE: 1,
+  PHONE_AGENCY: 2,
+  COORDINATE: 3,
+} as const;
+
+export function decodePickupType(value: number | null): string {
+  if (value === null || value === PICKUP_TYPES.REGULAR) return "regular pickup";
+  if (value === PICKUP_TYPES.NO_SERVICE) return "no pickup";
+  if (value === PICKUP_TYPES.PHONE_AGENCY) return "pickup by phone";
+  if (value === PICKUP_TYPES.COORDINATE) return "pickup by coordinate";
+  return `pickup type ${value}`;
+}
+
+export function decodeDropOffType(value: number | null): string {
+  if (value === null || value === DROP_OFF_TYPES.REGULAR) return "regular drop-off";
+  if (value === DROP_OFF_TYPES.NO_SERVICE) return "no drop-off";
+  if (value === DROP_OFF_TYPES.PHONE_AGENCY) return "drop-off by phone";
+  if (value === DROP_OFF_TYPES.COORDINATE) return "drop-off by coordinate";
+  return `drop-off type ${value}`;
+}
+
 export function decodeTripFieldValue(
   value: number | null,
 ): "Unknown" | "Yes" | "No" | "Unrecognized" {

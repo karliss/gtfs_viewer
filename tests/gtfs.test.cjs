@@ -4,7 +4,8 @@ const { strToU8, zipSync } = require("fflate");
 const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, summarizeTripField,
-  decodeTripFieldValue, processGtfsColor, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES,
+  decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
+  WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
 } = require("../dist/gtfs.cjs");
 const {
   WarningCollector, WARNING_DESCRIPTIONS, WARNING_TYPES,
@@ -380,6 +381,21 @@ test("processes and validates GTFS colors", () => {
   assert.equal(processGtfsColor("#A1B2C3"), null);
   assert.equal(processGtfsColor("12345"), null);
   assert.equal(processGtfsColor("GGGGGG"), null);
+});
+
+test("decodes GTFS pickup and drop-off types", () => {
+  assert.equal(PICKUP_TYPES.REGULAR, 0);
+  assert.equal(PICKUP_TYPES.NO_SERVICE, 1);
+  assert.equal(PICKUP_TYPES.PHONE_AGENCY, 2);
+  assert.equal(PICKUP_TYPES.COORDINATE, 3);
+  assert.equal(DROP_OFF_TYPES.REGULAR, 0);
+  assert.equal(DROP_OFF_TYPES.NO_SERVICE, 1);
+  assert.equal(DROP_OFF_TYPES.PHONE_AGENCY, 2);
+  assert.equal(DROP_OFF_TYPES.COORDINATE, 3);
+  assert.equal(decodePickupType(null), "regular pickup");
+  assert.equal(decodePickupType(PICKUP_TYPES.NO_SERVICE), "no pickup");
+  assert.equal(decodeDropOffType(DROP_OFF_TYPES.PHONE_AGENCY), "drop-off by phone");
+  assert.equal(decodePickupType(99), "pickup type 99");
 });
 
 test("summarizes trip accessibility with missing values left unprovided", () => {
