@@ -386,31 +386,25 @@ input[type="file"] {
   padding-left: 1.5rem;
 }
 
-.trip-stop-button {
-  display: grid;
-  grid-template-columns: minmax(12rem, 1fr) 11rem;
-  width: 100%;
-  gap: 1rem;
-  border: 0;
-  background: transparent;
-  text-align: left;
-}
-
-.trip-stop-button[aria-selected="true"] {
+.trip-stop-time[aria-selected="true"] {
   background: #eaf1fb;
   outline: 1px solid #9bb7dd;
 }
 
 .trip-stop-row {
   display: grid;
-  grid-template-columns: minmax(18rem, 1fr) 9rem 2rem;
+  grid-template-columns: 2rem 14rem 8rem 10rem;
   align-items: center;
   gap: 0.5rem;
 }
 
 .trip-stop-time {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  background: transparent;
   font-family: monospace;
-  text-align: right;
+  text-align: left;
   font-variant-numeric: tabular-nums;
 }
 

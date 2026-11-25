@@ -1081,10 +1081,6 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     item.dataset.stopIndex = String(index);
     const row = document.createElement("div");
     row.className = "trip-stop-row";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "trip-stop-button";
-    button.dataset.stopIndex = String(index);
     const stopName = stop?.fields.stop_name || stopId || "Location";
     const stopLink = document.createElement("span");
     stopLink.className = "trip-stop-name";
@@ -1098,20 +1094,17 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     } else {
       stopLink.textContent = `${stopName}${stopId ? ` (${stopId})` : ""}`;
     }
-    const time = document.createElement("span");
+    const time = document.createElement("button");
+    time.type = "button";
     time.className = "trip-stop-time";
+    time.dataset.stopIndex = String(index);
     const arrival = stopTime.fields.arrival_time;
     const departure = stopTime.fields.departure_time;
     time.textContent = arrival && departure && arrival !== departure
       ? `${arrival} — ${departure}`
       : departure || arrival || "";
-    button.append(stopLink, time);
-    button.setAttribute("aria-selected", "false");
-    button.addEventListener("click", () => selectTripStop(trip, stopRows, index, button));
-    row.append(button);
-    const fare = document.createElement("span");
-    fare.className = "trip-inline-fare";
-    row.append(fare);
+    time.setAttribute("aria-selected", "false");
+    time.addEventListener("click", () => selectTripStop(trip, stopRows, index, time));
     if (stop) {
       const position = mapStop(stop).coordinate;
       const mapButton = document.createElement("button");
@@ -1126,6 +1119,10 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     } else {
       row.append(document.createElement("span"));
     }
+    row.append(stopLink, time);
+    const fare = document.createElement("span");
+    fare.className = "trip-inline-fare";
+    row.append(fare);
     item.append(row);
     tripStopList.append(item);
   }
@@ -1178,7 +1175,7 @@ function selectTripStop(
   selectedButton: HTMLButtonElement,
 ): void {
   if (!feed) return;
-  tripStopList.querySelectorAll<HTMLButtonElement>(".trip-stop-button")
+  tripStopList.querySelectorAll<HTMLButtonElement>(".trip-stop-time")
     .forEach((button) => button.setAttribute("aria-selected", String(button === selectedButton)));
   tripStopList.querySelectorAll<HTMLElement>(".trip-inline-fare")
     .forEach((fare) => { fare.textContent = ""; });
@@ -1200,9 +1197,10 @@ function selectTripStop(
     );
     if (!fareLabel) continue;
     const name = fare.productName || fare.fareId || "No fare found";
-    fareLabel.textContent = fare.price === null
+    const hasFare = fare.fareId !== null || fare.price !== null || fare.productName !== null;
+    fareLabel.textContent = `${hasFare ? "💰 " : ""}${fare.price === null
       ? name
-      : `${name}: ${fare.price}${fare.currency ? ` ${fare.currency}` : ""}`;
+      : `${name}: ${fare.price}${fare.currency ? ` ${fare.currency}` : ""}`}`;
   }
 }
 
