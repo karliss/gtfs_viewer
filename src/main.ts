@@ -1229,14 +1229,15 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     const exceptions = feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [];
     const calendarList = document.createElement("table");
     calendarList.className = "trip-calendar-table";
-    appendWeekdayHeader(calendarList, "Date range");
+    appendWeekdayHeader(calendarList, "Service", true);
 
     if (calendar) {
-      const start = gtfsDateToIso(calendar.fields.start_date);
-      const end = gtfsDateToIso(calendar.fields.end_date);
-      const range = document.createElement("td");
-      range.textContent = `${start || "Not provided"} — ${end || "Not provided"}`;
-      appendWeekdayRow(calendarList, range, calendar);
+      const serviceLink = document.createElement("button");
+      serviceLink.type = "button";
+      serviceLink.className = "route-link";
+      serviceLink.textContent = serviceId;
+      serviceLink.addEventListener("click", () => showServiceTable(serviceId));
+      appendWeekdayRow(calendarList, serviceLink, calendar, null, undefined, true);
     }
     if (!calendar) {
       const row = document.createElement("tr");
