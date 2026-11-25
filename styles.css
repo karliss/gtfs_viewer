@@ -636,6 +636,27 @@ tbody tr:last-child td {
   margin: 0 0 0 0.75rem;
 }
 
+#date-schedule .form-controls {
+  align-items: center;
+}
+
+#date-schedule .form-controls label {
+  margin: 0;
+}
+
+#schedule-date-prev,
+#schedule-date-next,
+#schedule-date {
+  height: 2.25rem;
+}
+
+#schedule-date-prev,
+#schedule-date-next {
+  min-width: 2.25rem;
+  padding: 0;
+  line-height: 1;
+}
+
 #map-heading {
   margin-top: 0.5rem;
 }

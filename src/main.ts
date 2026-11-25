@@ -206,7 +206,8 @@ app.innerHTML = `
       </section>
     </section>
     <section id="date-schedule" class="panel viewer" aria-labelledby="date-schedule-heading" hidden>
-      <h2 id="date-schedule-heading" tabindex="-1">Date-specific schedule</h2>
+      <h2 id="date-schedule-heading" tabindex="-1">Schedule on date</h2>
+      <p id="date-schedule-trips"></p>
       <p id="date-schedule-route"></p>
       <div class="form-controls">
         <label for="schedule-date">Date</label>
@@ -216,6 +217,10 @@ app.innerHTML = `
       </div>
       <p id="schedule-summary"></p>
       <div id="schedule-variants"></div>
+      <section id="date-schedule-rules">
+        <h3>Active rules</h3>
+        <ul id="date-schedule-rule-list"></ul>
+      </section>
     </section>
     <section id="map-panel" class="panel viewer" aria-labelledby="map-heading" hidden>
       <h2 id="map-heading" tabindex="-1">Map</h2>
@@ -345,6 +350,8 @@ const scheduleDate = element<HTMLInputElement>("#schedule-date");
 const scheduleDatePrev = element<HTMLButtonElement>("#schedule-date-prev");
 const scheduleDateNext = element<HTMLButtonElement>("#schedule-date-next");
 const dateScheduleRoute = element<HTMLParagraphElement>("#date-schedule-route");
+const dateScheduleTrips = element<HTMLParagraphElement>("#date-schedule-trips");
+const dateScheduleRuleList = element<HTMLUListElement>("#date-schedule-rule-list");
 const scheduleSummary = element<HTMLParagraphElement>("#schedule-summary");
 const scheduleVariants = element<HTMLElement>("#schedule-variants");
 const routeDateSchedule = element<HTMLButtonElement>("#route-date-schedule");
@@ -1424,17 +1431,31 @@ function showDateSchedule(route: GtfsRow<"routes.txt">, date: string): void {
       || "";
   }
   scheduleDate.value = isoDate;
-  const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
-  dateScheduleHeading.textContent = `Date-specific schedule: ${title || "Route"}`;
+  dateScheduleHeading.textContent = isoDate ? `Schedule on ${formatDateWithWeekday(gtfsDateToIso(isoDate) || isoDate)}` : "Schedule on date";
+  dateScheduleTrips.replaceChildren();
+  dateScheduleTrips.append(document.createTextNode("Trip: "));
   dateScheduleRoute.replaceChildren();
-  const routeLink = routeStopRouteButton(route);
-  const routeParts = [
-    route.fields.route_id ? `Route ID: ${route.fields.route_id}` : null,
-    route.fields.route_short_name ? `Short name: ${route.fields.route_short_name}` : null,
-    route.fields.route_long_name ? `Long name: ${route.fields.route_long_name}` : null,
-  ].filter((part): part is string => part !== null);
-  dateScheduleRoute.append(routeLink);
-  if (routeParts.length) dateScheduleRoute.append(document.createTextNode(` — ${routeParts.join(" · ")}`));
+  dateScheduleRoute.append(document.createTextNode("Route: "));
+  const color = routeColor(route);
+  if (color) {
+    const swatch = document.createElement("span");
+    swatch.className = "route-header-swatch";
+    swatch.style.backgroundColor = color;
+    swatch.setAttribute("aria-hidden", "true");
+    dateScheduleRoute.append(swatch);
+  }
+  const names = [route.fields.route_short_name, route.fields.route_long_name]
+    .filter((value): value is string => Boolean(value));
+  dateScheduleRoute.append(document.createTextNode(names.length ? ` ${names.join(" ")}` : " "));
+  if (route.fields.route_id) {
+    dateScheduleRoute.append(" ");
+    const routeIdLink = document.createElement("button");
+    routeIdLink.type = "button";
+    routeIdLink.className = "route-link";
+    routeIdLink.textContent = route.fields.route_id;
+    routeIdLink.addEventListener("click", () => showRoute(route));
+    dateScheduleRoute.append(routeIdLink);
+  }
   renderDateSchedule();
   viewer.hidden = true;
   routeDetail.hidden = true;
@@ -1453,16 +1474,29 @@ function renderDateSchedule(): void {
   if (!routeId) {
     scheduleSummary.textContent = "This route has no route_id.";
     scheduleVariants.replaceChildren();
+    dateScheduleRuleList.replaceChildren();
     return;
   }
   const date = scheduleDate.value;
   const gtfsDate = isoDateToGtfs(date);
+  dateScheduleHeading.textContent = gtfsDate
+    ? `Schedule on ${formatDateWithWeekday(gtfsDate)}`
+    : "Schedule on date";
   const { variants } = getRouteVariants(feed, routeId);
   scheduleVariants.replaceChildren();
+  dateScheduleTrips.replaceChildren();
+  dateScheduleTrips.append(document.createTextNode("Trip: "));
+  const activeTripIds = new Set<string>();
+  const activeServiceIds = new Set<string>();
   let scheduledTripCount = 0;
   for (const variant of variants) {
     const schedule = getDateSchedule(feed, variant, date);
     scheduledTripCount += schedule.tripCount;
+    for (const trip of variant.trips) {
+      if (!isServiceActiveOnDate(feed, trip.fields.service_id, date)) continue;
+      if (trip.fields.trip_id) activeTripIds.add(trip.fields.trip_id);
+      if (trip.fields.service_id) activeServiceIds.add(trip.fields.service_id);
+    }
     const section = document.createElement("section");
     const heading = document.createElement("h3");
     const firstStop = variant.stops[0];
@@ -1508,11 +1542,61 @@ function renderDateSchedule(): void {
     }
     scheduleVariants.append(section);
   }
+  if (!activeTripIds.size) {
+    dateScheduleTrips.append(document.createTextNode("None"));
+  } else {
+    for (const [index, tripId] of [...activeTripIds].entries()) {
+      if (index) dateScheduleTrips.append(", ");
+      const trip = feed.indexes.tripsById.get(tripId);
+      if (trip) {
+        const link = document.createElement("button");
+        link.type = "button";
+        link.className = "route-link";
+        link.textContent = tripId;
+        link.addEventListener("click", () => showTrip(trip));
+        dateScheduleTrips.append(link);
+      } else {
+        dateScheduleTrips.append(tripId);
+      }
+    }
+  }
   scheduleSummary.textContent = gtfsDate
     ? `${scheduledTripCount} scheduled ${scheduledTripCount === 1 ? "trip" : "trips"} run on ${date}.`
     : "Select a valid date.";
   if (!variants.length) {
     scheduleSummary.textContent = "No route variants could be formed.";
+  }
+  dateScheduleRuleList.replaceChildren();
+  if (!gtfsDate) {
+    const item = document.createElement("li");
+    item.textContent = "Select a valid date.";
+    dateScheduleRuleList.append(item);
+  } else {
+    let ruleCount = 0;
+    for (const serviceId of activeServiceIds) {
+      const exceptions = (feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [])
+        .filter((row) => row.fields.date === isoDateToGtfs(date));
+      const added = exceptions.find((row) => row.fields.exception_type === 1);
+      if (added) {
+        const item = document.createElement("li");
+        item.textContent = `calendar_dates.txt — ${serviceId} — Added`;
+        dateScheduleRuleList.append(item);
+        ruleCount++;
+        continue;
+      }
+      const calendar = feed.indexes.calendarByServiceId.get(serviceId);
+      if (calendar) {
+        const item = document.createElement("li");
+        item.textContent = `calendar.txt — ${serviceId}`;
+        dateScheduleRuleList.append(item);
+        ruleCount++;
+      }
+    }
+    if (!ruleCount) {
+      const item = document.createElement("li");
+      item.textContent = "No active calendar or exception rule.";
+      dateScheduleRuleList.append(item);
+    }
   }
 }
 
