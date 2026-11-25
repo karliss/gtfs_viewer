@@ -706,10 +706,6 @@ function routeColor(route: GtfsRow<"routes.txt"> | undefined): string | null {
   return processGtfsColor(route?.fields.route_color)?.css ?? null;
 }
 
-function routeTextColor(route: GtfsRow<"routes.txt"> | undefined): string | null {
-  return processGtfsColor(route?.fields.route_text_color)?.css ?? null;
-}
-
 function appendColorSwatch(description: HTMLElement, color: string): void {
   const swatch = document.createElement("span");
   swatch.className = "route-color-swatch";
@@ -720,26 +716,13 @@ function appendColorSwatch(description: HTMLElement, color: string): void {
 
 function prependRouteColorHeading(heading: HTMLElement, route: GtfsRow<"routes.txt"> | undefined): void {
   const color = routeColor(route);
-  const textColor = routeTextColor(route);
-  if (!color && !textColor) return;
-  const swatches = document.createDocumentFragment();
-  if (color) {
-    const swatch = document.createElement("span");
-    swatch.className = "route-header-swatch";
-    swatch.style.backgroundColor = color;
-    swatch.title = `Route color ${color}`;
-    swatch.setAttribute("aria-label", `Route color ${color}`);
-    swatches.append(swatch);
-  }
-  if (textColor) {
-    const swatch = document.createElement("span");
-    swatch.className = "route-header-swatch";
-    swatch.style.backgroundColor = textColor;
-    swatch.title = `Route text color ${textColor}`;
-    swatch.setAttribute("aria-label", `Route text color ${textColor}`);
-    swatches.append(swatch);
-  }
-  heading.prepend(swatches, document.createTextNode(" "));
+  if (!color) return;
+  const swatch = document.createElement("span");
+  swatch.className = "route-header-swatch";
+  swatch.style.backgroundColor = color;
+  swatch.title = `Route color ${color}`;
+  swatch.setAttribute("aria-label", `Route color ${color}`);
+  heading.prepend(swatch, document.createTextNode(" "));
 }
 
 function wheelchairIcon(value: number | null): HTMLElement | null {
