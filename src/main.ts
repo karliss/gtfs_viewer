@@ -658,19 +658,34 @@ function createWeekdayGrid(
   selectedException: GtfsRow<"calendar_dates.txt"> | undefined = undefined,
 ): HTMLElement {
   const wrapper = document.createElement("div");
-  wrapper.className = "date-schedule-week-wrapper";
-  const week = document.createElement("div");
-  week.className = "date-schedule-week";
-  for (const cellData of getWeekdayCells(calendar, currentDayIndex, selectedException)) {
-    const cell = document.createElement("span");
-    cell.className = "date-schedule-week-day";
-    if (cellData.current) cell.classList.add("date-schedule-week-day--current");
-    if (cellData.exceptionType !== null) cell.classList.add("date-schedule-week-day--exception");
-    cell.textContent = cellData.symbol || cellData.name;
-    cell.title = cellData.title;
-    week.append(cell);
+  wrapper.className = "date-schedule-week-table";
+  const table = document.createElement("table");
+  table.className = "trip-calendar-table";
+  const head = document.createElement("tr");
+  for (const name of ["Date range", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]) {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = name;
+    head.append(th);
   }
-  wrapper.append(week);
+  table.append(head);
+  const row = document.createElement("tr");
+  const range = document.createElement("td");
+  const start = gtfsDateToIso(calendar?.fields.start_date ?? null);
+  const end = gtfsDateToIso(calendar?.fields.end_date ?? null);
+  range.textContent = `${start || "Not provided"} — ${end || "Not provided"}`;
+  row.append(range);
+  for (const cellData of getWeekdayCells(calendar, currentDayIndex, selectedException)) {
+    const cell = document.createElement("td");
+    cell.textContent = cellData.symbol;
+    cell.title = cellData.title;
+    cell.className = cellData.current ? "date-schedule-current-day" : "";
+    if (cellData.active) cell.classList.add("trip-calendar-active");
+    if (cellData.exceptionType !== null) cell.classList.add("trip-calendar-exception");
+    row.append(cell);
+  }
+  table.append(row);
+  wrapper.append(table);
   const legend = document.createElement("p");
   legend.className = "date-schedule-week-legend";
   legend.textContent = "➕ Added exception · ❌ Regular service removed";
@@ -1657,13 +1672,6 @@ function renderDateSchedule(): void {
       item.append(header);
 
       if (calendar) {
-        const start = gtfsDateToIso(calendar.fields.start_date);
-        const end = gtfsDateToIso(calendar.fields.end_date);
-        const range = document.createElement("div");
-        range.className = "date-schedule-rule-range";
-        range.textContent = `Date range: ${start || "Not provided"} — ${end || "Not provided"}`;
-        item.append(range);
-
         const week = createWeekdayGrid(calendar, weekdayIndex, selectedException);
         item.append(week);
       } else if (selectedException) {
