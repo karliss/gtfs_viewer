@@ -45,6 +45,14 @@ export interface GtfsIndexes {
   calendarByServiceId: Map<string, GtfsRow<"calendar.txt">>;
   calendarDatesByServiceId: Map<string, GtfsRow<"calendar_dates.txt">[]>;
   routesByStopId: Map<string, string[]>;
+  fareAttributesById: Map<string, GtfsRow<"fare_attributes.txt">>;
+  fareRulesByRouteId: Map<string, GtfsRow<"fare_rules.txt">[]>;
+  fareRulesWithoutRoute: GtfsRow<"fare_rules.txt">[];
+  stopAreasByStopId: Map<string, GtfsRow<"stop_areas.txt">[]>;
+  fareLegRules: GtfsRow<"fare_leg_rules.txt">[];
+  fareProductsById: Map<string, GtfsRow<"fare_products.txt">>;
+  networksByRouteId: Map<string, string[]>;
+  fareCache: Map<string, FareResult | null>;
 }
 
 export interface GtfsFeed {
@@ -250,25 +258,24 @@ export function getDateSchedule(feed: GtfsFeed, variant: RouteVariant, date: str
 export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
   originStopId: string, destinationStopIds: readonly (string | null)[]): FareResult[] {
   const routeId = trip.fields.route_id;
-  const fareAttributes = feed.tables.find((table) => table.kind === "fare_attributes.txt");
-  const fareRules = feed.tables.find((table) => table.kind === "fare_rules.txt");
   const results: FareResult[] = [];
 
   const legacyFareFor = (destinationStopId: string): FareResult | null => {
-    if (!fareAttributes || fareAttributes.kind !== "fare_attributes.txt") return null;
-    if (!fareRules || fareRules.kind !== "fare_rules.txt") return null;
     const origin = feed.indexes.stopsById.get(originStopId);
     const destination = feed.indexes.stopsById.get(destinationStopId);
     const originZone = origin?.fields.zone_id;
     const destinationZone = destination?.fields.zone_id;
-    for (const rule of fareRules.rows) {
+    const routeRules = routeId
+      ? feed.indexes.fareRulesByRouteId.get(routeId) ?? []
+      : [];
+    for (const rule of [...routeRules, ...feed.indexes.fareRulesWithoutRoute]) {
       if (rule.fields.route_id && routeId && rule.fields.route_id !== routeId) continue;
       if (rule.fields.origin_id && originZone && rule.fields.origin_id !== originZone) continue;
       if (rule.fields.destination_id && destinationZone && rule.fields.destination_id !== destinationZone) continue;
       if (rule.fields.contains_id && originZone !== rule.fields.contains_id &&
         destinationZone !== rule.fields.contains_id) continue;
       if (rule.fields.fare_id) {
-        const attribute = fareAttributes.rows.find((row) => row.fields.fare_id === rule.fields.fare_id);
+        const attribute = feed.indexes.fareAttributesById.get(rule.fields.fare_id);
         if (attribute) return {
           destinationStopId,
           fareId: rule.fields.fare_id,
@@ -282,29 +289,32 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
     return null;
   };
 
-  const stopAreas = feed.tables.find((table) => table.kind === "stop_areas.txt");
-  const legRules = feed.tables.find((table) => table.kind === "fare_leg_rules.txt");
-  const fareProducts = feed.tables.find((table) => table.kind === "fare_products.txt");
-  const routeNetworks = feed.tables.find((table) => table.kind === "route_networks.txt");
   for (const destinationStopId of destinationStopIds) {
     if (!destinationStopId) continue;
+    const cacheKey = `${routeId ?? ""}\u001f${originStopId}\u001f${destinationStopId}`;
+    if (feed.indexes.fareCache.has(cacheKey)) {
+      const cached = feed.indexes.fareCache.get(cacheKey);
+      results.push(cached ? { ...cached, destinationStopId } : {
+        destinationStopId, fareId: null, price: null, currency: null, productName: null,
+        source: "legacy",
+      });
+      continue;
+    }
     let modern: FareResult | null = null;
-    if (stopAreas?.kind === "stop_areas.txt" && legRules?.kind === "fare_leg_rules.txt"
-      && fareProducts?.kind === "fare_products.txt") {
-      const originAreas = stopAreas.rows.filter((row) => row.fields.stop_id === originStopId)
+    if (feed.indexes.fareLegRules.length > 0) {
+      const originAreas = (feed.indexes.stopAreasByStopId.get(originStopId) ?? [])
         .map((row) => row.fields.area_id).filter((id): id is string => id !== null);
-      const destinationAreas = stopAreas.rows.filter((row) => row.fields.stop_id === destinationStopId)
+      const destinationAreas = (feed.indexes.stopAreasByStopId.get(destinationStopId) ?? [])
         .map((row) => row.fields.area_id).filter((id): id is string => id !== null);
-      const networks = routeNetworks?.kind === "route_networks.txt"
-        ? routeNetworks.rows.filter((row) => row.fields.route_id === routeId)
-          .map((row) => row.fields.network_id).filter((id): id is string => id !== null)
+      const networks = routeId
+        ? feed.indexes.networksByRouteId.get(routeId) ?? []
         : [];
-      for (const rule of legRules.rows) {
+      for (const rule of feed.indexes.fareLegRules) {
         if (rule.fields.from_area_id && !originAreas.includes(rule.fields.from_area_id)) continue;
         if (rule.fields.to_area_id && !destinationAreas.includes(rule.fields.to_area_id)) continue;
         if (rule.fields.network_id && networks.length > 0 && !networks.includes(rule.fields.network_id)) continue;
         if (!rule.fields.fare_product_id) continue;
-        const product = fareProducts.rows.find((row) => row.fields.fare_product_id === rule.fields.fare_product_id);
+        const product = feed.indexes.fareProductsById.get(rule.fields.fare_product_id);
         if (product) {
           modern = {
             destinationStopId,
@@ -318,7 +328,9 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
         }
       }
     }
-    results.push(modern ?? legacyFareFor(destinationStopId) ?? {
+    const resolved = modern ?? legacyFareFor(destinationStopId);
+    feed.indexes.fareCache.set(cacheKey, resolved);
+    results.push(resolved ? { ...resolved, destinationStopId } : {
       destinationStopId, fareId: null, price: null, currency: null, productName: null,
       source: "legacy",
     });
@@ -741,6 +753,53 @@ function initializeFeedIndexes(feed: GtfsFeed): void {
   const routesByStopId = new Map<string, string[]>(
     [...routeIdsByStop].map(([stopId, routes]) => [stopId, [...routes]]),
   );
+  const fareAttributesById = new Map<string, GtfsRow<"fare_attributes.txt">>();
+  for (const row of getRows("fare_attributes.txt")) {
+    const id = row.fields.fare_id;
+    if (id && !fareAttributesById.has(id)) fareAttributesById.set(id, row);
+  }
+
+  const fareRulesByRouteId = new Map<string, GtfsRow<"fare_rules.txt">[]>();
+  const fareRulesWithoutRoute: GtfsRow<"fare_rules.txt">[] = [];
+  for (const row of getRows("fare_rules.txt")) {
+    const routeId = row.fields.route_id;
+    if (routeId) {
+      const rows = fareRulesByRouteId.get(routeId) ?? [];
+      rows.push(row);
+      fareRulesByRouteId.set(routeId, rows);
+    } else {
+      fareRulesWithoutRoute.push(row);
+    }
+  }
+
+  const stopAreasByStopId = new Map<string, GtfsRow<"stop_areas.txt">[]>();
+  for (const row of getRows("stop_areas.txt")) {
+    const stopId = row.fields.stop_id;
+    if (stopId) {
+      const rows = stopAreasByStopId.get(stopId) ?? [];
+      rows.push(row);
+      stopAreasByStopId.set(stopId, rows);
+    }
+  }
+
+  const fareLegRules = getRows("fare_leg_rules.txt");
+  const fareProductsById = new Map<string, GtfsRow<"fare_products.txt">>();
+  for (const row of getRows("fare_products.txt")) {
+    const id = row.fields.fare_product_id;
+    if (id && !fareProductsById.has(id)) fareProductsById.set(id, row);
+  }
+
+  const networksByRouteId = new Map<string, string[]>();
+  for (const row of getRows("route_networks.txt")) {
+    const routeId = row.fields.route_id;
+    const networkId = row.fields.network_id;
+    if (routeId && networkId) {
+      const networks = networksByRouteId.get(routeId) ?? [];
+      if (!networks.includes(networkId)) networks.push(networkId);
+      networksByRouteId.set(routeId, networks);
+    }
+  }
+
   feed.indexes = {
     agenciesById,
     routesById,
@@ -754,6 +813,14 @@ function initializeFeedIndexes(feed: GtfsFeed): void {
     calendarByServiceId,
     calendarDatesByServiceId,
     routesByStopId,
+    fareAttributesById,
+    fareRulesByRouteId,
+    fareRulesWithoutRoute,
+    stopAreasByStopId,
+    fareLegRules,
+    fareProductsById,
+    networksByRouteId,
+    fareCache: new Map<string, FareResult | null>(),
   };
 }
 
