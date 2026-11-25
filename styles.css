@@ -20,6 +20,11 @@ body {
   padding: 1rem;
 }
 
+.page.ultrawide {
+  max-width: 100rem;
+  margin-inline: auto;
+}
+
 .page__header {
   margin-bottom: 1rem;
 }
@@ -65,7 +70,8 @@ form,
 
 #load-panel.loaded h2,
 #load-panel.loaded > p:not(#status),
-#load-panel.loaded #status {
+#load-panel.loaded #status,
+#load-panel.loaded #load-form label {
   display: none;
 }
 
@@ -215,6 +221,12 @@ button:not(:disabled) {
 
 button:disabled {
   opacity: 0.5;
+}
+
+#ultrawide-toggle[aria-pressed="true"] {
+  border-color: #1554a0;
+  background: #eaf1fb;
+  color: #1554a0;
 }
 
 input[type="file"] {
