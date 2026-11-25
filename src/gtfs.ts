@@ -204,6 +204,7 @@ export function summarizeTripField(
 }
 
 export interface RouteVariant {
+  routeId: string | null;
   shapeId: string | null;
   shapeIds: string[];
   tripHeadsign: string | null;
@@ -216,7 +217,6 @@ export interface RouteVariant {
 export interface VariantMergeResult {
   merged: boolean;
   mergedVariantCount: number;
-  updatedTripCount: number;
   canonicalShapeId: string | null;
   removedShapeIds: string[];
 }
@@ -225,7 +225,6 @@ export interface RouteVariantMergeSummary {
   variantsBefore: number;
   variantsAfter: number;
   mergedVariantCount: number;
-  updatedTripCount: number;
   removedShapeIds: string[];
 }
 
@@ -613,12 +612,7 @@ export function canMergeRouteVariants(
   second: RouteVariant,
 ): boolean {
   if (!first.shapeId || !second.shapeId || first.shapeId === second.shapeId) return false;
-  const firstRouteIds = new Set(first.trips.flatMap((trip) =>
-    trip.fields.route_id ? [trip.fields.route_id] : []));
-  const secondRouteIds = new Set(second.trips.flatMap((trip) =>
-    trip.fields.route_id ? [trip.fields.route_id] : []));
-  if (firstRouteIds.size === 0 || secondRouteIds.size === 0
-    || !arraysEqual([...firstRouteIds].sort(), [...secondRouteIds].sort())) return false;
+  if (!first.routeId || first.routeId !== second.routeId) return false;
   if (first.tripHeadsign !== second.tripHeadsign) return false;
   if (first.tripShortName !== second.tripShortName) return false;
   if (!arraysEqual(first.stops, second.stops)) return false;
@@ -642,7 +636,6 @@ export function mergeRouteVariantPair(
     return {
       merged: false,
       mergedVariantCount: 0,
-      updatedTripCount: 0,
       canonicalShapeId: first.shapeId,
       removedShapeIds: [],
     };
@@ -656,24 +649,17 @@ export function mergeRouteVariantPair(
   const trips = new Set(first.trips);
   for (const trip of second.trips) trips.add(trip);
   first.trips = [...trips];
-  for (const directionId of second.directionIds) {
-    if (!first.directionIds.includes(directionId)) first.directionIds.push(directionId);
-  }
 
-  const routeIds = new Set([
-    ...first.trips.flatMap((trip) => trip.fields.route_id ? [trip.fields.route_id] : []),
-  ]);
-  for (const routeId of routeIds) {
-    const variants = feed.indexes.routeVariantsByRouteId.get(routeId);
+  if (first.routeId) {
+    const variants = feed.indexes.routeVariantsByRouteId.get(first.routeId);
     if (variants) {
-      feed.indexes.routeVariantsByRouteId.set(routeId,
+      feed.indexes.routeVariantsByRouteId.set(first.routeId,
         variants.filter((variant) => variant !== second));
     }
   }
   return {
     merged: true,
     mergedVariantCount: 1,
-    updatedTripCount: 0,
     canonicalShapeId,
     removedShapeIds: [],
   };
@@ -687,7 +673,6 @@ export function mergeRouteVariants(
   const variantsBefore = routeId ? getRouteVariants(feed, routeId).variants : [];
   const removedShapeIds = new Set<string>();
   let mergedVariantCount = 0;
-  let updatedTripCount = 0;
 
   const canonicalVariants: RouteVariant[] = [];
   for (const variant of variantsBefore) {
@@ -696,7 +681,6 @@ export function mergeRouteVariants(
       const result = mergeRouteVariantPair(feed, canonical, variant);
       if (result.merged) {
         mergedVariantCount += result.mergedVariantCount;
-        updatedTripCount += result.updatedTripCount;
         for (const shapeId of result.removedShapeIds) removedShapeIds.add(shapeId);
       }
     } else {
@@ -709,7 +693,6 @@ export function mergeRouteVariants(
     variantsBefore: variantsBefore.length,
     variantsAfter: variantsAfter.length,
     mergedVariantCount,
-    updatedTripCount,
     removedShapeIds: [...removedShapeIds],
   };
 }
@@ -731,11 +714,13 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
     shapeId: string | null,
     headsign: string | null,
     shortName: string | null,
+    directionId: number | null,
     stops: readonly (string | null)[],
   ): string => [
     variantKeyPart(shapeId),
     variantKeyPart(headsign),
     variantKeyPart(shortName),
+    directionId === null ? "n" : `d${directionId}`,
     ...stops.map((stop) => variantKeyPart(stop)),
   ].join("|");
 
@@ -758,11 +743,13 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
       tripsWithoutVariant++;
       continue;
     }
-    const key = variantKey(fields.shape_id, fields.trip_headsign, fields.trip_short_name, stops);
+    const key = variantKey(fields.shape_id, fields.trip_headsign,
+      fields.trip_short_name, fields.direction_id, stops);
     let variant = variantsByKey.get(key);
     if (!variant) {
       const shapeId = fields.shape_id || null;
       variant = {
+        routeId,
         shapeId, shapeIds: shapeId ? [shapeId] : [],
         tripHeadsign: fields.trip_headsign,
         tripShortName: fields.trip_short_name, directionIds: [], stops, trips: [],
