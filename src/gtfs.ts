@@ -128,7 +128,7 @@ export function getReferencedRoute(
 export interface TripFieldSummary {
   value: number | null;
   count: number;
-  percent: number;
+  percent: number | null;
 }
 
 export function summarizeTripField(
@@ -141,10 +141,11 @@ export function summarizeTripField(
     const value = trip.fields[field];
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
+  const showPercent = counts.size > 1;
   return [...counts].map(([value, count]) => ({
     value,
     count,
-    percent: Number((count * 100 / trips.length).toFixed(1)),
+    percent: showPercent ? Number((count * 100 / trips.length).toFixed(1)) : null,
   }));
 }
 

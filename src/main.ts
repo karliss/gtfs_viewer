@@ -747,7 +747,7 @@ function appendTripFieldSummary(
     if (icon) description.append(icon, " ");
     const word = decodeTripFieldValue(item.value);
     const rawValue = item.value === null ? "null" : String(item.value);
-    description.append(`${word} (${rawValue}) (${item.percent}%)`);
+    description.append(`${word} (${rawValue})${item.percent === null ? "" : ` (${item.percent}%)`}`);
   }
 }
 

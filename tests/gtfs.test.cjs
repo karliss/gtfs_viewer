@@ -390,7 +390,7 @@ test("summarizes trip accessibility with missing values left unprovided", () => 
   assert.equal(decodeTripFieldValue(3), "Unrecognized");
   assert.deepEqual(summarizeTripField([], "bikes_allowed"), []);
   assert.deepEqual(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), [
-    { value: 1, count: 2, percent: 100 },
+    { value: 1, count: 2, percent: null },
   ]);
   assert.deepEqual(summarizeTripField(table.rows, "wheelchair_accessible"), [
     { value: 1, count: 2, percent: 40 },
