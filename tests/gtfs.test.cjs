@@ -750,7 +750,8 @@ test("supports multiple calendar rows for one service ID", () => {
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-06"), false);
   const variant = getRouteVariants(feed, "r").variants[0];
   const timetable = getVariantTimetable(feed, variant);
-  assert.deepEqual(timetable.popularDays, [[1, 2]]);
+  assert.deepEqual(timetable.popularDays, [[1], [2]]);
+  assert.deepEqual(timetable.rows[0].departures[0].days, [[1], [2]]);
 });
 
 test("calculates legacy fares from a selected stop to following stops", () => {

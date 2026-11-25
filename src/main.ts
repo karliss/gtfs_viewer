@@ -1932,7 +1932,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
           column.className = "timetable-column";
           if (timetable.popularDays.length === 2) column.classList.add("timetable-day-column");
           for (const departure of row.departures) {
-            if (departure.days && !departure.days.some((day) => popularDays.includes(day))) continue;
+            if (departure.days && !departure.days.some((days) => days.some((day) => popularDays.includes(day)))) continue;
             const minute = document.createElement("span");
             minute.className = "timetable-minute";
             minute.textContent = String(departure.minute).padStart(2, "0");
