@@ -620,6 +620,11 @@ tbody tr:last-child td {
   line-height: 1;
 }
 
+#stops-map[hidden],
+#routes-map[hidden] {
+  display: none;
+}
+
 #feed-summary {
   margin-left: auto;
   color: #52617a;
@@ -628,13 +633,6 @@ tbody tr:last-child td {
 
 .pagination label {
   margin: 0 0 0 0.75rem;
-}
-
-#stops-map,
-#routes-map,
-#route-map,
-#map-clear-filter {
-  margin-top: 0.75rem;
 }
 
 #map-heading {
