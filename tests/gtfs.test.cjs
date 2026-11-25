@@ -735,6 +735,24 @@ test("applies calendar exceptions and produces a date-specific schedule", () => 
   assert.equal(schedule.rows[0].departures[0].tripId, "t1");
 });
 
+test("supports multiple calendar rows for one service ID", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,route_short_name\nr,5\n",
+    "trips.txt": "route_id,trip_id,service_id,shape_id,trip_headsign\nr,t1,weekday,s,Center\n",
+    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\nt1,08:05:00,a,1\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "weekday,1,0,0,0,0,0,0,20260101,20260331\n"
+      + "weekday,0,1,0,0,0,0,0,20260601,20260831\n",
+  }));
+  assert.equal(feed.indexes.calendarByServiceId.get("weekday").length, 2);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-05"), true);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-06-02"), true);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-06"), false);
+  const variant = getRouteVariants(feed, "r").variants[0];
+  const timetable = getVariantTimetable(feed, variant);
+  assert.deepEqual(timetable.popularDays, [[1, 2]]);
+});
+
 test("calculates legacy fares from a selected stop to following stops", () => {
   const feed = loadGtfs(archive({
     "routes.txt": "route_id\nr\n",

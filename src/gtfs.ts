@@ -118,7 +118,7 @@ export interface GtfsIndexes {
   routesByTripId: Map<string, string>;
   stopTimesByTripId: Map<string, GtfsRow<"stop_times.txt">[]>;
   stopTimesByStopId: Map<string, GtfsRow<"stop_times.txt">[]>;
-  calendarByServiceId: Map<string, GtfsRow<"calendar.txt">>;
+  calendarByServiceId: Map<string, GtfsRow<"calendar.txt">[]>;
   calendarDatesByServiceId: Map<string, GtfsRow<"calendar_dates.txt">[]>;
   routesByStopId: Map<string, string[]>;
   fareAttributesById: Map<string, GtfsRow<"fare_attributes.txt">>;
@@ -242,26 +242,24 @@ export function isServiceActiveOnDate(feed: GtfsFeed, serviceId: string | null, 
   const gtfsDate = isoDateToGtfs(date);
   if (!gtfsDate) return false;
   let active: boolean | null = null;
-  const calendar = feed.indexes.calendarByServiceId.get(serviceId);
-  if (calendar) {
+  const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+  const days = [
+    null,
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+  ] as const;
+  const dayField = days[weekday === 0 ? 7 : weekday];
+  for (const calendar of feed.indexes.calendarByServiceId.get(serviceId) ?? []) {
     const start = calendar.fields.start_date;
     const end = calendar.fields.end_date;
-    if (start && end && gtfsDate >= start && gtfsDate <= end) {
-      const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
-      const days = [
-        null,
-        calendar.fields.monday,
-        calendar.fields.tuesday,
-        calendar.fields.wednesday,
-        calendar.fields.thursday,
-        calendar.fields.friday,
-        calendar.fields.saturday,
-        calendar.fields.sunday,
-      ];
-      active = days[weekday === 0 ? 7 : weekday] === 1;
-    } else {
-      active = false;
-    }
+    if (!dayField || !start || !end || gtfsDate < start || gtfsDate > end) continue;
+    if (active === null) active = false;
+    if (calendar.fields[dayField] === 1) active = true;
   }
   for (const exception of feed.indexes.calendarDatesByServiceId.get(serviceId) ?? []) {
     if (exception.fields.date !== gtfsDate) continue;
@@ -455,16 +453,16 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
 
   const daySetForService = (serviceId: string | null): number[] | null => {
     if (!serviceId) return null;
-    const row = feed.indexes.calendarByServiceId.get(serviceId);
-    if (!row) return null;
+    const rows = feed.indexes.calendarByServiceId.get(serviceId);
+    if (!rows?.length) return null;
     return [
-      row.fields.monday === 1 ? 1 : null,
-      row.fields.tuesday === 1 ? 2 : null,
-      row.fields.wednesday === 1 ? 3 : null,
-      row.fields.thursday === 1 ? 4 : null,
-      row.fields.friday === 1 ? 5 : null,
-      row.fields.saturday === 1 ? 6 : null,
-      row.fields.sunday === 1 ? 7 : null,
+      rows.some((row) => row.fields.monday === 1) ? 1 : null,
+      rows.some((row) => row.fields.tuesday === 1) ? 2 : null,
+      rows.some((row) => row.fields.wednesday === 1) ? 3 : null,
+      rows.some((row) => row.fields.thursday === 1) ? 4 : null,
+      rows.some((row) => row.fields.friday === 1) ? 5 : null,
+      rows.some((row) => row.fields.saturday === 1) ? 6 : null,
+      rows.some((row) => row.fields.sunday === 1) ? 7 : null,
     ].filter((day): day is number => day !== null);
   };
 
@@ -817,10 +815,14 @@ function initializeFeedIndexes(feed: GtfsFeed): void {
     }
   }
 
-  const calendarByServiceId = new Map<string, GtfsRow<"calendar.txt">>();
+  const calendarByServiceId = new Map<string, GtfsRow<"calendar.txt">[]>();
   for (const row of getRows("calendar.txt")) {
     const id = row.fields.service_id;
-    if (id && !calendarByServiceId.has(id)) calendarByServiceId.set(id, row);
+    if (id) {
+      const rows = calendarByServiceId.get(id) ?? [];
+      rows.push(row);
+      calendarByServiceId.set(id, rows);
+    }
   }
 
   const calendarDatesByServiceId = new Map<string, GtfsRow<"calendar_dates.txt">[]>();

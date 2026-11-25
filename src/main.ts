@@ -1243,21 +1243,23 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
   tripCalendar.replaceChildren();
   tripExceptions.replaceChildren();
   if (serviceId) {
-    const calendar = feed.indexes.calendarByServiceId.get(serviceId);
+    const calendars = feed.indexes.calendarByServiceId.get(serviceId) ?? [];
     const exceptions = feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [];
     const calendarList = document.createElement("table");
     calendarList.className = "trip-calendar-table";
     appendWeekdayHeader(calendarList);
 
-    if (calendar) {
-      const serviceLink = document.createElement("button");
-      serviceLink.type = "button";
-      serviceLink.className = "route-link";
-      serviceLink.textContent = serviceId;
-      serviceLink.addEventListener("click", () => showServiceTable(serviceId));
-      appendWeekdayRow(calendarList, serviceLink, calendar);
+    if (calendars.length) {
+      for (const calendar of calendars) {
+        const serviceLink = document.createElement("button");
+        serviceLink.type = "button";
+        serviceLink.className = "route-link";
+        serviceLink.textContent = serviceId;
+        serviceLink.addEventListener("click", () => showServiceTable(serviceId));
+        appendWeekdayRow(calendarList, serviceLink, calendar);
+      }
     }
-    if (!calendar) {
+    if (!calendars.length) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
       cell.colSpan = 9;
@@ -1567,8 +1569,8 @@ function showDateSchedule(route: GtfsRow<"routes.txt">, date: string): void {
   currentScheduleRoute = route;
   let isoDate = gtfsDateToIso(date) || (/^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "");
   if (!isoDate) {
-    const calendar = [...feed.indexes.calendarByServiceId.values()][0];
-    isoDate = gtfsDateToIso(calendar?.fields.start_date ?? null)
+    const calendars = [...feed.indexes.calendarByServiceId.values()][0];
+    isoDate = gtfsDateToIso(calendars?.[0]?.fields.start_date ?? null)
       || gtfsDateToIso(feed.tables.find((table) => table.kind === "feed_info.txt")?.kind === "feed_info.txt"
         ? (feed.tables.find((table) => table.kind === "feed_info.txt") as GtfsTable & { kind: "feed_info.txt" }).rows[0]?.fields.feed_start_date
         : null)
@@ -1700,14 +1702,25 @@ function renderDateSchedule(): void {
     for (const serviceId of routeServiceIds) {
       const exceptions = feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [];
       const selectedException = exceptions.find((row) => row.fields.date === gtfsDate);
-      const calendar = feed.indexes.calendarByServiceId.get(serviceId);
-      if (!calendar && !selectedException) continue;
-      const serviceLink = document.createElement("button");
-      serviceLink.type = "button";
-      serviceLink.className = "route-link";
-      serviceLink.textContent = serviceId;
-      serviceLink.addEventListener("click", () => showServiceTable(serviceId));
-      appendWeekdayRow(dateScheduleRuleTable, serviceLink, calendar, weekdayIndex, selectedException);
+      const calendars = feed.indexes.calendarByServiceId.get(serviceId) ?? [];
+      if (!calendars.length && !selectedException) continue;
+      if (calendars.length) {
+        for (const calendar of calendars) {
+          const serviceLink = document.createElement("button");
+          serviceLink.type = "button";
+          serviceLink.className = "route-link";
+          serviceLink.textContent = serviceId;
+          serviceLink.addEventListener("click", () => showServiceTable(serviceId));
+          appendWeekdayRow(dateScheduleRuleTable, serviceLink, calendar, weekdayIndex, selectedException);
+        }
+      } else {
+        const serviceLink = document.createElement("button");
+        serviceLink.type = "button";
+        serviceLink.className = "route-link";
+        serviceLink.textContent = serviceId;
+        serviceLink.addEventListener("click", () => showServiceTable(serviceId));
+        appendWeekdayRow(dateScheduleRuleTable, serviceLink, undefined, weekdayIndex, selectedException);
+      }
       ruleCount++;
     }
     if (!ruleCount) {
