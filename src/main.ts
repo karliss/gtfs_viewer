@@ -1703,25 +1703,33 @@ function renderDateSchedule(): void {
       const exceptions = feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [];
       const selectedException = exceptions.find((row) => row.fields.date === gtfsDate);
       const calendars = feed.indexes.calendarByServiceId.get(serviceId) ?? [];
-      if (!calendars.length && !selectedException) continue;
-      if (calendars.length) {
-        for (const calendar of calendars) {
+      const applicableCalendars = gtfsDate
+        ? calendars.filter((calendar) =>
+          calendar.fields.start_date !== null
+          && calendar.fields.end_date !== null
+          && gtfsDate >= calendar.fields.start_date
+          && gtfsDate <= calendar.fields.end_date)
+        : [];
+      if (!applicableCalendars.length && !selectedException) continue;
+      if (applicableCalendars.length) {
+        for (const calendar of applicableCalendars) {
           const serviceLink = document.createElement("button");
           serviceLink.type = "button";
           serviceLink.className = "route-link";
           serviceLink.textContent = serviceId;
           serviceLink.addEventListener("click", () => showServiceTable(serviceId));
           appendWeekdayRow(dateScheduleRuleTable, serviceLink, calendar, weekdayIndex, selectedException);
+          ruleCount++;
         }
-      } else {
+      } else if (selectedException) {
         const serviceLink = document.createElement("button");
         serviceLink.type = "button";
         serviceLink.className = "route-link";
         serviceLink.textContent = serviceId;
         serviceLink.addEventListener("click", () => showServiceTable(serviceId));
         appendWeekdayRow(dateScheduleRuleTable, serviceLink, undefined, weekdayIndex, selectedException);
+        ruleCount++;
       }
-      ruleCount++;
     }
     if (!ruleCount) {
       const row = document.createElement("tr");
