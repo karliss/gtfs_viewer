@@ -369,7 +369,114 @@ input[type="file"] {
   margin-right: 1rem;
 }
 
-#back-to-route,
+#trip-detail details,
+#trip-detail section,
+#date-schedule {
+  margin-top: 1rem;
+}
+
+#trip-route-details summary,
+#trip-detail section h3,
+#date-schedule h3 {
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#trip-stop-list {
+  padding-left: 1.5rem;
+}
+
+.trip-stop-time[aria-selected="true"] {
+  background: #eaf1fb;
+  outline: 1px solid #9bb7dd;
+}
+
+.trip-stop-row {
+  display: grid;
+  grid-template-columns: 2rem 14rem 12rem 10rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.trip-stop-time {
+  display: grid;
+  grid-template-columns: 5.5rem 5.5rem;
+  width: 12rem;
+  padding: 0.35rem 0.5rem;
+  border: 0;
+  background: transparent;
+  font-family: monospace;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.trip-arrival-time,
+.trip-departure-time {
+  display: block;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.trip-stop-details {
+  white-space: nowrap;
+}
+
+.trip-stop-item {
+  margin-bottom: 0.25rem;
+}
+
+.trip-calendar-summary p {
+  margin: 0.25rem 0;
+  color: #52617a;
+}
+
+.trip-calendar-table {
+  width: auto;
+  max-width: 100%;
+  margin-top: 0.25rem;
+}
+
+.trip-calendar-table th,
+.trip-calendar-table td {
+  min-width: 2.5rem;
+  max-width: none;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.trip-calendar-table th:first-child,
+.trip-calendar-table td:first-child {
+  min-width: 18rem;
+  text-align: left;
+}
+
+.trip-calendar-active {
+  color: #1554a0;
+  font-weight: 700;
+}
+
+.trip-inline-fare {
+  display: block;
+  color: #52617a;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+#trip-fares table,
+#schedule-variants table {
+  margin-top: 0.75rem;
+}
+
+.schedule-exception-button,
+.schedule-date-button {
+  margin-left: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1554a0;
+  text-decoration: underline;
+}
+
 #clear-filter {
   margin-top: 0.75rem;
 }

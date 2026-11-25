@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
-  getVariantTimetable, loadGtfs, summarizeTripField,
+  getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, summarizeTripField,
 } = require("../dist/gtfs.cjs");
 const {
   WarningCollector, WARNING_DESCRIPTIONS, WARNING_TYPES,
@@ -672,6 +672,46 @@ test("keeps shape IDs and trip text distinct even when they contain delimiters",
     { shapeId: "s", tripHeadsign: "1,A", tripShortName: "B", trips: ["t2"] },
     { shapeId: "s,1", tripHeadsign: "A", tripShortName: "C", trips: ["t3"] },
   ]);
+});
+
+test("applies calendar exceptions and produces a date-specific schedule", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,route_short_name\nr,5\n",
+    "trips.txt": "route_id,trip_id,service_id,shape_id,trip_headsign\nr,t1,weekday,s,Center\n",
+    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\nt1,08:05:00,a,1\nt1,08:15:00,b,2\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "weekday,1,1,1,1,1,0,0,20260101,20261231\n",
+    "calendar_dates.txt": "service_id,date,exception_type\nweekday,20260102,2\nweekday,20260103,1\n",
+  }));
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-01"), true);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-02"), false);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-03"), true);
+  const variant = getRouteVariants(feed, "r").variants[0];
+  const schedule = getDateSchedule(feed, variant, "2026-01-03");
+  assert.equal(schedule.tripCount, 1);
+  assert.equal(schedule.rows[0].hour, 8);
+  assert.equal(schedule.rows[0].departures[0].minute, 5);
+  assert.equal(schedule.rows[0].departures[0].tripId, "t1");
+});
+
+test("calculates legacy fares from a selected stop to following stops", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id\nr\n",
+    "trips.txt": "route_id,trip_id,service_id\nr,t,s\n",
+    "stops.txt": "stop_id,zone_id\na,z1\nb,z2\nc,z2\n",
+    "fare_attributes.txt": "fare_id,price,currency_type\nbase,2.50,EUR\n",
+    "fare_rules.txt": "fare_id,route_id,origin_id,destination_id\nbase,r,z1,z2\n",
+  }));
+  const trip = feed.indexes.tripsById.get("t");
+  const fares = getTripFares(feed, trip, "a", ["b", "c"]);
+  assert.deepEqual(fares.map(({ destinationStopId, fareId, price, currency }) =>
+    ({ destinationStopId, fareId, price, currency })), [
+    { destinationStopId: "b", fareId: "base", price: 2.5, currency: "EUR" },
+    { destinationStopId: "c", fareId: "base", price: 2.5, currency: "EUR" },
+  ]);
+  assert.equal(feed.indexes.fareAttributesById.get("base").fields.price, 2.5);
+  assert.equal(feed.indexes.fareRulesByRouteId.get("r").length, 1);
+  assert.equal(feed.indexes.fareCache.size, 2);
 });
 
 test("decodes standard route types for display", () => {

@@ -45,6 +45,14 @@ export interface GtfsIndexes {
   calendarByServiceId: Map<string, GtfsRow<"calendar.txt">>;
   calendarDatesByServiceId: Map<string, GtfsRow<"calendar_dates.txt">[]>;
   routesByStopId: Map<string, string[]>;
+  fareAttributesById: Map<string, GtfsRow<"fare_attributes.txt">>;
+  fareRulesByRouteId: Map<string, GtfsRow<"fare_rules.txt">[]>;
+  fareRulesWithoutRoute: GtfsRow<"fare_rules.txt">[];
+  stopAreasByStopId: Map<string, GtfsRow<"stop_areas.txt">[]>;
+  fareLegRules: GtfsRow<"fare_leg_rules.txt">[];
+  fareProductsById: Map<string, GtfsRow<"fare_products.txt">>;
+  networksByRouteId: Map<string, string[]>;
+  fareCache: Map<string, FareResult | null>;
 }
 
 export interface GtfsFeed {
@@ -132,6 +140,202 @@ export interface VariantTimetable {
   popularDays: number[][];
   exceptionDates: string[];
   rows: VariantTimetableRow[];
+}
+
+export function gtfsDateToIso(date: string | null): string | null {
+  if (!date || !/^\d{8}$/.test(date)) return null;
+  return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
+}
+
+export function isoDateToGtfs(date: string | null): string | null {
+  if (!date) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  return match ? `${match[1]}${match[2]}${match[3]}` : null;
+}
+
+export function isServiceActiveOnDate(feed: GtfsFeed, serviceId: string | null, date: string): boolean {
+  if (!serviceId) return false;
+  const gtfsDate = isoDateToGtfs(date);
+  if (!gtfsDate) return false;
+  let active: boolean | null = null;
+  const calendar = feed.indexes.calendarByServiceId.get(serviceId);
+  if (calendar) {
+    const start = calendar.fields.start_date;
+    const end = calendar.fields.end_date;
+    if (start && end && gtfsDate >= start && gtfsDate <= end) {
+      const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+      const days = [
+        null,
+        calendar.fields.monday,
+        calendar.fields.tuesday,
+        calendar.fields.wednesday,
+        calendar.fields.thursday,
+        calendar.fields.friday,
+        calendar.fields.saturday,
+        calendar.fields.sunday,
+      ];
+      active = days[weekday === 0 ? 7 : weekday] === 1;
+    } else {
+      active = false;
+    }
+  }
+  for (const exception of feed.indexes.calendarDatesByServiceId.get(serviceId) ?? []) {
+    if (exception.fields.date !== gtfsDate) continue;
+    if (exception.fields.exception_type === 1) active = true;
+    if (exception.fields.exception_type === 2) active = false;
+  }
+  return active ?? false;
+}
+
+export interface DateScheduleDeparture {
+  tripId: string | null;
+  time: string;
+  minute: number;
+  hour: number;
+  headsign: string | null;
+  shortName: string | null;
+}
+
+export interface DateScheduleRow {
+  hour: number;
+  departures: DateScheduleDeparture[];
+}
+
+export interface DateScheduleVariant {
+  variant: RouteVariant;
+  rows: DateScheduleRow[];
+  tripCount: number;
+}
+
+export interface FareResult {
+  destinationStopId: string;
+  fareId: string | null;
+  price: number | null;
+  currency: string | null;
+  productName: string | null;
+  source: "legacy" | "modern";
+}
+
+export function getDateSchedule(feed: GtfsFeed, variant: RouteVariant, date: string): DateScheduleVariant {
+  const grouped = new Map<number, Map<number, DateScheduleDeparture[]>>();
+  let tripCount = 0;
+  const firstStop = variant.stops[0];
+  for (const trip of variant.trips) {
+    if (!isServiceActiveOnDate(feed, trip.fields.service_id, date)) continue;
+    tripCount++;
+    const tripId = trip.fields.trip_id;
+    if (!tripId) continue;
+    for (const stopTime of feed.indexes.stopTimesByTripId.get(tripId) ?? []) {
+      if (firstStop !== null && stopTime.fields.stop_id !== firstStop) continue;
+      const time = stopTime.fields.departure_time || stopTime.fields.arrival_time;
+      const match = time ? /^(\d+):(\d{2})(:\d{2})?$/.exec(time) : null;
+      if (!match) continue;
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
+      const minutes = grouped.get(hour) ?? new Map<number, DateScheduleDeparture[]>();
+      const departures = minutes.get(minute) ?? [];
+      departures.push({
+        tripId,
+        time: match[0],
+        hour,
+        minute,
+        headsign: trip.fields.trip_headsign,
+        shortName: trip.fields.trip_short_name,
+      });
+      minutes.set(minute, departures);
+      grouped.set(hour, minutes);
+    }
+  }
+  const rows = [...grouped.entries()].sort(([a], [b]) => a - b).map(([hour, minutes]) => ({
+    hour,
+    departures: [...minutes.entries()].sort(([a], [b]) => a - b)
+      .flatMap(([, departures]) => departures),
+  }));
+  return { variant, rows, tripCount };
+}
+
+export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
+  originStopId: string, destinationStopIds: readonly (string | null)[]): FareResult[] {
+  const routeId = trip.fields.route_id;
+  const results: FareResult[] = [];
+
+  const legacyFareFor = (destinationStopId: string): FareResult | null => {
+    const origin = feed.indexes.stopsById.get(originStopId);
+    const destination = feed.indexes.stopsById.get(destinationStopId);
+    const originZone = origin?.fields.zone_id;
+    const destinationZone = destination?.fields.zone_id;
+    const routeRules = routeId
+      ? feed.indexes.fareRulesByRouteId.get(routeId) ?? []
+      : [];
+    for (const rule of [...routeRules, ...feed.indexes.fareRulesWithoutRoute]) {
+      if (rule.fields.route_id && routeId && rule.fields.route_id !== routeId) continue;
+      if (rule.fields.origin_id && originZone && rule.fields.origin_id !== originZone) continue;
+      if (rule.fields.destination_id && destinationZone && rule.fields.destination_id !== destinationZone) continue;
+      if (rule.fields.contains_id && originZone !== rule.fields.contains_id &&
+        destinationZone !== rule.fields.contains_id) continue;
+      if (rule.fields.fare_id) {
+        const attribute = feed.indexes.fareAttributesById.get(rule.fields.fare_id);
+        if (attribute) return {
+          destinationStopId,
+          fareId: rule.fields.fare_id,
+          price: attribute.fields.price,
+          currency: attribute.fields.currency_type,
+          productName: null,
+          source: "legacy",
+        };
+      }
+    }
+    return null;
+  };
+
+  for (const destinationStopId of destinationStopIds) {
+    if (!destinationStopId) continue;
+    const cacheKey = `${routeId ?? ""}\u001f${originStopId}\u001f${destinationStopId}`;
+    if (feed.indexes.fareCache.has(cacheKey)) {
+      const cached = feed.indexes.fareCache.get(cacheKey);
+      results.push(cached ? { ...cached, destinationStopId } : {
+        destinationStopId, fareId: null, price: null, currency: null, productName: null,
+        source: "legacy",
+      });
+      continue;
+    }
+    let modern: FareResult | null = null;
+    if (feed.indexes.fareLegRules.length > 0) {
+      const originAreas = (feed.indexes.stopAreasByStopId.get(originStopId) ?? [])
+        .map((row) => row.fields.area_id).filter((id): id is string => id !== null);
+      const destinationAreas = (feed.indexes.stopAreasByStopId.get(destinationStopId) ?? [])
+        .map((row) => row.fields.area_id).filter((id): id is string => id !== null);
+      const networks = routeId
+        ? feed.indexes.networksByRouteId.get(routeId) ?? []
+        : [];
+      for (const rule of feed.indexes.fareLegRules) {
+        if (rule.fields.from_area_id && !originAreas.includes(rule.fields.from_area_id)) continue;
+        if (rule.fields.to_area_id && !destinationAreas.includes(rule.fields.to_area_id)) continue;
+        if (rule.fields.network_id && networks.length > 0 && !networks.includes(rule.fields.network_id)) continue;
+        if (!rule.fields.fare_product_id) continue;
+        const product = feed.indexes.fareProductsById.get(rule.fields.fare_product_id);
+        if (product) {
+          modern = {
+            destinationStopId,
+            fareId: rule.fields.fare_product_id,
+            price: product.fields.amount,
+            currency: product.fields.currency,
+            productName: product.fields.fare_product_name,
+            source: "modern",
+          };
+          break;
+        }
+      }
+    }
+    const resolved = modern ?? legacyFareFor(destinationStopId);
+    feed.indexes.fareCache.set(cacheKey, resolved);
+    results.push(resolved ? { ...resolved, destinationStopId } : {
+      destinationStopId, fareId: null, price: null, currency: null, productName: null,
+      source: "legacy",
+    });
+  }
+  return results;
 }
 
 export function formatTimetableDayRange(days: readonly number[]): string {
@@ -549,6 +753,53 @@ function initializeFeedIndexes(feed: GtfsFeed): void {
   const routesByStopId = new Map<string, string[]>(
     [...routeIdsByStop].map(([stopId, routes]) => [stopId, [...routes]]),
   );
+  const fareAttributesById = new Map<string, GtfsRow<"fare_attributes.txt">>();
+  for (const row of getRows("fare_attributes.txt")) {
+    const id = row.fields.fare_id;
+    if (id && !fareAttributesById.has(id)) fareAttributesById.set(id, row);
+  }
+
+  const fareRulesByRouteId = new Map<string, GtfsRow<"fare_rules.txt">[]>();
+  const fareRulesWithoutRoute: GtfsRow<"fare_rules.txt">[] = [];
+  for (const row of getRows("fare_rules.txt")) {
+    const routeId = row.fields.route_id;
+    if (routeId) {
+      const rows = fareRulesByRouteId.get(routeId) ?? [];
+      rows.push(row);
+      fareRulesByRouteId.set(routeId, rows);
+    } else {
+      fareRulesWithoutRoute.push(row);
+    }
+  }
+
+  const stopAreasByStopId = new Map<string, GtfsRow<"stop_areas.txt">[]>();
+  for (const row of getRows("stop_areas.txt")) {
+    const stopId = row.fields.stop_id;
+    if (stopId) {
+      const rows = stopAreasByStopId.get(stopId) ?? [];
+      rows.push(row);
+      stopAreasByStopId.set(stopId, rows);
+    }
+  }
+
+  const fareLegRules = getRows("fare_leg_rules.txt");
+  const fareProductsById = new Map<string, GtfsRow<"fare_products.txt">>();
+  for (const row of getRows("fare_products.txt")) {
+    const id = row.fields.fare_product_id;
+    if (id && !fareProductsById.has(id)) fareProductsById.set(id, row);
+  }
+
+  const networksByRouteId = new Map<string, string[]>();
+  for (const row of getRows("route_networks.txt")) {
+    const routeId = row.fields.route_id;
+    const networkId = row.fields.network_id;
+    if (routeId && networkId) {
+      const networks = networksByRouteId.get(routeId) ?? [];
+      if (!networks.includes(networkId)) networks.push(networkId);
+      networksByRouteId.set(routeId, networks);
+    }
+  }
+
   feed.indexes = {
     agenciesById,
     routesById,
@@ -562,6 +813,14 @@ function initializeFeedIndexes(feed: GtfsFeed): void {
     calendarByServiceId,
     calendarDatesByServiceId,
     routesByStopId,
+    fareAttributesById,
+    fareRulesByRouteId,
+    fareRulesWithoutRoute,
+    stopAreasByStopId,
+    fareLegRules,
+    fareProductsById,
+    networksByRouteId,
+    fareCache: new Map<string, FareResult | null>(),
   };
 }
 
