@@ -644,12 +644,8 @@ function renderRoutesCell(column: string, value: string | number | null): HTMLTa
   if (column === "route_color" || column === "route_text_color") {
     const color = processGtfsColor(typeof value === "string" ? value : null);
     if (!color) return renderGenericCell(column, value);
-    const swatch = document.createElement("span");
-    swatch.className = "route-color-swatch";
-    swatch.style.backgroundColor = color.css;
-    swatch.setAttribute("aria-hidden", "true");
     const cell = document.createElement("td");
-    cell.append(swatch, document.createTextNode(color.raw));
+    cell.append(createColorSwatch(color.css), document.createTextNode(color.raw));
     return cell;
   }
 
@@ -713,22 +709,27 @@ function routeColor(route: GtfsRow<"routes.txt"> | undefined): string | null {
   return processGtfsColor(route?.fields.route_color)?.css ?? null;
 }
 
-function appendColorSwatch(description: HTMLElement, color: string): void {
+function createColorSwatch(color: string, header = false, label?: string): HTMLSpanElement {
   const swatch = document.createElement("span");
-  swatch.className = "route-color-swatch";
+  swatch.className = header ? "route-header-swatch" : "route-color-swatch";
   swatch.style.backgroundColor = color;
-  swatch.setAttribute("aria-hidden", "true");
-  description.append(swatch);
+  if (label) {
+    swatch.title = label;
+    swatch.setAttribute("aria-label", label);
+  } else {
+    swatch.setAttribute("aria-hidden", "true");
+  }
+  return swatch;
+}
+
+function appendColorSwatch(description: HTMLElement, color: string): void {
+  description.append(createColorSwatch(color));
 }
 
 function prependRouteColorHeading(heading: HTMLElement, route: GtfsRow<"routes.txt"> | undefined): void {
   const color = routeColor(route);
   if (!color) return;
-  const swatch = document.createElement("span");
-  swatch.className = "route-header-swatch";
-  swatch.style.backgroundColor = color;
-  swatch.title = `Route color ${color}`;
-  swatch.setAttribute("aria-label", `Route color ${color}`);
+  const swatch = createColorSwatch(color, true, `Route color ${color}`);
   heading.prepend(swatch, document.createTextNode(" "));
 }
 
@@ -895,11 +896,7 @@ function stopContent(stop: GtfsRow<"stops.txt">, popup = false): HTMLElement {
         button.className = "route-link";
         const color = routeColor(route);
         if (popup && color) {
-          const swatch = document.createElement("span");
-          swatch.className = "route-color-swatch";
-          swatch.style.backgroundColor = color;
-          swatch.setAttribute("aria-hidden", "true");
-          button.append(swatch);
+          button.append(createColorSwatch(color));
         }
         const shortName = routeListLabel(route);
         const longName = route.fields.route_long_name;
@@ -1438,11 +1435,7 @@ function showDateSchedule(route: GtfsRow<"routes.txt">, date: string): void {
   dateScheduleRoute.append(document.createTextNode("Route: "));
   const color = routeColor(route);
   if (color) {
-    const swatch = document.createElement("span");
-    swatch.className = "route-header-swatch";
-    swatch.style.backgroundColor = color;
-    swatch.setAttribute("aria-hidden", "true");
-    dateScheduleRoute.append(swatch);
+    dateScheduleRoute.append(createColorSwatch(color, true));
   }
   const names = [route.fields.route_short_name, route.fields.route_long_name]
     .filter((value): value is string => Boolean(value));
