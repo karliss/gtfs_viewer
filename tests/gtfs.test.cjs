@@ -5,6 +5,7 @@ const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, loadGtfsFiles, summarizeTripField,
   decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
+  canMergeRouteVariants, mergeRouteVariantPair, mergeRouteVariants,
   WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
 } = require("../dist/gtfs.cjs");
 const {
@@ -589,7 +590,7 @@ test("handles missing tables and shape trips without stop times", () => {
   assert.equal(tripsCount, 2);
   assert.equal(tripsWithoutVariant, 1);
   assert.deepEqual(variants.map(({ trips, ...variant }) => variant), [
-    { shapeId: "s", tripHeadsign: null, tripShortName: null, directionIds: [null], stops: [] },
+    { shapeId: "s", shapeIds: ["s"], tripHeadsign: null, tripShortName: null, directionIds: [null], stops: [] },
   ]);
   assert.equal(getVariantTableRows(feed, variants[0], "shapes.txt"), undefined);
   assert.deepEqual(getRouteVariants(feed, "other"), {
@@ -617,6 +618,80 @@ test("resolves route references from other tables without linking missing IDs", 
   assert.equal(getReferencedRoute(routes, "trips.txt", "route_id", ""), undefined);
   assert.equal(getReferencedRoute(routes, "trips.txt", "route_id", null), undefined);
   assert.equal(loadGtfs(archive({ "trips.txt": "trip_id\nt\n" })).indexes.routesById.size, 0);
+});
+
+test("checks and merges route variants that differ only by shape ID with identical shape points", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id\nr\n",
+    "trips.txt": "route_id,trip_id,shape_id,trip_headsign,direction_id\n"
+      + "r,t1,shape-a,North,0\nr,t2,shape-b,North,0\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,a,1\nt1,b,2\nt2,a,1\nt2,b,2\n",
+    "shapes.txt": "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n"
+      + "shape-a,1,2,1\nshape-a,3,4,2\n"
+      + "shape-b,1,2,1\nshape-b,3,4,2\n",
+  }));
+  const variants = getRouteVariants(feed, "r").variants;
+  assert.equal(variants.length, 2);
+  assert.deepEqual(feed.indexes.shapePointsById.get("shape-a"), [[1, 2, null], [3, 4, null]]);
+  assert.equal(canMergeRouteVariants(feed, variants[0], variants[1]), true);
+
+  const result = mergeRouteVariantPair(feed, variants[0], variants[1]);
+  assert.equal(result.merged, true);
+  assert.equal(result.mergedVariantCount, 1);
+  assert.equal(result.updatedTripCount, 0);
+  assert.equal(feed.indexes.tripsById.get("t2").fields.shape_id, "shape-b");
+  assert.equal(feed.indexes.shapesById.has("shape-b"), true);
+  const mergedVariants = getRouteVariants(feed, "r").variants;
+  assert.equal(mergedVariants.length, 1);
+  assert.deepEqual(mergedVariants[0].shapeIds, ["shape-a", "shape-b"]);
+  assert.deepEqual(mergedVariants[0].trips.map((trip) => trip.fields.trip_id), ["t1", "t2"]);
+});
+
+test("includes shape_dist_traveled in the indexed shape points", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,shape_id,trip_headsign\n"
+      + "r,t1,shape-a,North\nr,t2,shape-b,North\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,a,1\nt1,b,2\nt2,a,1\nt2,b,2\n",
+    "shapes.txt": "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence,shape_dist_traveled\n"
+      + "shape-a,1,2,1,10\nshape-a,3,4,2,20\n"
+      + "shape-b,1,2,1,10\nshape-b,3,4,2,21\n",
+  }));
+  const variants = getRouteVariants(feed, "r").variants;
+  assert.deepEqual(feed.indexes.shapePointsById.get("shape-a"), [[1, 2, 10], [3, 4, 20]]);
+  assert.deepEqual(feed.indexes.shapePointsById.get("shape-b"), [[1, 2, 10], [3, 4, 21]]);
+  assert.equal(canMergeRouteVariants(feed, variants[0], variants[1]), false);
+});
+
+test("does not merge variants with different stops, directions, names, or shape points", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,shape_id,trip_headsign,trip_short_name,direction_id\n"
+      + "r,t1,shape-a,North,X,0\nr,t2,shape-b,North,X,0\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,a,1\nt1,b,2\nt2,a,1\nt2,c,2\n",
+    "shapes.txt": "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n"
+      + "shape-a,1,2,1\nshape-a,3,4,2\n"
+      + "shape-b,1,2,1\nshape-b,3,5,2\n",
+  }));
+  const variants = getRouteVariants(feed, "r").variants;
+  assert.equal(canMergeRouteVariants(feed, variants[0], variants[1]), false);
+  assert.equal(mergeRouteVariantPair(feed, variants[0], variants[1]).merged, false);
+});
+
+test("automatically merges all equivalent variants for a route", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id\nr\n",
+    "trips.txt": "route_id,trip_id,shape_id,trip_headsign,direction_id\n"
+      + "r,t1,shape-a,North,0\nr,t2,shape-b,North,0\nr,t3,shape-c,North,0\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,a,1\nt1,b,2\nt2,a,1\nt2,b,2\nt3,a,1\nt3,b,2\n",
+    "shapes.txt": "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n"
+      + "shape-a,1,2,1\nshape-a,3,4,2\n"
+      + "shape-b,1,2,1\nshape-b,3,4,2\n"
+      + "shape-c,1,2,1\nshape-c,3,4,2\n",
+  }));
+  const result = mergeRouteVariants(feed, "r");
+  assert.equal(result.variantsBefore, 3);
+  assert.equal(result.variantsAfter, 1);
+  assert.equal(result.mergedVariantCount, 2);
+  assert.equal(result.updatedTripCount, 0);
 });
 
 test("preserves missing stop IDs and variants with no stop times", () => {

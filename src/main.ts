@@ -2,6 +2,7 @@ import {
   decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, summarizeTripField,
   getVariantTimetable, formatTimetableDayRange, getDateSchedule, getTripFares, isServiceActiveOnDate,
   gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
+  mergeRouteVariants,
   WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant, type FareResult,
 } from "./gtfs";
@@ -105,6 +106,7 @@ app.innerHTML = `
       <button id="route-trips" type="button">View route trips</button>
       <button id="route-date-schedule" type="button">Open date-specific schedule</button>
       <button id="route-map" type="button">🗺️ View route on map</button>
+      <button id="route-merge-variants" type="button">Merge route variants</button>
       <h3>Shapes and route variants</h3>
       <div id="route-variants"></div>
       <section id="all-route-stops">
@@ -303,6 +305,7 @@ const routeProperties = element<HTMLElement>("#route-properties");
 const routeVariants = element<HTMLElement>("#route-variants");
 const routeSummary = element<HTMLParagraphElement>("#route-summary");
 const routeTrips = element<HTMLButtonElement>("#route-trips");
+const routeMergeVariants = element<HTMLButtonElement>("#route-merge-variants");
 const routeStopList = element<HTMLOListElement>("#route-stop-list");
 const tableFilter = element<HTMLParagraphElement>("#table-filter");
 const clearFilter = element<HTMLButtonElement>("#clear-filter");
@@ -1841,7 +1844,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     const properties = document.createElement("dl");
     properties.className = "route-properties";
     for (const [name, value, missing] of [
-      ["Shape ID", variant.shapeId, !variant.shapeId],
+      ["Shape IDs", variant.shapeIds.length ? variant.shapeIds.join(", ") : null, !variant.shapeIds.length],
       ["Trip headsign", variant.tripHeadsign, variant.tripHeadsign === null || variant.tripHeadsign === ""],
       ["Trip short name", variant.tripShortName, variant.tripShortName === null || variant.tripShortName === ""],
       ["Direction ID", variant.directionIds.map((id) => id === null ? "Not provided" : String(id)).join(", "),
@@ -1851,7 +1854,8 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       const term = document.createElement("dt");
       term.textContent = name;
       const description = document.createElement("dd");
-      if (name === "Shape ID" && variant.shapeId && feed.tables.some((table) => table.kind === "shapes.txt")) {
+      if (name === "Shape IDs" && variant.shapeIds.length === 1 && variant.shapeId
+        && feed.tables.some((table) => table.kind === "shapes.txt")) {
         const shapeButton = document.createElement("button");
         shapeButton.type = "button";
         shapeButton.className = "route-link";
@@ -2883,6 +2887,13 @@ routeTrips.addEventListener("click", () => {
     { ...table, rows: feed.indexes.tripsByRouteId.get(routeId) ?? [] },
     `Showing trips for route ${routeId}.`,
   );
+});
+
+routeMergeVariants.addEventListener("click", () => {
+  if (!feed || !currentRoute) return;
+  const result = mergeRouteVariants(feed, currentRoute);
+  showRoute(currentRoute);
+  routeSummary.textContent = `${result.mergedVariantCount} ${result.mergedVariantCount === 1 ? "variant" : "variants"} merged.`;
 });
 
 routeDateSchedule.addEventListener("click", () => {
