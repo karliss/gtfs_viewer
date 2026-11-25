@@ -53,6 +53,11 @@ test("warning descriptions cover every warning type with severity and scope", ()
     assert.ok(["error", "warning", "info"].includes(description.severity));
     assert.ok(["archive", "table", "element"].includes(description.scope));
   }
+  const mergeTemplate = WARNING_DESCRIPTIONS.variant_merge.messageTemplate;
+  assert.match(mergeTemplate, /\{firstTripId\}/);
+  assert.match(mergeTemplate, /\{firstShapeId\}/);
+  assert.match(mergeTemplate, /\{secondTripId\}/);
+  assert.match(mergeTemplate, /\{secondShapeId\}/);
 });
 
 test("loadGtfs attaches all warning types to feed and collector", () => {
