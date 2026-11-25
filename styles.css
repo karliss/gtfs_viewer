@@ -229,6 +229,10 @@ button:disabled {
   color: #1554a0;
 }
 
+#ultrawide-toggle {
+  margin-left: auto;
+}
+
 input[type="file"] {
   max-width: 100%;
 }
