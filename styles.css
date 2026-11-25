@@ -388,7 +388,7 @@ input[type="file"] {
 
 .trip-stop-button {
   display: grid;
-  grid-template-columns: minmax(10rem, 1fr) 12rem;
+  grid-template-columns: minmax(12rem, 1fr) 11rem;
   width: 100%;
   gap: 1rem;
   border: 0;
@@ -403,7 +403,7 @@ input[type="file"] {
 
 .trip-stop-row {
   display: grid;
-  grid-template-columns: minmax(16rem, 1fr) max-content;
+  grid-template-columns: minmax(18rem, 1fr) 9rem 2rem;
   align-items: center;
   gap: 0.5rem;
 }
@@ -427,11 +427,36 @@ input[type="file"] {
   color: #52617a;
 }
 
+.trip-calendar-table {
+  width: auto;
+  max-width: 100%;
+  margin-top: 0.25rem;
+}
+
+.trip-calendar-table th,
+.trip-calendar-table td {
+  min-width: 2.5rem;
+  max-width: none;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.trip-calendar-table th:first-child,
+.trip-calendar-table td:first-child {
+  min-width: 18rem;
+  text-align: left;
+}
+
+.trip-calendar-active {
+  color: #1554a0;
+  font-weight: 700;
+}
+
 .trip-inline-fare {
-  display: inline-block;
-  margin: 0.15rem 0 0.35rem 0.75rem;
+  display: block;
   color: #52617a;
   font-size: 0.9rem;
+  overflow-wrap: anywhere;
 }
 
 #trip-fares table,
