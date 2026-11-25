@@ -350,6 +350,13 @@ input[type="file"] {
   font-family: monospace;
 }
 
+.timetable-date-range {
+  margin: 0.75rem 0 0.25rem;
+  color: #52617a;
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
 .timetable-row,
 .timetable-headings {
   display: grid;

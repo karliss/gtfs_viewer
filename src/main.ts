@@ -36,11 +36,11 @@ app.innerHTML = `
     </header>
     <section id="load-panel" class="panel" aria-labelledby="load-heading">
       <h2 id="load-heading">Load a GTFS feed</h2>
-      <p>Choose a GTFS ZIP file from your device. The file is processed locally in your browser.</p>
+      <p>Choose a GTFS ZIP file or multiple .txt files. The files are processed locally in your browser.</p>
       <form id="load-form">
-        <label for="feed-file">GTFS ZIP file</label>
+        <label for="feed-file">GTFS ZIP or TXT files</label>
         <div class="form-controls">
-          <input id="feed-file" type="file" accept=".zip,application/zip" required />
+          <input id="feed-file" type="file" accept=".zip,.txt" multiple required />
           <button type="submit">Load feed</button>
         </div>
       </form>
@@ -1243,21 +1243,23 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
   tripCalendar.replaceChildren();
   tripExceptions.replaceChildren();
   if (serviceId) {
-    const calendar = feed.indexes.calendarByServiceId.get(serviceId);
+    const calendars = feed.indexes.calendarByServiceId.get(serviceId) ?? [];
     const exceptions = feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [];
     const calendarList = document.createElement("table");
     calendarList.className = "trip-calendar-table";
     appendWeekdayHeader(calendarList);
 
-    if (calendar) {
-      const serviceLink = document.createElement("button");
-      serviceLink.type = "button";
-      serviceLink.className = "route-link";
-      serviceLink.textContent = serviceId;
-      serviceLink.addEventListener("click", () => showServiceTable(serviceId));
-      appendWeekdayRow(calendarList, serviceLink, calendar);
+    if (calendars.length) {
+      for (const calendar of calendars) {
+        const serviceLink = document.createElement("button");
+        serviceLink.type = "button";
+        serviceLink.className = "route-link";
+        serviceLink.textContent = serviceId;
+        serviceLink.addEventListener("click", () => showServiceTable(serviceId));
+        appendWeekdayRow(calendarList, serviceLink, calendar);
+      }
     }
-    if (!calendar) {
+    if (!calendars.length) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
       cell.colSpan = 9;
@@ -1567,8 +1569,8 @@ function showDateSchedule(route: GtfsRow<"routes.txt">, date: string): void {
   currentScheduleRoute = route;
   let isoDate = gtfsDateToIso(date) || (/^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "");
   if (!isoDate) {
-    const calendar = [...feed.indexes.calendarByServiceId.values()][0];
-    isoDate = gtfsDateToIso(calendar?.fields.start_date ?? null)
+    const calendars = [...feed.indexes.calendarByServiceId.values()][0];
+    isoDate = gtfsDateToIso(calendars?.[0]?.fields.start_date ?? null)
       || gtfsDateToIso(feed.tables.find((table) => table.kind === "feed_info.txt")?.kind === "feed_info.txt"
         ? (feed.tables.find((table) => table.kind === "feed_info.txt") as GtfsTable & { kind: "feed_info.txt" }).rows[0]?.fields.feed_start_date
         : null)
@@ -1700,15 +1702,34 @@ function renderDateSchedule(): void {
     for (const serviceId of routeServiceIds) {
       const exceptions = feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [];
       const selectedException = exceptions.find((row) => row.fields.date === gtfsDate);
-      const calendar = feed.indexes.calendarByServiceId.get(serviceId);
-      if (!calendar && !selectedException) continue;
-      const serviceLink = document.createElement("button");
-      serviceLink.type = "button";
-      serviceLink.className = "route-link";
-      serviceLink.textContent = serviceId;
-      serviceLink.addEventListener("click", () => showServiceTable(serviceId));
-      appendWeekdayRow(dateScheduleRuleTable, serviceLink, calendar, weekdayIndex, selectedException);
-      ruleCount++;
+      const calendars = feed.indexes.calendarByServiceId.get(serviceId) ?? [];
+      const applicableCalendars = gtfsDate
+        ? calendars.filter((calendar) =>
+          calendar.fields.start_date !== null
+          && calendar.fields.end_date !== null
+          && gtfsDate >= calendar.fields.start_date
+          && gtfsDate <= calendar.fields.end_date)
+        : [];
+      if (!applicableCalendars.length && !selectedException) continue;
+      if (applicableCalendars.length) {
+        for (const calendar of applicableCalendars) {
+          const serviceLink = document.createElement("button");
+          serviceLink.type = "button";
+          serviceLink.className = "route-link";
+          serviceLink.textContent = serviceId;
+          serviceLink.addEventListener("click", () => showServiceTable(serviceId));
+          appendWeekdayRow(dateScheduleRuleTable, serviceLink, calendar, weekdayIndex, selectedException);
+          ruleCount++;
+        }
+      } else if (selectedException) {
+        const serviceLink = document.createElement("button");
+        serviceLink.type = "button";
+        serviceLink.className = "route-link";
+        serviceLink.textContent = serviceId;
+        serviceLink.addEventListener("click", () => showServiceTable(serviceId));
+        appendWeekdayRow(dateScheduleRuleTable, serviceLink, undefined, weekdayIndex, selectedException);
+        ruleCount++;
+      }
     }
     if (!ruleCount) {
       const row = document.createElement("tr");
@@ -1886,55 +1907,64 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     timetableDetails.addEventListener("toggle", () => {
       if (!timetableDetails.open || timetableLoaded) return;
       timetableLoaded = true;
-      const timetable = getVariantTimetable(activeFeed, variant);
-      if (timetable.rows.length === 0) {
+      const timetables = getVariantTimetable(activeFeed, variant);
+      if (timetables.every((timetable) => timetable.rows.length === 0)) {
         const message = document.createElement("p");
         message.textContent = "No timetable times found for this variant.";
         timetableDetails.append(message);
         return;
       }
-      const table = document.createElement("div");
-      table.className = "timetable";
-      table.style.setProperty("--timetable-columns", String(Math.max(timetable.popularDays.length, 1)));
-      const headings = document.createElement("div");
-      headings.className = "timetable-headings";
-      headings.append(document.createElement("span"));
-      for (const days of timetable.popularDays) {
-        const heading = document.createElement("span");
-        heading.className = "timetable-popular-days";
-        if (timetable.popularDays.length === 2) heading.classList.add("timetable-day-column");
-        heading.textContent = formatTimetableDayRange(days);
-        headings.append(heading);
-      }
-      table.append(headings);
-      for (const row of timetable.rows) {
-        const line = document.createElement("div");
-        line.className = "timetable-row";
-        const hour = document.createElement("span");
-        hour.className = "timetable-hour";
-        hour.textContent = `${String(row.hour)} `;
-        line.append(hour);
-        for (const popularDays of timetable.popularDays) {
-          const column = document.createElement("span");
-          column.className = "timetable-column";
-          if (timetable.popularDays.length === 2) column.classList.add("timetable-day-column");
-          for (const departure of row.departures) {
-            if (departure.days && !departure.days.some((day) => popularDays.includes(day))) continue;
-            const minute = document.createElement("span");
-            minute.className = "timetable-minute";
-            minute.textContent = String(departure.minute).padStart(2, "0");
-            column.append(minute, " ");
-          }
-          line.append(column);
+      for (const timetable of timetables) {
+        const dateRange = document.createElement("p");
+        dateRange.className = "timetable-date-range";
+        const [startDate, endDate] = timetable.dateRange;
+        const start = gtfsDateToIso(startDate);
+        const end = gtfsDateToIso(endDate);
+        dateRange.textContent = `Date range: ${start || "Not provided"} — ${end || "Not provided"}`;
+        timetableDetails.append(dateRange);
+        const table = document.createElement("div");
+        table.className = "timetable";
+        table.style.setProperty("--timetable-columns", String(Math.max(timetable.popularDays.length, 1)));
+        const headings = document.createElement("div");
+        headings.className = "timetable-headings";
+        headings.append(document.createElement("span"));
+        for (const days of timetable.popularDays) {
+          const heading = document.createElement("span");
+          heading.className = "timetable-popular-days";
+          if (timetable.popularDays.length === 2) heading.classList.add("timetable-day-column");
+          heading.textContent = formatTimetableDayRange(days);
+          headings.append(heading);
         }
-        table.append(line);
+        table.append(headings);
+        for (const row of timetable.rows) {
+          const line = document.createElement("div");
+          line.className = "timetable-row";
+          const hour = document.createElement("span");
+          hour.className = "timetable-hour";
+          hour.textContent = `${String(row.hour)} `;
+          line.append(hour);
+          for (const popularDays of timetable.popularDays) {
+            const column = document.createElement("span");
+            column.className = "timetable-column";
+            if (timetable.popularDays.length === 2) column.classList.add("timetable-day-column");
+            for (const departure of row.departures) {
+              if (departure.days && !departure.days.some((day) => popularDays.includes(day))) continue;
+              const minute = document.createElement("span");
+              minute.className = "timetable-minute";
+              minute.textContent = String(departure.minute).padStart(2, "0");
+              column.append(minute, " ");
+            }
+            line.append(column);
+          }
+          table.append(line);
+        }
+        timetableDetails.append(table);
       }
-      timetableDetails.append(table);
-      if (timetable.exceptionDates.length > 0) {
+      if (timetables[0]?.exceptionDates.length) {
         const exceptions = document.createElement("p");
         exceptions.className = "timetable-exception-dates";
         exceptions.append("Exceptions: ");
-        for (const [index, date] of timetable.exceptionDates.entries()) {
+        for (const [index, date] of timetables[0].exceptionDates.entries()) {
           if (index) exceptions.append(", ");
           const iso = gtfsDateToIso(date);
           const button = document.createElement("button");
@@ -2641,7 +2671,7 @@ function renderRouteMap(preserveMapView = false): void {
   mapView?.setSelectedVariant(selected.length === 1 ? selected[0] : null);
 }
 
-function loadFeed(file: File): Promise<GtfsFeed> {
+function loadFeed(files: File[]): Promise<GtfsFeed> {
   const url = URL.createObjectURL(new Blob([workerSource], { type: "text/javascript" }));
   let worker: Worker;
   try {
@@ -2655,7 +2685,7 @@ function loadFeed(file: File): Promise<GtfsFeed> {
         const progress = event.data.progress;
         if (progress.phase === "extracting") {
           loadingProgress.value = progress.completed ? 10 : 5;
-          status.textContent = progress.completed ? "Archive extracted." : "Extracting GTFS archive…";
+          status.textContent = progress.completed ? "GTFS files read." : "Reading GTFS files…";
         } else if (progress.phase === "indexing") {
           loadingProgress.value = progress.completed ? 100 : 95;
           status.textContent = progress.completed ? "GTFS indexes built." : "Building GTFS indexes…";
@@ -2688,7 +2718,9 @@ function loadFeed(file: File): Promise<GtfsFeed> {
       reject(new Error("Could not read the parsed feed."));
     };
     try {
-      worker.postMessage(file);
+      worker.postMessage(files.length === 1 && /\.zip$/i.test(files[0].name)
+        ? { type: "zip", file: files[0] }
+        : { type: "files", files });
     } catch (error) {
       worker.terminate();
       reject(error);
@@ -2698,8 +2730,16 @@ function loadFeed(file: File): Promise<GtfsFeed> {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const file = input.files?.[0];
-  if (!file) return;
+  const files = [...(input.files ?? [])];
+  if (!files.length) return;
+  if (files.some((file) => !/\.zip$/i.test(file.name) && !/\.txt$/i.test(file.name))) {
+    status.textContent = "Select a ZIP file or TXT files only.";
+    return;
+  }
+  if (files.length > 1 && files.some((file) => /\.zip$/i.test(file.name))) {
+    status.textContent = "Select one ZIP file, or multiple TXT files, but not both.";
+    return;
+  }
 
   input.disabled = true;
   submit.disabled = true;
@@ -2728,7 +2768,7 @@ form.addEventListener("submit", async (event) => {
   agenciesById.clear();
 
   try {
-    feed = await loadFeed(file);
+    feed = await loadFeed(files);
     warningCollector.replace(feed.warnings ?? []);
     feed.warnings = [...warningCollector.all];
     updateWarningNavigation(feed.warnings.length);

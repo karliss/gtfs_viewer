@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
-  getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, summarizeTripField,
+  getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, loadGtfsFiles, summarizeTripField,
   decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
   WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
 } = require("../dist/gtfs.cjs");
@@ -322,6 +322,16 @@ test("loads a header-only table and ignores directory entries", () => {
   });
 });
 
+test("loads selected TXT files without an archive", () => {
+  const feed = loadGtfsFiles({
+    "routes.txt": strToU8("route_id,route_type\nR1,3\n"),
+    "stops.txt": strToU8("stop_id,stop_name\nS1,Main\n"),
+  });
+  assert.deepEqual(feed.tables.map((table) => table.name), ["routes.txt", "stops.txt"]);
+  assert.equal(feed.indexes.routesById.get("R1").fields.route_type, 3);
+  assert.equal(feed.indexes.stopsById.get("S1").fields.stop_name, "Main");
+});
+
 test("reports invalid archives, missing tables and duplicate filenames", () => {
   assert.throws(() => loadGtfs(strToU8("not a zip")), /valid.*ZIP/i);
   assert.throws(() => loadGtfs(archive({ "readme.md": "hello" })), /no.*\.txt/i);
@@ -520,8 +530,8 @@ test("preserves valid single-trip calendar masks", () => {
         + `service,${monday},${tuesday},${wednesday},${thursday},${friday},${saturday},${sunday},20260101,20261231\n`,
     }));
     const variant = getRouteVariants(feed, "r").variants[0];
-    const timetable = getVariantTimetable(feed, variant);
-    assert.deepEqual(timetable.popularDays, [expected]);
+    const timetables = getVariantTimetable(feed, variant);
+    assert.deepEqual(timetables[0].popularDays, [expected]);
   }
 });
 
@@ -533,9 +543,9 @@ test("trims calendar IDs and values for single-trip timetables", () => {
       + "weekday-service, 1 ,1,1,1,1,0,0,20260101,20261231\n",
   }));
   const variant = getRouteVariants(feed, "r").variants[0];
-  const timetable = getVariantTimetable(feed, variant);
-  assert.deepEqual(timetable.popularDays, [[1, 2, 3, 4, 5]]);
-  assert.equal(formatTimetableDayRange(timetable.popularDays[0]), "1-5");
+  const timetables = getVariantTimetable(feed, variant);
+  assert.deepEqual(timetables[0].popularDays, [[1, 2, 3, 4, 5]]);
+  assert.equal(formatTimetableDayRange(timetables[0].popularDays[0]), "1-5");
 });
 
 test("groups trips by shape, headsign, short name and ordered stops", () => {
@@ -733,6 +743,29 @@ test("applies calendar exceptions and produces a date-specific schedule", () => 
   assert.equal(schedule.rows[0].hour, 8);
   assert.equal(schedule.rows[0].departures[0].minute, 5);
   assert.equal(schedule.rows[0].departures[0].tripId, "t1");
+});
+
+test("supports multiple calendar rows for one service ID", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,route_short_name\nr,5\n",
+    "trips.txt": "route_id,trip_id,service_id,shape_id,trip_headsign\nr,t1,weekday,s,Center\n",
+    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\nt1,08:05:00,a,1\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "weekday,1,0,0,0,0,0,0,20260101,20260331\n"
+      + "weekday,0,1,0,0,0,0,0,20260601,20260831\n",
+  }));
+  assert.equal(feed.indexes.calendarByServiceId.get("weekday").length, 2);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-05"), true);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-06-02"), true);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-06"), false);
+  const variant = getRouteVariants(feed, "r").variants[0];
+  const timetables = getVariantTimetable(feed, variant);
+  assert.deepEqual(timetables.map((timetable) => timetable.popularDays), [[[1]], [[2]]]);
+  assert.deepEqual(timetables.map((timetable) => timetable.rows[0].departures[0].days), [[1], [2]]);
+  assert.deepEqual(
+    timetables.map((timetable) => timetable.dateRange),
+    [["20260101", "20260331"], ["20260601", "20260831"]],
+  );
 });
 
 test("calculates legacy fares from a selected stop to following stops", () => {
