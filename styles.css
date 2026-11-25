@@ -487,6 +487,13 @@ input[type="file"] {
 
 .trip-calendar-table th:first-child,
 .trip-calendar-table td:first-child {
+  min-width: 8rem;
+  max-width: 10rem;
+  text-align: left;
+}
+
+.trip-calendar-table th:nth-child(2),
+.trip-calendar-table td:nth-child(2) {
   min-width: 18rem;
   text-align: left;
 }

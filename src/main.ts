@@ -638,7 +638,9 @@ function getWeekdayCells(
     let title = `${name}: ${active ? "Active" : "Inactive"}`;
     if (exception) {
       const exceptionType = exception.fields.exception_type;
-      symbol = exceptionType === 1 ? "➕" : exceptionType === 2 ? "❌" : "?";
+      symbol = exceptionType === 1
+        ? active ? "◉" : "➕"
+        : exceptionType === 2 ? "❌" : "?";
       title = exceptionType === 1 ? `${name}: Added exception`
         : exceptionType === 2 ? `${name}: Removed exception`
           : `${name}: Unrecognized exception`;
@@ -1477,6 +1479,10 @@ function appendCalendarExceptions(
     list.append(item);
   }
   container.append(list);
+  const legend = document.createElement("p");
+  legend.className = "date-schedule-week-legend";
+  legend.textContent = "◉ Already active · ➕ Added exception · ❌ Regular service removed";
+  container.append(legend);
 }
 
 function routeStopRouteButton(route: GtfsRow<"routes.txt">): HTMLButtonElement {
