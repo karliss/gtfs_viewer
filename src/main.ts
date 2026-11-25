@@ -850,7 +850,20 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
   if (!feed) return;
   currentTrip = trip;
   const tripId = trip.fields.trip_id || "Trip";
-  tripHeading.textContent = `Trip details: ${trip.fields.trip_headsign || trip.fields.trip_short_name || tripId}`;
+  const route = trip.fields.route_id ? routesById.get(trip.fields.route_id) : undefined;
+  const tripName = trip.fields.trip_headsign && trip.fields.trip_short_name
+    && trip.fields.trip_headsign !== trip.fields.trip_short_name
+    ? `${trip.fields.trip_headsign} · ${trip.fields.trip_short_name}`
+    : trip.fields.trip_headsign || trip.fields.trip_short_name || tripId;
+  tripHeading.textContent = `Trip details: ${tripName}`;
+  if (route) {
+    const routeName = [route.fields.route_short_name, route.fields.route_long_name]
+      .filter((value): value is string => Boolean(value))
+      .join(" — ");
+    tripHeading.textContent += ` · ${routeName || route.fields.route_id || "Route"}`;
+  } else if (trip.fields.route_id) {
+    tripHeading.textContent += ` · Route ${trip.fields.route_id}`;
+  }
 
   const properties = document.createElement("dl");
   properties.className = "route-properties";
@@ -865,7 +878,27 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       const route = routesById.get(String(value));
       description.append(route ? routeStopRouteButton(route) : document.createTextNode(String(value)));
     } else if (name === "service_id") {
-      description.textContent = String(value);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "route-link";
+      button.textContent = String(value);
+      button.addEventListener("click", () => showServiceTable(String(value)));
+      description.append(button);
+    } else if (name === "shape_id") {
+      const shapeTable = feed.tables.find((table) => table.kind === "shapes.txt");
+      if (shapeTable?.kind === "shapes.txt") {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "route-link";
+        button.textContent = String(value);
+        button.addEventListener("click", () => showFilteredTable(
+          { ...shapeTable, rows: shapeTable.rows.filter((row) => row.fields.shape_id === String(value)) },
+          `Showing rows for shape ${value}.`,
+        ));
+        description.append(button);
+      } else {
+        description.textContent = String(value);
+      }
     } else {
       description.textContent = String(value);
     }
@@ -880,7 +913,6 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
   }
   tripProperties.replaceChildren(properties);
 
-  const route = trip.fields.route_id ? routesById.get(trip.fields.route_id) : undefined;
   tripRouteDetails.open = false;
   tripRouteSummary.replaceChildren();
   tripRouteProperties.replaceChildren();
@@ -901,6 +933,10 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       if (value === null || value === "") {
         description.textContent = value === null ? "Not provided" : "(empty)";
         description.className = "not-provided";
+      } else if (name === "route_id") {
+        description.append(routeStopRouteButton(route));
+      } else if (name === "agency_id") {
+        description.append(agencyLink(String(value), true));
       } else if (name === "route_url") {
         description.append(renderLink(value, String(value)));
       } else {
@@ -1002,19 +1038,38 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     const stopId = stopTime.fields.stop_id;
     const stop = stopId ? stopsById.get(stopId) : undefined;
     const item = document.createElement("li");
+    item.className = "trip-stop-item";
+    item.dataset.stopIndex = String(index);
+    const row = document.createElement("div");
+    row.className = "trip-stop-row";
     const button = document.createElement("button");
     button.type = "button";
     button.className = "trip-stop-button";
     button.dataset.stopIndex = String(index);
     const stopName = stop?.fields.stop_name || stopId || "Location";
-    const time = stopTime.fields.departure_time || stopTime.fields.arrival_time || "";
-    button.append(
-      document.createTextNode(`${stopName}${stopId ? ` (${stopId})` : ""}`),
-      document.createTextNode(time),
-    );
+    const name = document.createElement("span");
+    name.className = "trip-stop-name";
+    name.textContent = `${stopName}${stopId ? ` (${stopId})` : ""}`;
+    const time = document.createElement("span");
+    time.className = "trip-stop-time";
+    const arrival = stopTime.fields.arrival_time;
+    const departure = stopTime.fields.departure_time;
+    time.textContent = arrival && departure && arrival !== departure
+      ? `${arrival} — ${departure}`
+      : departure || arrival || "";
+    button.append(name, time);
     button.setAttribute("aria-selected", "false");
     button.addEventListener("click", () => selectTripStop(trip, stopRows, index, button));
-    item.append(button);
+    row.append(button);
+    if (stop) {
+      const stopButton = document.createElement("button");
+      stopButton.type = "button";
+      stopButton.className = "route-link trip-stop-details";
+      stopButton.textContent = "Stop details";
+      stopButton.addEventListener("click", () => showStop(stop));
+      row.append(stopButton);
+    }
+    item.append(row);
     tripStopList.append(item);
   }
   if (!stopRows.length) tripStopList.append(document.createTextNode("No stop times"));
@@ -1028,6 +1083,25 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
   tripDetail.hidden = false;
   tripHeading.focus();
   pushViewState();
+}
+
+function showServiceTable(serviceId: string): void {
+  if (!feed) return;
+  const calendar = feed.tables.find((table) => table.kind === "calendar.txt");
+  if (calendar?.kind === "calendar.txt") {
+    const rows = calendar.rows.filter((row) => row.fields.service_id === serviceId);
+    if (rows.length) {
+      showFilteredTable({ ...calendar, rows }, `Showing calendar rows for service ${serviceId}.`);
+      return;
+    }
+  }
+  const calendarDates = feed.tables.find((table) => table.kind === "calendar_dates.txt");
+  if (calendarDates?.kind === "calendar_dates.txt") {
+    const rows = calendarDates.rows.filter((row) => row.fields.service_id === serviceId);
+    if (rows.length) {
+      showFilteredTable({ ...calendarDates, rows }, `Showing calendar exceptions for service ${serviceId}.`);
+    }
+  }
 }
 
 function routeStopRouteButton(route: GtfsRow<"routes.txt">): HTMLButtonElement {
@@ -1049,6 +1123,8 @@ function selectTripStop(
   if (!feed) return;
   tripStopList.querySelectorAll<HTMLButtonElement>(".trip-stop-button")
     .forEach((button) => button.setAttribute("aria-selected", String(button === selectedButton)));
+  tripStopList.querySelectorAll<HTMLElement>(".trip-inline-fare")
+    .forEach((fare) => fare.remove());
   const originId = stopRows[selectedIndex]?.fields.stop_id;
   if (!originId) {
     tripFares.textContent = "This stop has no stop_id, so fares cannot be calculated.";
@@ -1060,40 +1136,20 @@ function selectTripStop(
     tripFares.textContent = "No following stops.";
     return;
   }
-  const table = document.createElement("table");
-  const head = document.createElement("tr");
-  for (const name of ["Destination", "Fare", "Price", "Currency", "Source"]) {
-    const th = document.createElement("th");
-    th.scope = "col";
-    th.textContent = name;
-    head.append(th);
+  tripFares.textContent = "";
+  for (const [fareIndex, fare] of fares.entries()) {
+    const item = tripStopList.querySelector<HTMLElement>(
+      `.trip-stop-item[data-stop-index="${selectedIndex + fareIndex + 1}"]`,
+    );
+    if (!item) continue;
+    const fareLabel = document.createElement("span");
+    fareLabel.className = "trip-inline-fare";
+    const name = fare.productName || fare.fareId || "No fare found";
+    fareLabel.textContent = fare.price === null
+      ? name
+      : `${name}: ${fare.price}${fare.currency ? ` ${fare.currency}` : ""}`;
+    item.append(fareLabel);
   }
-  table.append(head);
-  for (const fare of fares) {
-    const stop = stopsById.get(fare.destinationStopId);
-    const tr = document.createElement("tr");
-    const destination = document.createElement("td");
-    if (stop) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "route-link";
-      button.textContent = stop.fields.stop_name
-        ? `${stop.fields.stop_name} (${fare.destinationStopId})` : fare.destinationStopId;
-      button.addEventListener("click", () => showStop(stop));
-      destination.append(button);
-    } else destination.textContent = fare.destinationStopId;
-    const fareName = document.createElement("td");
-    fareName.textContent = fare.productName || fare.fareId || "No fare found";
-    const price = document.createElement("td");
-    price.textContent = fare.price === null ? "" : String(fare.price);
-    const currency = document.createElement("td");
-    currency.textContent = fare.currency || "";
-    const source = document.createElement("td");
-    source.textContent = fare.fareId ? fare.source : "";
-    tr.append(destination, fareName, price, currency, source);
-    table.append(tr);
-  }
-  tripFares.replaceChildren(table);
 }
 
 function showDateSchedule(route: GtfsRow<"routes.txt">, date: string): void {

@@ -387,9 +387,9 @@ input[type="file"] {
 }
 
 .trip-stop-button {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) 12rem;
   width: 100%;
-  justify-content: space-between;
   gap: 1rem;
   border: 0;
   background: transparent;
@@ -399,6 +399,34 @@ input[type="file"] {
 .trip-stop-button[aria-selected="true"] {
   background: #eaf1fb;
   outline: 1px solid #9bb7dd;
+}
+
+.trip-stop-row {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1fr) max-content;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.trip-stop-time {
+  font-family: monospace;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.trip-stop-details {
+  white-space: nowrap;
+}
+
+.trip-stop-item {
+  margin-bottom: 0.25rem;
+}
+
+.trip-inline-fare {
+  display: inline-block;
+  margin: 0.15rem 0 0.35rem 0.75rem;
+  color: #52617a;
+  font-size: 0.9rem;
 }
 
 #trip-fares table,
