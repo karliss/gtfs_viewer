@@ -43,7 +43,11 @@ test("single service ID supports separate calendar ranges and weekday masks", ()
     [[1], [6, 7]],
   );
   assert.deepEqual(
+    timetables.map((timetable) => timetable.dateRange),
+    [["20260101", "20260331"], ["20260601", "20260831"]],
+  );
+  assert.deepEqual(
     timetables.map((timetable) => timetable.exceptionDates),
-    [["20260106"], ["20260608"]],
+    [["20260106", "20260608"], ["20260106", "20260608"]],
   );
 });

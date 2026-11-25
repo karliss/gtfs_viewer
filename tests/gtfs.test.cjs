@@ -762,6 +762,10 @@ test("supports multiple calendar rows for one service ID", () => {
   const timetables = getVariantTimetable(feed, variant);
   assert.deepEqual(timetables.map((timetable) => timetable.popularDays), [[[1]], [[2]]]);
   assert.deepEqual(timetables.map((timetable) => timetable.rows[0].departures[0].days), [[1], [2]]);
+  assert.deepEqual(
+    timetables.map((timetable) => timetable.dateRange),
+    [["20260101", "20260331"], ["20260601", "20260831"]],
+  );
 });
 
 test("calculates legacy fares from a selected stop to following stops", () => {

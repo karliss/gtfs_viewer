@@ -222,6 +222,7 @@ export interface VariantTimetableRow {
 
 export interface VariantTimetable {
   popularDays: number[][];
+  dateRange: [string | null, string | null];
   exceptionDates: string[];
   rows: VariantTimetableRow[];
 }
@@ -451,11 +452,15 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
   const firstStop = variant.stops[0];
   const tripIds = new Set(variant.trips.flatMap((trip) => trip.fields.trip_id ? [trip.fields.trip_id] : []));
 
-  const daySetsForService = (serviceId: string | null): number[][] => {
+  const calendarRangesForService = (serviceId: string | null): {
+    days: number[];
+    dateRange: [string | null, string | null];
+  }[] => {
     if (!serviceId) return [];
     const rows = feed.indexes.calendarByServiceId.get(serviceId);
     if (!rows?.length) return [];
-    const sets = rows.map((row) => [
+    return rows.map((row) => ({
+      days: [
       row.fields.monday === 1 ? 1 : null,
       row.fields.tuesday === 1 ? 2 : null,
       row.fields.wednesday === 1 ? 3 : null,
@@ -463,62 +468,46 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
       row.fields.friday === 1 ? 5 : null,
       row.fields.saturday === 1 ? 6 : null,
       row.fields.sunday === 1 ? 7 : null,
-    ].filter((day): day is number => day !== null));
-    return [...new Map(sets.map((days) => [days.join(","), days])).values()];
+      ].filter((day): day is number => day !== null),
+      dateRange: [row.fields.start_date, row.fields.end_date],
+    }));
   };
 
-  const allDaySets = new Map<string, number[]>();
+  const calendarRanges: {
+    days: number[];
+    dateRange: [string | null, string | null];
+  }[] = [];
+  const calendarKeys = new Set<string>();
   for (const trip of variant.trips) {
-    for (const days of daySetsForService(trip.fields.service_id)) {
-      allDaySets.set(days.join(","), days);
+    for (const range of calendarRangesForService(trip.fields.service_id)) {
+      const key = `${range.days.join(",")}|${range.dateRange[0]}|${range.dateRange[1]}`;
+      if (!calendarKeys.has(key)) {
+        calendarKeys.add(key);
+        calendarRanges.push(range);
+      }
     }
   }
   const serviceIds = new Set(variant.trips.flatMap((trip) =>
     trip.fields.service_id ? [trip.fields.service_id] : []));
-  const exceptionsForDays = (targetDays: number[] | null): string[] => {
-    const matchingServices = [...serviceIds].filter((serviceId) =>
-      daySetsForService(serviceId)?.some((days) =>
-        targetDays ? days.join(",") === targetDays.join(",") : true));
-    const exceptions = matchingServices.flatMap((serviceId) =>
-      feed.indexes.calendarDatesByServiceId.get(serviceId) ?? []);
-    if (targetDays) {
-      const matchingRanges = matchingServices.flatMap((serviceId) =>
-        (feed.indexes.calendarByServiceId.get(serviceId) ?? []).filter((calendar) => {
-          const days = [
-            calendar.fields.monday === 1 ? 1 : null,
-            calendar.fields.tuesday === 1 ? 2 : null,
-            calendar.fields.wednesday === 1 ? 3 : null,
-            calendar.fields.thursday === 1 ? 4 : null,
-            calendar.fields.friday === 1 ? 5 : null,
-            calendar.fields.saturday === 1 ? 6 : null,
-            calendar.fields.sunday === 1 ? 7 : null,
-          ].filter((day): day is number => day !== null);
-          return days.join(",") === targetDays.join(",");
-        }));
-      return [...new Set(exceptions
-        .filter((exception) => matchingRanges.some((calendar) =>
-          exception.fields.date !== null
-          && calendar.fields.start_date !== null
-          && calendar.fields.end_date !== null
-          && exception.fields.date >= calendar.fields.start_date
-          && exception.fields.date <= calendar.fields.end_date))
-        .map((exception) => exception.fields.date)
-        .filter((date): date is string => date !== null))]
-        .sort();
-    }
-    return [...new Set(exceptions
+  const exceptionDates = [...new Set(
+    [...serviceIds].flatMap((serviceId) => feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [])
       .map((row) => row.fields.date)
       .filter((date): date is string => date !== null))]
-      .sort();
-  };
+    .sort();
 
-  const buildTimetable = (targetDays: number[] | null): VariantTimetable => {
+  const buildTimetable = (
+    targetRange: { days: number[]; dateRange: [string | null, string | null] } | null,
+  ): VariantTimetable => {
+    const targetDays = targetRange?.days ?? null;
     const grouped = new Map<number, Map<number, Map<string, number>>>();
     for (const trip of variant.trips) {
       const tripId = trip.fields.trip_id;
       if (!tripId || !tripIds.has(tripId)) continue;
-      const sets = daySetsForService(trip.fields.service_id);
-      if (targetDays && !sets.some((days) => days.join(",") === targetDays.join(","))) continue;
+      const ranges = calendarRangesForService(trip.fields.service_id);
+      if (targetRange && !ranges.some((range) =>
+        range.days.join(",") === targetRange.days.join(",")
+        && range.dateRange[0] === targetRange.dateRange[0]
+        && range.dateRange[1] === targetRange.dateRange[1])) continue;
       const rows = feed.indexes.stopTimesByTripId.get(tripId)?.filter((row) =>
         firstStop !== null && row.fields.stop_id === firstStop) ?? [];
       for (const row of rows) {
@@ -553,13 +542,12 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
         }]),
       }));
     const popularDays = targetDays ? [targetDays] : [[1, 2, 3, 4, 5, 6, 7]];
-    const exceptionDates = exceptionsForDays(targetDays);
-    return { popularDays, exceptionDates, rows };
+    const dateRange = targetRange?.dateRange ?? [null, null];
+    return { popularDays, dateRange, exceptionDates, rows };
   };
 
-  const daySets = [...allDaySets.values()];
-  if (daySets.length === 0) return [buildTimetable(null)];
-  return daySets.map((days) => buildTimetable(days));
+  if (calendarRanges.length === 0) return [buildTimetable(null)];
+  return calendarRanges.map((range) => buildTimetable(range));
 }
 
 export function getVariantTableRows(
