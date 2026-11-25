@@ -670,6 +670,49 @@ function routeColor(route: GtfsRow<"routes.txt"> | undefined): string | null {
   return value && /^[\da-f]{6}$/i.test(value) ? `#${value}` : null;
 }
 
+function prependRouteColorHeading(heading: HTMLElement, route: GtfsRow<"routes.txt"> | undefined): void {
+  const color = routeColor(route);
+  if (!color) return;
+  const swatch = document.createElement("span");
+  swatch.className = "route-header-swatch";
+  swatch.style.backgroundColor = color;
+  swatch.title = `Route color ${color}`;
+  swatch.setAttribute("aria-label", `Route color ${color}`);
+  heading.prepend(swatch, document.createTextNode(" "));
+}
+
+function wheelchairIcon(value: number | null): HTMLElement | null {
+  if (value === null) return null;
+  if (value === 1) {
+    const icon = document.createElement("span");
+    icon.className = "accessibility-icon";
+    icon.textContent = "♿";
+    icon.title = "Wheelchair accessible";
+    icon.setAttribute("aria-label", "Wheelchair accessible");
+    return icon;
+  }
+  if (value === 2) {
+    const icon = document.createElement("span");
+    icon.className = "accessibility-icon";
+    icon.textContent = "♿";
+    icon.title = "Wheelchair boarding not available";
+    icon.setAttribute("aria-label", "Wheelchair boarding not available");
+    icon.classList.add("not-accessible");
+    return icon;
+  }
+  return null;
+}
+
+function bikesIcon(value: number | null): HTMLElement | null {
+  if (value !== 1) return null;
+  const icon = document.createElement("span");
+  icon.className = "bikes-icon";
+  icon.textContent = "🚲";
+  icon.title = "Bikes allowed";
+  icon.setAttribute("aria-label", "Bikes allowed");
+  return icon;
+}
+
 function routeCompactContent(route: GtfsRow<"routes.txt">, variantIndex: number | null): HTMLElement {
   const content = document.createElement("div");
   const heading = document.createElement("h3");
@@ -871,6 +914,7 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
   } else if (trip.fields.route_id) {
     tripHeading.textContent += ` · Route ${trip.fields.route_id}`;
   }
+  prependRouteColorHeading(tripHeading, route);
 
   const properties = document.createElement("dl");
   properties.className = "route-properties";
@@ -883,7 +927,19 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       description.className = "not-provided";
     } else if (name === "route_id") {
       const route = routesById.get(String(value));
-      description.append(route ? routeStopRouteButton(route) : document.createTextNode(String(value)));
+      if (route) {
+        description.append(routeStopRouteButton(route));
+        const mapButton = document.createElement("button");
+        mapButton.type = "button";
+        mapButton.className = "route-map-icon";
+        mapButton.textContent = "🗺️";
+        mapButton.title = "Open route on map";
+        mapButton.setAttribute("aria-label", "Open route on map");
+        mapButton.addEventListener("click", () => showRouteMap(route, "all"));
+        description.append(" ", mapButton);
+      } else {
+        description.textContent = String(value);
+      }
     } else if (name === "service_id") {
       const button = document.createElement("button");
       button.type = "button";
@@ -903,11 +959,26 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
           `Showing rows for shape ${value}.`,
         ));
         description.append(button);
+        const mapButton = document.createElement("button");
+        mapButton.type = "button";
+        mapButton.className = "route-map-icon";
+        mapButton.textContent = "🗺️";
+        mapButton.title = "Open the current trip variant on map";
+        mapButton.setAttribute("aria-label", "Open the current trip variant on map");
+        mapButton.addEventListener("click", () => showTripVariantOnMap(trip));
+        description.append(" ", mapButton);
       } else {
         description.textContent = String(value);
       }
     } else {
       description.textContent = String(value);
+    }
+    if (name === "wheelchair_accessible") {
+      const icon = wheelchairIcon(typeof value === "number" ? value : null);
+      if (icon) description.append(" ", icon);
+    } else if (name === "bikes_allowed") {
+      const icon = bikesIcon(typeof value === "number" ? value : null);
+      if (icon) description.append(" ", icon);
     }
     properties.append(term, description);
   }
@@ -927,6 +998,14 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     const label = `${route.fields.route_id || "Route"} — ${route.fields.route_short_name || route.fields.route_long_name || ""}`.replace(/ — $/, "");
     tripRouteSummary.textContent = `Route: ${label}`;
     tripRouteSummary.prepend(routeStopRouteButton(route), document.createTextNode(" "));
+    const mapButton = document.createElement("button");
+    mapButton.type = "button";
+    mapButton.className = "route-map-icon";
+    mapButton.textContent = "🗺️";
+    mapButton.title = "Open route on map";
+    mapButton.setAttribute("aria-label", "Open route on map");
+    mapButton.addEventListener("click", () => showRouteMap(route, "all"));
+    tripRouteSummary.append(" ", mapButton);
   } else {
     tripRouteSummary.textContent = "Route";
   }
@@ -950,6 +1029,21 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
         description.textContent = name === "route_type" ? routeTypeLabel(value) : String(value);
       }
       routeProperties.append(term, description);
+    }
+    if (trip.fields.route_id) {
+      const routeTrips = feed.indexes.tripsByRouteId.get(trip.fields.route_id) ?? [];
+      if (routeTrips.some((candidate) => candidate.fields.wheelchair_accessible === 1)) {
+        const icon = wheelchairIcon(1);
+        if (icon) {
+          icon.title = "At least one trip is wheelchair accessible";
+          icon.setAttribute("aria-label", icon.title);
+          tripRouteProperties.append(icon, document.createTextNode(" "));
+        }
+      }
+      if (routeTrips.some((candidate) => candidate.fields.bikes_allowed === 1)) {
+        const icon = bikesIcon(1);
+        if (icon) tripRouteProperties.append(icon);
+      }
     }
     tripRouteProperties.append(routeProperties);
   }
@@ -1088,8 +1182,22 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       link.textContent = `${stopName}${stopId ? ` (${stopId})` : ""}`;
       link.addEventListener("click", () => showStop(stop));
       stopLink.append(link);
+      const wheelchair = wheelchairIcon(stop.fields.wheelchair_boarding);
+      if (wheelchair) stopLink.append(" ", wheelchair);
     } else {
       stopLink.textContent = `${stopName}${stopId ? ` (${stopId})` : ""}`;
+    }
+    const pickup = stopTime.fields.pickup_type;
+    const dropOff = stopTime.fields.drop_off_type;
+    if ((pickup !== null && pickup !== 0) || (dropOff !== null && dropOff !== 0)) {
+      const hand = document.createElement("span");
+      hand.className = "pickup-dropoff-icon";
+      hand.textContent = "🤚";
+      const pickupLabel = pickup === null || pickup === 0 ? "regular pickup" : pickupLabelText(pickup);
+      const dropOffLabel = dropOff === null || dropOff === 0 ? "regular drop-off" : dropOffLabelText(dropOff);
+      hand.title = `Non-default stop access: ${pickupLabel}; ${dropOffLabel}`;
+      hand.setAttribute("aria-label", hand.title);
+      stopLink.append(" ", hand);
     }
     const time = document.createElement("button");
     time.type = "button";
@@ -1115,13 +1223,14 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       mapButton.title = position ? "Open stop on map" : "Stop location unavailable";
       mapButton.setAttribute("aria-label", `Open stop ${stopName} on map`);
       mapButton.disabled = !position;
-      mapButton.addEventListener("click", () => showStopOnMap(stop));
+      mapButton.addEventListener("click", () => showTripStopOnMap(trip, stop));
       row.append(mapButton);
     } else {
       row.append(document.createElement("span"));
     }
     row.append(stopLink, time);
-    const fare = document.createElement("span");
+    const fare = document.createElement("button");
+    fare.type = "button";
     fare.className = "trip-inline-fare";
     if (stopId) {
       const destinations = stopRows.slice(index + 1).map((row) => row.fields.stop_id);
@@ -1131,6 +1240,9 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
         fare.textContent = "💰";
       }
     }
+    fare.title = "Calculate fares from this stop";
+    fare.setAttribute("aria-label", "Calculate fares from this stop");
+    fare.addEventListener("click", () => selectTripStop(trip, stopRows, index, time));
     row.append(fare);
     item.append(row);
     tripStopList.append(item);
@@ -1175,6 +1287,22 @@ function routeStopRouteButton(route: GtfsRow<"routes.txt">): HTMLButtonElement {
     ? ` (${route.fields.route_short_name || route.fields.route_long_name})` : ""}`.replace(/^\s*\(\)/, "");
   button.addEventListener("click", () => showRoute(route));
   return button;
+}
+
+function pickupLabelText(value: number): string {
+  return ({
+    1: "no pickup",
+    2: "pickup by phone",
+    3: "pickup by coordinate",
+  } as Record<number, string>)[value] ?? `pickup type ${value}`;
+}
+
+function dropOffLabelText(value: number): string {
+  return ({
+    1: "no drop-off",
+    2: "drop-off by phone",
+    3: "drop-off by coordinate",
+  } as Record<number, string>)[value] ?? `drop-off type ${value}`;
 }
 
 function selectTripStop(
@@ -1315,6 +1443,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
   currentRoute = route;
   const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
   routeHeading.textContent = title ? `Route details: ${title}` : "Route details";
+  prependRouteColorHeading(routeHeading, route);
   const list = document.createElement("dl");
   list.className = "route-properties";
   const properties = [...Object.entries(route.fields), ...Object.entries(route.unrecognizedColumns)];
@@ -1351,6 +1480,14 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     const description = document.createElement("dd");
     term.textContent = field;
     description.textContent = summarizeTripField(trips, field);
+    if (field === "wheelchair_accessible" && trips.some((trip) => trip.fields.wheelchair_accessible === 1)) {
+      const icon = wheelchairIcon(1);
+      if (icon) description.append(" ", icon);
+    }
+    if (field === "bikes_allowed" && trips.some((trip) => trip.fields.bikes_allowed === 1)) {
+      const icon = bikesIcon(1);
+      if (icon) description.append(" ", icon);
+    }
     list.append(term, description);
   }
   routeProperties.replaceChildren(list);
@@ -1678,6 +1815,23 @@ function renderTable(table: GtfsTable): void {
         button.addEventListener("click", () => showTrip(feed!.indexes.tripsById.get(String(value))!));
         cell.append(button);
         row.append(cell);
+      } else if (table.kind === "trips.txt" && column === "shape_id" && value) {
+        const cell = document.createElement("td");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "route-link";
+        button.textContent = String(value);
+        const shapeTable = feed?.tables.find((candidate) => candidate.kind === "shapes.txt");
+        button.addEventListener("click", () => {
+          if (shapeTable?.kind === "shapes.txt") {
+            showFilteredTable(
+              { ...shapeTable, rows: shapeTable.rows.filter((row) => row.fields.shape_id === String(value)) },
+              `Showing rows for shape ${value}.`,
+            );
+          }
+        });
+        cell.append(button);
+        row.append(cell);
       } else if (column === "stop_id" && value && feed?.indexes.stopsById.get(String(value))) {
         const cell = document.createElement("td");
         const button = document.createElement("button");
@@ -1875,6 +2029,25 @@ function renderStopsMap(): void {
   mapSummary.textContent = `${mappable} of ${stops.length} matching stops have valid coordinates.`;
   mapClearFilter.hidden = !tableSearch.value.trim();
   mapView?.update(stops, []);
+}
+
+function showTripVariantOnMap(trip: GtfsRow<"trips.txt">): void {
+  if (!feed) return;
+  const routeId = trip.fields.route_id;
+  const route = routeId ? routesById.get(routeId) : undefined;
+  if (!route) return;
+  const variants = getRouteVariants(feed, routeId!).variants;
+  const tripId = trip.fields.trip_id;
+  const index = variants.findIndex((variant) => variant.trips.some((candidate) =>
+    tripId ? candidate.fields.trip_id === tripId : candidate === trip));
+  showRouteMap(route, index < 0 ? "all" : index);
+}
+
+function showTripStopOnMap(trip: GtfsRow<"trips.txt">, stop: GtfsRow<"stops.txt">): void {
+  if (!feed) return;
+  showTripVariantOnMap(trip);
+  const position = mapStop(stop).coordinate;
+  if (position) mapView?.showStopPopup(stop.fields.stop_id ?? "", position);
 }
 
 function showRouteMap(route: GtfsRow<"routes.txt">, variantIndex: number | "all" = 0): void {
@@ -2239,6 +2412,7 @@ form.addEventListener("submit", async (event) => {
   mapPanel.hidden = true;
   warningsView.hidden = true;
   if (historyControls) historyControls.hidden = true;
+  historyWarnings.textContent = "Warnings";
   mapView?.remove();
   mapView = undefined;
   viewHistory.clear();
@@ -2254,6 +2428,7 @@ form.addEventListener("submit", async (event) => {
     feed = await loadFeed(file);
     warningCollector.replace(feed.warnings ?? []);
     feed.warnings = [...warningCollector.all];
+    historyWarnings.textContent = `Warnings (${feed.warnings.length})`;
     if (historyControls) historyControls.hidden = false;
     routesById = feed.indexes.routesById;
     agenciesById = feed.indexes.agenciesById;
