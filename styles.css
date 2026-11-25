@@ -644,6 +644,23 @@ tbody tr:last-child td {
   border-bottom: 0;
 }
 
+.warnings-table th:nth-child(1),
+.warnings-table td:nth-child(1) {
+  width: 6rem;
+  min-width: 6rem;
+  max-width: 6rem;
+  white-space: nowrap;
+}
+
+.warnings-table th:nth-child(3),
+.warnings-table td:nth-child(3) {
+  width: 4rem;
+  min-width: 4rem;
+  max-width: 4rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .pagination {
   margin-top: 1rem;
 }

@@ -4,7 +4,8 @@ export type WarningType =
   | "unrecognized_columns"
   | "missing_or_duplicate_ids"
   | "unrecognized_files"
-  | "invalid_values";
+  | "invalid_values"
+  | "variant_merge";
 
 export type WarningSeverity = "error" | "warning" | "info";
 export type WarningScope = "archive" | "table" | "element";
@@ -60,6 +61,13 @@ export const WARNING_DESCRIPTIONS: Readonly<Record<WarningType, WarningDescripti
     scope: "element",
     parameters: ["file", "row", "column", "value"],
   },
+  variant_merge: {
+    id: "variant_merge",
+    messageTemplate: "Route {routeId}: variants merged despite different {field} (trip_id/shape_id samples: {firstTripId}/{firstShapeId} and {secondTripId}/{secondShapeId})",
+    severity: "warning",
+    scope: "element",
+    parameters: ["routeId", "field", "first", "second", "firstTripId", "firstShapeId", "secondTripId", "secondShapeId"],
+  },
 };
 
 export interface GtfsWarning {
@@ -77,6 +85,7 @@ export const WARNING_TYPES: readonly WarningType[] = [
   "missing_or_duplicate_ids",
   "unrecognized_files",
   "invalid_values",
+  "variant_merge",
 ];
 
 export const WARNING_LABELS: Readonly<Record<WarningType, string>> = {
@@ -86,6 +95,7 @@ export const WARNING_LABELS: Readonly<Record<WarningType, string>> = {
   missing_or_duplicate_ids: "Missing or duplicate IDs",
   unrecognized_files: "Unrecognized files",
   invalid_values: "Invalid field values",
+  variant_merge: "Variant merge warnings",
 };
 
 export class WarningCollector {

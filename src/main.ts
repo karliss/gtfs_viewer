@@ -135,7 +135,7 @@ app.innerHTML = `
         </div>
       </div>
       <div class="table-scroll" tabindex="0" role="region" aria-label="GTFS warnings">
-        <table>
+        <table class="warnings-table">
           <thead><tr><th scope="col">Severity</th><th scope="col">Type</th><th scope="col">Row</th><th scope="col">Message</th></tr></thead>
           <tbody id="warning-table-body"></tbody>
         </table>
@@ -2904,14 +2904,16 @@ routeTrips.addEventListener("click", () => {
 
 routeMergeVariants.addEventListener("click", () => {
   if (!feed || !currentRoute) return;
-  const result = mergeRouteVariants(feed, currentRoute);
+  const result = mergeRouteVariants(feed, currentRoute, warningCollector);
+  updateWarningNavigation(warningCollector.all.length);
   showRoute(currentRoute);
   routeSummary.textContent = `${result.mergedVariantCount} ${result.mergedVariantCount === 1 ? "variant" : "variants"} merged.`;
 });
 
 feedMergeVariants.addEventListener("click", () => {
   if (!feed) return;
-  const result = mergeRouteVariantsInFeed(feed);
+  const result = mergeRouteVariantsInFeed(feed, warningCollector);
+  updateWarningNavigation(warningCollector.all.length);
   if (currentRoute) showRoute(currentRoute);
   tableSummary.textContent =
     `${result.mergedVariantCount} ${result.mergedVariantCount === 1 ? "variant" : "variants"} merged across `
@@ -3026,7 +3028,7 @@ function showWarnings(): void {
   mapPanel.hidden = true;
   warningsView.hidden = false;
 
-  const warnings = feed?.warnings ?? [];
+  const warnings = warningCollector.all;
   if (!warningTablesInitialized) {
     const tableKeys = new Set(["Global"]);
     for (const table of feed?.tables ?? []) tableKeys.add(table.name);
@@ -3039,6 +3041,7 @@ function showWarnings(): void {
   renderWarningFilters();
   renderWarningTable();
   updateHistoryUi();
+  pushViewState();
 }
 
 function warningTableKey(warning: GtfsWarning): string {
@@ -3047,7 +3050,7 @@ function warningTableKey(warning: GtfsWarning): string {
 }
 
 function renderWarningFilters(): void {
-  const warnings = feed?.warnings ?? [];
+  const warnings = warningCollector.all;
 
   const selectedByType = warnings.filter((warning) => selectedWarningTables.has(warningTableKey(warning)));
   warningTypes.replaceChildren();
@@ -3090,7 +3093,7 @@ function renderWarningFilters(): void {
 }
 
 function renderWarningTable(): void {
-  const warnings = (feed?.warnings ?? []).filter((warning) =>
+  const warnings = warningCollector.all.filter((warning) =>
     selectedWarningTypes.has(warning.type) && selectedWarningTables.has(warningTableKey(warning)));
   const pageCount = Math.max(1, Math.ceil(warnings.length / warningRowsPerPage));
   warningPage = Math.min(warningPage, pageCount - 1);
@@ -3157,7 +3160,7 @@ warningTypesClearAll.addEventListener("click", () => {
 
 warningTablesSelectAll.addEventListener("click", () => {
   selectedWarningTables = new Set(["Global", ...(feed?.tables.map((table) => table.name) ?? [])]);
-  for (const warning of feed?.warnings ?? []) {
+  for (const warning of warningCollector.all) {
     if (typeof warning.parameters.file === "string") selectedWarningTables.add(warning.parameters.file);
   }
   warningPage = 0;
