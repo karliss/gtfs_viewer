@@ -1907,6 +1907,13 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
         return;
       }
       for (const timetable of timetables) {
+        const dateRange = document.createElement("p");
+        dateRange.className = "timetable-date-range";
+        const [startDate, endDate] = timetable.dateRange;
+        const start = gtfsDateToIso(startDate);
+        const end = gtfsDateToIso(endDate);
+        dateRange.textContent = `Date range: ${start || "Not provided"} — ${end || "Not provided"}`;
+        timetableDetails.append(dateRange);
         const table = document.createElement("div");
         table.className = "timetable";
         table.style.setProperty("--timetable-columns", String(Math.max(timetable.popularDays.length, 1)));
