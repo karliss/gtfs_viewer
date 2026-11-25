@@ -206,9 +206,12 @@ app.innerHTML = `
     </section>
     <section id="date-schedule" class="panel viewer" aria-labelledby="date-schedule-heading" hidden>
       <h2 id="date-schedule-heading" tabindex="-1">Date-specific schedule</h2>
+      <p id="date-schedule-route"></p>
       <div class="form-controls">
         <label for="schedule-date">Date</label>
+        <button id="schedule-date-prev" type="button" title="Previous day" aria-label="Previous day">‹</button>
         <input id="schedule-date" type="date" />
+        <button id="schedule-date-next" type="button" title="Next day" aria-label="Next day">›</button>
       </div>
       <p id="schedule-summary"></p>
       <div id="schedule-variants"></div>
@@ -338,6 +341,9 @@ const tripFares = element<HTMLElement>("#trip-fares");
 const dateSchedule = element<HTMLElement>("#date-schedule");
 const dateScheduleHeading = element<HTMLHeadingElement>("#date-schedule-heading");
 const scheduleDate = element<HTMLInputElement>("#schedule-date");
+const scheduleDatePrev = element<HTMLButtonElement>("#schedule-date-prev");
+const scheduleDateNext = element<HTMLButtonElement>("#schedule-date-next");
+const dateScheduleRoute = element<HTMLParagraphElement>("#date-schedule-route");
 const scheduleSummary = element<HTMLParagraphElement>("#schedule-summary");
 const scheduleVariants = element<HTMLElement>("#schedule-variants");
 const routeDateSchedule = element<HTMLButtonElement>("#route-date-schedule");
@@ -636,6 +642,15 @@ function renderRoutesCell(column: string, value: string | number | null): HTMLTa
     cell.append(swatch, document.createTextNode(value));
     return cell;
   }
+  if (column === "route_text_color" && typeof value === "string" && /^[\da-f]{6}$/i.test(value)) {
+    const swatch = document.createElement("span");
+    swatch.className = "route-color-swatch";
+    swatch.style.backgroundColor = `#${value}`;
+    swatch.setAttribute("aria-hidden", "true");
+    const cell = document.createElement("td");
+    cell.append(swatch, document.createTextNode(value));
+    return cell;
+  }
 
   return renderGenericCell(column, value);
 }
@@ -698,15 +713,41 @@ function routeColor(route: GtfsRow<"routes.txt"> | undefined): string | null {
   return value && /^[\da-f]{6}$/i.test(value) ? `#${value}` : null;
 }
 
+function routeTextColor(route: GtfsRow<"routes.txt"> | undefined): string | null {
+  const value = route?.fields.route_text_color;
+  return value && /^[\da-f]{6}$/i.test(value) ? `#${value}` : null;
+}
+
+function appendColorSwatch(description: HTMLElement, color: string): void {
+  const swatch = document.createElement("span");
+  swatch.className = "route-color-swatch";
+  swatch.style.backgroundColor = color;
+  swatch.setAttribute("aria-hidden", "true");
+  description.append(swatch);
+}
+
 function prependRouteColorHeading(heading: HTMLElement, route: GtfsRow<"routes.txt"> | undefined): void {
   const color = routeColor(route);
-  if (!color) return;
-  const swatch = document.createElement("span");
-  swatch.className = "route-header-swatch";
-  swatch.style.backgroundColor = color;
-  swatch.title = `Route color ${color}`;
-  swatch.setAttribute("aria-label", `Route color ${color}`);
-  heading.prepend(swatch, document.createTextNode(" "));
+  const textColor = routeTextColor(route);
+  if (!color && !textColor) return;
+  const swatches = document.createDocumentFragment();
+  if (color) {
+    const swatch = document.createElement("span");
+    swatch.className = "route-header-swatch";
+    swatch.style.backgroundColor = color;
+    swatch.title = `Route color ${color}`;
+    swatch.setAttribute("aria-label", `Route color ${color}`);
+    swatches.append(swatch);
+  }
+  if (textColor) {
+    const swatch = document.createElement("span");
+    swatch.className = "route-header-swatch";
+    swatch.style.backgroundColor = textColor;
+    swatch.title = `Route text color ${textColor}`;
+    swatch.setAttribute("aria-label", `Route text color ${textColor}`);
+    swatches.append(swatch);
+  }
+  heading.prepend(swatches, document.createTextNode(" "));
 }
 
 function wheelchairIcon(value: number | null): HTMLElement | null {
@@ -1090,6 +1131,12 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
         description.append(agencyLink(String(value), true));
       } else if (name === "route_url") {
         description.append(renderLink(value, String(value)));
+      } else if (name === "route_color" && typeof value === "string" && /^[\da-f]{6}$/i.test(value)) {
+        appendColorSwatch(description, `#${value}`);
+        description.append(document.createTextNode(value));
+      } else if (name === "route_text_color" && typeof value === "string" && /^[\da-f]{6}$/i.test(value)) {
+        appendColorSwatch(description, `#${value}`);
+        description.append(document.createTextNode(value));
       } else {
         description.textContent = name === "route_type" ? routeTypeLabel(value) : String(value);
       }
@@ -1145,7 +1192,9 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       const heading = document.createElement("h4");
       heading.textContent = "Exceptions";
       const list = document.createElement("ul");
-      for (const exception of exceptions) {
+      const sortedExceptions = [...exceptions].sort((left, right) =>
+        String(left.fields.date ?? "").localeCompare(String(right.fields.date ?? "")));
+      for (const exception of sortedExceptions) {
         const item = document.createElement("li");
         const date = gtfsDateToIso(exception.fields.date);
         const button = document.createElement("button");
@@ -1403,6 +1452,15 @@ function showDateSchedule(route: GtfsRow<"routes.txt">, date: string): void {
   scheduleDate.value = isoDate;
   const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
   dateScheduleHeading.textContent = `Date-specific schedule: ${title || "Route"}`;
+  dateScheduleRoute.replaceChildren();
+  const routeLink = routeStopRouteButton(route);
+  const routeParts = [
+    route.fields.route_id ? `Route ID: ${route.fields.route_id}` : null,
+    route.fields.route_short_name ? `Short name: ${route.fields.route_short_name}` : null,
+    route.fields.route_long_name ? `Long name: ${route.fields.route_long_name}` : null,
+  ].filter((part): part is string => part !== null);
+  dateScheduleRoute.append(routeLink);
+  if (routeParts.length) dateScheduleRoute.append(document.createTextNode(` — ${routeParts.join(" · ")}`));
   renderDateSchedule();
   viewer.hidden = true;
   routeDetail.hidden = true;
@@ -2123,7 +2181,7 @@ function showAllRoutesMap(): void {
     : feed.tables.find((candidate) => candidate.kind === "routes.txt");
   if (!table) return;
   prepareRouteMap(getMatchingRows(table, tableSearch.value) as GtfsRow<"routes.txt">[]);
-  mapRoute.value = "all";
+  mapRoute.value = mapRoutes.length > 100 ? "0" : "all";
   populateMapVariants();
   openMap("Routes map");
   renderRouteMap();
@@ -2588,6 +2646,19 @@ scheduleDate.addEventListener("change", () => {
   renderDateSchedule();
   pushViewState();
 });
+
+function shiftScheduleDate(days: number): void {
+  if (!scheduleDate.value) return;
+  const date = new Date(`${scheduleDate.value}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return;
+  date.setUTCDate(date.getUTCDate() + days);
+  scheduleDate.value = date.toISOString().slice(0, 10);
+  renderDateSchedule();
+  pushViewState();
+}
+
+scheduleDatePrev.addEventListener("click", () => shiftScheduleDate(-1));
+scheduleDateNext.addEventListener("click", () => shiftScheduleDate(1));
 
 clearFilter.addEventListener("click", () => {
   resetTableFilter();
