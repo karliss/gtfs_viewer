@@ -707,11 +707,14 @@ function appendWeekdayRow(
   table.append(row);
 }
 
-function appendWeekdayLegend(container: HTMLElement): void {
+function appendWeekdayLegend(table: HTMLTableElement): void {
+  if (table.nextElementSibling?.classList.contains("date-schedule-week-legend")) {
+    table.nextElementSibling.remove();
+  }
   const legend = document.createElement("p");
   legend.className = "date-schedule-week-legend";
   legend.textContent = "● Regular service · ◉ Already active · ➕ Added exception · ❌ Regular service removed";
-  container.append(legend);
+  table.insertAdjacentElement("afterend", legend);
 }
 
 function renderRoutesCell(column: string, value: string | number | null): HTMLTableCellElement {
@@ -1254,7 +1257,6 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       serviceLink.addEventListener("click", () => showServiceTable(serviceId));
       appendWeekdayRow(calendarList, serviceLink, calendar);
     }
-    appendWeekdayLegend(tripCalendar);
     if (!calendar) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
@@ -1264,6 +1266,7 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       calendarList.append(row);
     }
     tripCalendar.append(calendarList);
+    appendWeekdayLegend(calendarList);
 
     if (exceptions.length) {
       appendCalendarExceptions(tripExceptions, exceptions, route);
@@ -1610,6 +1613,9 @@ function renderDateSchedule(): void {
     scheduleSummary.textContent = "This route has no route_id.";
     scheduleVariants.replaceChildren();
     dateScheduleRuleTable.replaceChildren();
+    if (dateScheduleRuleTable.nextElementSibling?.classList.contains("date-schedule-week-legend")) {
+      dateScheduleRuleTable.nextElementSibling.remove();
+    }
     dateScheduleRuleTable.hidden = true;
     dateScheduleExceptions.replaceChildren();
     return;
@@ -1712,7 +1718,7 @@ function renderDateSchedule(): void {
       row.append(cell);
       dateScheduleRuleTable.append(row);
     }
-    appendWeekdayLegend(dateScheduleRuleTable.parentElement ?? dateScheduleRuleTable);
+    appendWeekdayLegend(dateScheduleRuleTable);
     dateScheduleExceptions.replaceChildren();
     const selectedExceptions: GtfsRow<"calendar_dates.txt">[] = [];
     for (const serviceId of routeServiceIds) {
