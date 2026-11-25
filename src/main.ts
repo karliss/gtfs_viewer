@@ -904,6 +904,7 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
         button.addEventListener("click", () => showFilteredTable(
           { ...shapeTable, rows: shapeTable.rows.filter((row) => row.fields.shape_id === String(value)) },
           `Showing rows for shape ${value}.`,
+          false,
         ));
         description.append(button);
       } else {
@@ -1067,6 +1068,7 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
           rows: stopTimesTable.rows.filter((row) => row.fields.trip_id === trip.fields.trip_id),
         },
         `Showing stop_times.txt rows for trip ${trip.fields.trip_id}.`,
+        false,
       ));
       tripStopHelp.append(" ", tableButton);
     }
@@ -1145,7 +1147,7 @@ function showServiceTable(serviceId: string): void {
   if (calendar?.kind === "calendar.txt") {
     const rows = calendar.rows.filter((row) => row.fields.service_id === serviceId);
     if (rows.length) {
-      showFilteredTable({ ...calendar, rows }, `Showing calendar rows for service ${serviceId}.`);
+      showFilteredTable({ ...calendar, rows }, `Showing calendar rows for service ${serviceId}.`, false);
       return;
     }
   }
@@ -1153,7 +1155,7 @@ function showServiceTable(serviceId: string): void {
   if (calendarDates?.kind === "calendar_dates.txt") {
     const rows = calendarDates.rows.filter((row) => row.fields.service_id === serviceId);
     if (rows.length) {
-      showFilteredTable({ ...calendarDates, rows }, `Showing calendar exceptions for service ${serviceId}.`);
+      showFilteredTable({ ...calendarDates, rows }, `Showing calendar exceptions for service ${serviceId}.`, false);
     }
   }
 }
