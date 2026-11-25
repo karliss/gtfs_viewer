@@ -44,6 +44,7 @@ test("warning descriptions cover every warning type with severity and scope", ()
     "missing_values",
     "unrecognized_columns",
     "unrecognized_files",
+    "variant_merge",
   ]);
   for (const type of WARNING_TYPES) {
     const description = WARNING_DESCRIPTIONS[type];
@@ -63,7 +64,7 @@ test("loadGtfs attaches all warning types to feed and collector", () => {
   }), collector);
   assert.equal(feed.warnings.length, 8);
   assert.equal(collector.all.length, 8);
-  for (const type of WARNING_TYPES) {
+  for (const type of WARNING_TYPES.filter((warningType) => warningType !== "variant_merge")) {
     assert.ok(feed.warnings.some((warning) => warning.type === type));
   }
 });
@@ -647,7 +648,7 @@ test("checks and merges route variants that differ only by shape ID with identic
   assert.deepEqual(mergedVariants[0].trips.map((trip) => trip.fields.trip_id), ["t1", "t2"]);
 });
 
-test("includes shape_dist_traveled in the indexed shape points", () => {
+test("includes shape_dist_traveled in the indexed shape points and warns when merging it", () => {
   const feed = loadGtfs(archive({
     "trips.txt": "route_id,trip_id,shape_id,trip_headsign\n"
       + "r,t1,shape-a,North\nr,t2,shape-b,North\n",
@@ -659,7 +660,11 @@ test("includes shape_dist_traveled in the indexed shape points", () => {
   const variants = getRouteVariants(feed, "r").variants;
   assert.deepEqual(feed.indexes.shapePointsById.get("shape-a"), [[1, 2, 10], [3, 4, 20]]);
   assert.deepEqual(feed.indexes.shapePointsById.get("shape-b"), [[1, 2, 10], [3, 4, 21]]);
-  assert.equal(canMergeRouteVariants(feed, variants[0], variants[1]), false);
+  assert.equal(canMergeRouteVariants(feed, variants[0], variants[1]), true);
+  const collector = new WarningCollector();
+  const result = mergeRouteVariantPair(feed, variants[0], variants[1], collector);
+  assert.equal(result.merged, true);
+  assert.equal(collector.count("variant_merge"), 1);
 });
 
 test("variants contain trips from one route and reject cross-route merges", () => {
@@ -708,6 +713,26 @@ test("does not merge variants with different stops, directions, names, or shape 
   const variants = getRouteVariants(feed, "r").variants;
   assert.equal(canMergeRouteVariants(feed, variants[0], variants[1]), false);
   assert.equal(mergeRouteVariantPair(feed, variants[0], variants[1]).merged, false);
+});
+
+test("merges variants with different short names or shapes and reports warnings", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,shape_id,trip_headsign,trip_short_name,direction_id\n"
+      + "r,t1,shape-a,North,A,0\nr,t2,shape-b,North,B,0\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\nt1,a,1\nt1,b,2\nt2,a,1\nt2,b,2\n",
+    "shapes.txt": "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n"
+      + "shape-a,1,2,1\nshape-a,3,4,2\n"
+      + "shape-b,1,2,1\nshape-b,5,6,2\n",
+  }));
+  const variants = getRouteVariants(feed, "r").variants;
+  assert.equal(canMergeRouteVariants(feed, variants[0], variants[1]), true);
+  const routeCollector = new WarningCollector();
+  const summary = mergeRouteVariants(feed, "r", routeCollector);
+  assert.equal(summary.variantsAfter, 1);
+  assert.deepEqual(routeCollector.all.map((warning) => warning.parameters.field).sort(), [
+    "shapes",
+    "trip short names",
+  ]);
 });
 
 test("attempts variant merging for every route in the feed", () => {

@@ -621,23 +621,58 @@ export function canMergeRouteVariants(
   if (!first.shapeId || !second.shapeId || first.shapeId === second.shapeId) return false;
   if (!first.routeId || first.routeId !== second.routeId) return false;
   if (first.tripHeadsign !== second.tripHeadsign) return false;
-  if (first.tripShortName !== second.tripShortName) return false;
   if (!arraysEqual(first.stops, second.stops)) return false;
   if (!arraysEqual(normalizedVariantValues(first.directionIds),
     normalizedVariantValues(second.directionIds))) return false;
+  return true;
+}
 
-  const firstPoints = feed.indexes.shapePointsById.get(first.shapeId);
-  const secondPoints = feed.indexes.shapePointsById.get(second.shapeId);
-  if (!firstPoints || !secondPoints) return false;
-  if (firstPoints.some(([lat, lon]) => lat === null || lon === null)
-    || secondPoints.some(([lat, lon]) => lat === null || lon === null)) return false;
-  return shapePointsEqual(firstPoints, secondPoints);
+function variantMergeWarnings(
+  feed: GtfsFeed,
+  first: RouteVariant,
+  second: RouteVariant,
+): GtfsWarning[] {
+  const warnings: GtfsWarning[] = [];
+  const routeId = first.routeId ?? "";
+  if (first.tripShortName !== second.tripShortName) {
+    warnings.push({
+      type: "variant_merge",
+      parameters: {
+        routeId,
+        field: "trip short names",
+        first: first.tripShortName,
+        second: second.tripShortName,
+      },
+      relatedObjectIds: [routeId].filter(Boolean),
+    });
+  }
+  if (first.shapeId && second.shapeId) {
+    const firstPoints = feed.indexes.shapePointsById.get(first.shapeId);
+    const secondPoints = feed.indexes.shapePointsById.get(second.shapeId);
+    if (!firstPoints || !secondPoints
+      || firstPoints.some(([lat, lon]) => lat === null || lon === null)
+      || secondPoints.some(([lat, lon]) => lat === null || lon === null)
+      || !shapePointsEqual(firstPoints, secondPoints)) {
+      warnings.push({
+        type: "variant_merge",
+        parameters: {
+          routeId,
+          field: "shapes",
+          first: first.shapeId,
+          second: second.shapeId,
+        },
+        relatedObjectIds: [routeId, first.shapeId, second.shapeId].filter(Boolean),
+      });
+    }
+  }
+  return warnings;
 }
 
 export function mergeRouteVariantPair(
   feed: GtfsFeed,
   first: RouteVariant,
   second: RouteVariant,
+  warningCollector?: WarningCollector,
 ): VariantMergeResult {
   if (!canMergeRouteVariants(feed, first, second)) {
     return {
@@ -650,6 +685,8 @@ export function mergeRouteVariantPair(
 
   const canonicalShapeId = first.shapeId;
   const secondaryShapeId = second.shapeId;
+  const warnings = variantMergeWarnings(feed, first, second);
+  for (const warning of warnings) warningCollector?.add(warning);
   for (const shapeId of [canonicalShapeId, secondaryShapeId]) {
     if (shapeId && !first.shapeIds.includes(shapeId)) first.shapeIds.push(shapeId);
   }
@@ -675,6 +712,7 @@ export function mergeRouteVariantPair(
 export function mergeRouteVariants(
   feed: GtfsFeed,
   route: GtfsRow<"routes.txt"> | string,
+  warningCollector?: WarningCollector,
 ): RouteVariantMergeSummary {
   const routeId = typeof route === "string" ? route : route.fields.route_id;
   const variantsBefore = routeId ? getRouteVariants(feed, routeId).variants : [];
@@ -685,7 +723,7 @@ export function mergeRouteVariants(
   for (const variant of variantsBefore) {
     const canonical = canonicalVariants.find((candidate) => canMergeRouteVariants(feed, candidate, variant));
     if (canonical) {
-      const result = mergeRouteVariantPair(feed, canonical, variant);
+      const result = mergeRouteVariantPair(feed, canonical, variant, warningCollector);
       if (result.merged) {
         mergedVariantCount += result.mergedVariantCount;
         for (const shapeId of result.removedShapeIds) removedShapeIds.add(shapeId);
@@ -704,7 +742,10 @@ export function mergeRouteVariants(
   };
 }
 
-export function mergeRouteVariantsInFeed(feed: GtfsFeed): FeedVariantMergeSummary {
+export function mergeRouteVariantsInFeed(
+  feed: GtfsFeed,
+  warningCollector?: WarningCollector,
+): FeedVariantMergeSummary {
   const removedShapeIds = new Set<string>();
   let routesAttempted = 0;
   let routesMerged = 0;
@@ -712,7 +753,7 @@ export function mergeRouteVariantsInFeed(feed: GtfsFeed): FeedVariantMergeSummar
 
   for (const routeId of feed.indexes.tripsByRouteId.keys()) {
     routesAttempted++;
-    const result = mergeRouteVariants(feed, routeId);
+    const result = mergeRouteVariants(feed, routeId, warningCollector);
     if (result.mergedVariantCount > 0) routesMerged++;
     mergedVariantCount += result.mergedVariantCount;
     for (const shapeId of result.removedShapeIds) removedShapeIds.add(shapeId);
