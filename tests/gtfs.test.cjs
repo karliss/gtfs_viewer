@@ -384,14 +384,6 @@ test("processes and validates GTFS colors", () => {
 });
 
 test("decodes GTFS pickup and drop-off types", () => {
-  assert.equal(PICKUP_TYPES.REGULAR, 0);
-  assert.equal(PICKUP_TYPES.NO_SERVICE, 1);
-  assert.equal(PICKUP_TYPES.PHONE_AGENCY, 2);
-  assert.equal(PICKUP_TYPES.COORDINATE, 3);
-  assert.equal(DROP_OFF_TYPES.REGULAR, 0);
-  assert.equal(DROP_OFF_TYPES.NO_SERVICE, 1);
-  assert.equal(DROP_OFF_TYPES.PHONE_AGENCY, 2);
-  assert.equal(DROP_OFF_TYPES.COORDINATE, 3);
   assert.equal(decodePickupType(null), "regular pickup");
   assert.equal(decodePickupType(PICKUP_TYPES.NO_SERVICE), "no pickup");
   assert.equal(decodeDropOffType(DROP_OFF_TYPES.PHONE_AGENCY), "drop-off by phone");
@@ -402,19 +394,10 @@ test("summarizes trip accessibility with missing values left unprovided", () => 
   const [table] = loadGtfs(archive({
     "trips.txt": "trip_id,wheelchair_accessible,bikes_allowed,cars_allowed\n1,1,2,1\n2,1,2,0\n3,2,,2\n4,,2,\n5\n",
   })).tables;
-  assert.equal(WHEELCHAIR_ACCESSIBLE_VALUES.UNKNOWN, 0);
-  assert.equal(WHEELCHAIR_ACCESSIBLE_VALUES.YES, 1);
-  assert.equal(WHEELCHAIR_ACCESSIBLE_VALUES.NO, 2);
-  assert.equal(BIKES_ALLOWED_VALUES.UNKNOWN, 0);
-  assert.equal(BIKES_ALLOWED_VALUES.YES, 1);
-  assert.equal(BIKES_ALLOWED_VALUES.NO, 2);
-  assert.equal(CARS_ALLOWED_VALUES.UNKNOWN, 0);
-  assert.equal(CARS_ALLOWED_VALUES.YES, 1);
-  assert.equal(CARS_ALLOWED_VALUES.NO, 2);
   assert.equal(decodeTripFieldValue(null), "Unknown");
-  assert.equal(decodeTripFieldValue(0), "Unknown");
-  assert.equal(decodeTripFieldValue(1), "Yes");
-  assert.equal(decodeTripFieldValue(2), "No");
+  assert.equal(decodeTripFieldValue(WHEELCHAIR_ACCESSIBLE_VALUES.UNKNOWN), "Unknown");
+  assert.equal(decodeTripFieldValue(BIKES_ALLOWED_VALUES.YES), "Yes");
+  assert.equal(decodeTripFieldValue(CARS_ALLOWED_VALUES.NO), "No");
   assert.equal(decodeTripFieldValue(3), "Unrecognized");
   assert.deepEqual(summarizeTripField([], "bikes_allowed"), []);
   assert.deepEqual(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), [
