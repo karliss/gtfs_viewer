@@ -629,7 +629,7 @@ function getWeekdayCells(
     let title = `${name}: ${active ? "Active" : "Inactive"}`;
     if (exception) {
       const exceptionType = exception.fields.exception_type;
-      symbol = exceptionType === 1 ? "+" : exceptionType === 2 ? "X" : "?";
+      symbol = exceptionType === 1 ? "➕" : exceptionType === 2 ? "✖" : "?";
       title = exceptionType === 1 ? `${name}: Added exception`
         : exceptionType === 2 ? `${name}: Removed exception`
           : `${name}: Unrecognized exception`;
@@ -650,6 +650,8 @@ function createWeekdayGrid(
   currentDayIndex: number | null = null,
   selectedException: GtfsRow<"calendar_dates.txt"> | undefined = undefined,
 ): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "date-schedule-week-wrapper";
   const week = document.createElement("div");
   week.className = "date-schedule-week";
   for (const cellData of getWeekdayCells(calendar, currentDayIndex, selectedException)) {
@@ -661,7 +663,12 @@ function createWeekdayGrid(
     cell.title = cellData.title;
     week.append(cell);
   }
-  return week;
+  wrapper.append(week);
+  const legend = document.createElement("p");
+  legend.className = "date-schedule-week-legend";
+  legend.textContent = "➕ Added exception · ✖ Regular service removed";
+  wrapper.append(legend);
+  return wrapper;
 }
 
 function renderRoutesCell(column: string, value: string | number | null): HTMLTableCellElement {
