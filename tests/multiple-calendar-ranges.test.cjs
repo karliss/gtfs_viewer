@@ -22,11 +22,12 @@ function archiveDirectory(directory) {
 }
 
 test("single service ID supports separate calendar ranges and weekday masks", () => {
-  const feed = loadGtfs(archiveDirectory(path.join(__dirname, "multiple-calendar-ranges")));
+  const feed = loadGtfs(archiveDirectory(path.join(__dirname, "testfiles", "multiple-calendar-ranges")));
 
   assert.equal(feed.indexes.calendarByServiceId.get("weekday").length, 2);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-05"), true);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-06"), true);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-04-07"), true);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-06-06"), true);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-06-08"), false);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-07"), false);
@@ -48,6 +49,6 @@ test("single service ID supports separate calendar ranges and weekday masks", ()
   );
   assert.deepEqual(
     timetables.map((timetable) => timetable.exceptionDates),
-    [["20260106", "20260608"], ["20260106", "20260608"]],
+    [["20260106", "20260407", "20260608"], ["20260106", "20260407", "20260608"]],
   );
 });
