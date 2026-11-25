@@ -48,7 +48,7 @@ app.innerHTML = `
       <progress id="loading-progress" max="100" value="0" hidden></progress>
       <p id="status" role="status" aria-live="polite"></p>
     </section>
-    <div class="history-controls" aria-label="View history" hidden>
+    <div class="history-controls" aria-label="View history">
       <label class="history-select-label">History</label>
       <button id="history-back" type="button" title="Back" aria-label="Back">←</button>
       <button id="history-forward" type="button" title="Forward" aria-label="Forward">→</button>
@@ -58,7 +58,7 @@ app.innerHTML = `
       </div>
       <button id="history-routes" type="button">Routes</button>
       <button id="history-stops" type="button">Stops</button>
-      <button id="history-warnings" type="button">Warnings</button>
+      <button id="history-warnings" type="button" title="No warnings" aria-label="No warnings">Warnings (0)</button>
     </div>
     <section id="viewer" class="panel viewer" hidden>
       <div class="table-selection-row">
@@ -291,7 +291,6 @@ const historyForward = element<HTMLButtonElement>("#history-forward");
 const historyRoutes = element<HTMLButtonElement>("#history-routes");
 const historyStops = element<HTMLButtonElement>("#history-stops");
 const historyWarnings = element<HTMLButtonElement>("#history-warnings");
-const historyControls = document.querySelector<HTMLElement>(".history-controls");
 const historySelect = element<HTMLButtonElement>("#history-select");
 const historyMenu = element<HTMLElement>("#history-menu");
 const routeDetail = element<HTMLElement>("#route-detail");
@@ -410,6 +409,18 @@ const warningCollector = new WarningCollector();
 const filteredTableStates = new Map<string, GtfsTable>();
 
 type CellRenderer = (column: string, value: string | number | null) => HTMLTableCellElement;
+
+function updateWarningNavigation(count: number): void {
+  historyWarnings.textContent = count > 0
+    ? `⚠️ Warnings (${count})`
+    : "Warnings (0)";
+  historyWarnings.title = count > 0
+    ? `${count} ${count === 1 ? "warning" : "warnings"}`
+    : "No warnings";
+  historyWarnings.setAttribute("aria-label", count > 0
+    ? `${count} ${count === 1 ? "warning" : "warnings"}`
+    : "No warnings");
+}
 
 function tableKind(): string {
   if (!feed) return "";
@@ -2698,8 +2709,7 @@ form.addEventListener("submit", async (event) => {
   dateSchedule.hidden = true;
   mapPanel.hidden = true;
   warningsView.hidden = true;
-  if (historyControls) historyControls.hidden = true;
-  historyWarnings.textContent = "Warnings";
+  updateWarningNavigation(0);
   mapView?.remove();
   mapView = undefined;
   viewHistory.clear();
@@ -2715,8 +2725,7 @@ form.addEventListener("submit", async (event) => {
     feed = await loadFeed(file);
     warningCollector.replace(feed.warnings ?? []);
     feed.warnings = [...warningCollector.all];
-    historyWarnings.textContent = `Warnings (${feed.warnings.length})`;
-    if (historyControls) historyControls.hidden = false;
+    updateWarningNavigation(feed.warnings.length);
     routesById = feed.indexes.routesById;
     agenciesById = feed.indexes.agenciesById;
     stopsById = feed.indexes.stopsById;
