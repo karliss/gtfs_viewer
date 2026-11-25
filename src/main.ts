@@ -696,6 +696,13 @@ function appendWeekdayRow(
   table.append(row);
 }
 
+function appendWeekdayLegend(container: HTMLElement): void {
+  const legend = document.createElement("p");
+  legend.className = "date-schedule-week-legend";
+  legend.textContent = "● Regular service · ◉ Already active · ➕ Added exception · ❌ Regular service removed";
+  container.append(legend);
+}
+
 function renderRoutesCell(column: string, value: string | number | null): HTMLTableCellElement {
   if (column === "route_url") return renderUrlCell(column, value);
   if (column === "route_type" && value !== null) {
@@ -1236,6 +1243,7 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       serviceLink.addEventListener("click", () => showServiceTable(serviceId));
       appendWeekdayRow(calendarList, serviceLink, calendar);
     }
+    appendWeekdayLegend(tripCalendar);
     if (!calendar) {
       const row = document.createElement("tr");
       const cell = document.createElement("td");
@@ -1487,10 +1495,6 @@ function appendCalendarExceptions(
     list.append(item);
   }
   container.append(list);
-  const legend = document.createElement("p");
-  legend.className = "date-schedule-week-legend";
-  legend.textContent = "◉ Already active · ➕ Added exception · ❌ Regular service removed";
-  container.append(legend);
 }
 
 function routeStopRouteButton(route: GtfsRow<"routes.txt">): HTMLButtonElement {
@@ -1697,6 +1701,7 @@ function renderDateSchedule(): void {
       row.append(cell);
       dateScheduleRuleTable.append(row);
     }
+    appendWeekdayLegend(dateScheduleRuleTable.parentElement ?? dateScheduleRuleTable);
     dateScheduleExceptions.replaceChildren();
     const selectedExceptions: GtfsRow<"calendar_dates.txt">[] = [];
     for (const serviceId of routeServiceIds) {
