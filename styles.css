@@ -657,6 +657,46 @@ tbody tr:last-child td {
   line-height: 1;
 }
 
+.date-schedule-rule {
+  margin-bottom: 0.75rem;
+}
+
+.date-schedule-rule-header,
+.date-schedule-rule-range,
+.date-schedule-rule-exception {
+  margin-bottom: 0.25rem;
+}
+
+.date-schedule-week {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0.25rem 0;
+}
+
+.date-schedule-week-day {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid #dce2eb;
+  border-radius: 50%;
+  color: #52617a;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.date-schedule-week-day--current {
+  outline: 2px solid #1554a0;
+  outline-offset: 1px;
+}
+
+.date-schedule-week-day--exception {
+  border-color: #1554a0;
+  color: #1554a0;
+  font-weight: 700;
+}
+
 #map-heading {
   margin-top: 0.5rem;
 }

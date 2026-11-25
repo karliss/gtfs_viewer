@@ -1327,6 +1327,16 @@ function showServiceTable(serviceId: string): void {
   }
 }
 
+function showCalendarDatesTable(serviceId: string): void {
+  if (!feed) return;
+  const table = feed.tables.find((candidate) => candidate.kind === "calendar_dates.txt");
+  if (table?.kind !== "calendar_dates.txt") return;
+  showFilteredTable(
+    { ...table, rows: table.rows.filter((row) => row.fields.service_id === serviceId) },
+    `Showing calendar_dates.txt rows for service ${serviceId}.`,
+  );
+}
+
 function routeStopRouteButton(route: GtfsRow<"routes.txt">): HTMLButtonElement {
   const button = document.createElement("button");
   button.type = "button";
@@ -1433,14 +1443,13 @@ function renderDateSchedule(): void {
     : "Schedule on date";
   const { variants } = getRouteVariants(feed, routeId);
   scheduleVariants.replaceChildren();
-  const activeServiceIds = new Set<string>();
+  const routeServiceIds = new Set<string>();
   let scheduledTripCount = 0;
   for (const variant of variants) {
     const schedule = getDateSchedule(feed, variant, date);
     scheduledTripCount += schedule.tripCount;
     for (const trip of variant.trips) {
-      if (!isServiceActiveOnDate(feed, trip.fields.service_id, date)) continue;
-      if (trip.fields.service_id) activeServiceIds.add(trip.fields.service_id);
+      if (trip.fields.service_id) routeServiceIds.add(trip.fields.service_id);
     }
     const section = document.createElement("section");
     const heading = document.createElement("h3");
@@ -1500,24 +1509,118 @@ function renderDateSchedule(): void {
     dateScheduleRuleList.append(item);
   } else {
     let ruleCount = 0;
-    for (const serviceId of activeServiceIds) {
-      const exceptions = (feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [])
-        .filter((row) => row.fields.date === isoDateToGtfs(date));
-      const added = exceptions.find((row) => row.fields.exception_type === 1);
-      if (added) {
-        const item = document.createElement("li");
-        item.textContent = `calendar_dates.txt — ${serviceId} — Added`;
-        dateScheduleRuleList.append(item);
-        ruleCount++;
-        continue;
-      }
+    const gtfsDate = isoDateToGtfs(date);
+    const weekday = gtfsDate ? new Date(`${date}T12:00:00Z`).getUTCDay() : -1;
+    const weekdayIndex = weekday === 0 ? 6 : weekday - 1;
+    for (const serviceId of routeServiceIds) {
+      const exceptions = feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [];
+      const selectedException = exceptions.find((row) => row.fields.date === gtfsDate);
       const calendar = feed.indexes.calendarByServiceId.get(serviceId);
+      if (!calendar && !selectedException) continue;
+
+      const item = document.createElement("li");
+      item.className = "date-schedule-rule";
+      const header = document.createElement("div");
+      header.className = "date-schedule-rule-header";
+
       if (calendar) {
-        const item = document.createElement("li");
-        item.textContent = `calendar.txt — ${serviceId}`;
-        dateScheduleRuleList.append(item);
-        ruleCount++;
+        const calendarLink = document.createElement("button");
+        calendarLink.type = "button";
+        calendarLink.className = "route-link";
+        calendarLink.textContent = "calendar.txt";
+        calendarLink.addEventListener("click", () => showServiceTable(serviceId));
+        header.append(calendarLink, document.createTextNode(" · "));
       }
+
+      const serviceLink = document.createElement("button");
+      serviceLink.type = "button";
+      serviceLink.className = "route-link";
+      serviceLink.textContent = serviceId;
+      serviceLink.addEventListener("click", () => showServiceTable(serviceId));
+      header.append(serviceLink);
+      item.append(header);
+
+      if (calendar) {
+        const start = gtfsDateToIso(calendar.fields.start_date);
+        const end = gtfsDateToIso(calendar.fields.end_date);
+        const range = document.createElement("div");
+        range.className = "date-schedule-rule-range";
+        range.textContent = `Date range: ${start || "Not provided"} — ${end || "Not provided"}`;
+        item.append(range);
+
+        const week = document.createElement("div");
+        week.className = "date-schedule-week";
+        const dayNames = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+        const dayFields = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+        for (const [dayIndex, dayName] of dayNames.entries()) {
+          const cell = document.createElement("span");
+          cell.className = "date-schedule-week-day";
+          if (dayIndex === weekdayIndex) cell.classList.add("date-schedule-week-day--current");
+          const exception = dayIndex === weekdayIndex ? selectedException : undefined;
+          if (exception) {
+            cell.textContent = exception.fields.exception_type === 1 ? "+" : "X";
+            cell.className += " date-schedule-week-day--exception";
+          } else if (calendar.fields[dayFields[dayIndex]] === 1) {
+            cell.textContent = "●";
+          } else {
+            cell.textContent = dayName;
+          }
+          cell.title = `${dayName}${exception
+            ? exception.fields.exception_type === 1 ? ": Added exception" : ": Removed exception"
+            : calendar.fields[dayFields[dayIndex]] === 1 ? ": Active" : ": Inactive"}`;
+          week.append(cell);
+        }
+        item.append(week);
+      } else if (selectedException) {
+        const week = document.createElement("div");
+        week.className = "date-schedule-week";
+        const dayNames = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+        for (const [dayIndex, dayName] of dayNames.entries()) {
+          const cell = document.createElement("span");
+          cell.className = "date-schedule-week-day";
+          if (dayIndex === weekdayIndex) cell.classList.add("date-schedule-week-day--current");
+          if (dayIndex === weekdayIndex) {
+            cell.textContent = selectedException.fields.exception_type === 1 ? "+" : "X";
+            cell.className += " date-schedule-week-day--exception";
+          } else {
+            cell.textContent = dayName;
+          }
+          week.append(cell);
+        }
+        item.append(week);
+      }
+
+      if (selectedException) {
+        const exception = document.createElement("div");
+        exception.className = "date-schedule-rule-exception";
+        const exceptionsTableLink = document.createElement("button");
+        exceptionsTableLink.type = "button";
+        exceptionsTableLink.className = "route-link";
+        exceptionsTableLink.textContent = "calendar_dates.txt";
+        exceptionsTableLink.addEventListener("click", () => showCalendarDatesTable(serviceId));
+        const exceptionType = selectedException.fields.exception_type === 1
+          ? "Added"
+          : selectedException.fields.exception_type === 2 ? "Removed" : "Unknown";
+        const exceptionDate = selectedException.fields.date
+          ? gtfsDateToIso(selectedException.fields.date) || selectedException.fields.date
+          : "";
+        const exceptionDateLink = document.createElement("button");
+        exceptionDateLink.type = "button";
+        exceptionDateLink.className = "schedule-exception-button";
+        exceptionDateLink.textContent = exceptionDate;
+        if (exceptionDate !== "") exceptionDateLink.addEventListener("click", () =>
+          showDateSchedule(currentScheduleRoute!, exceptionDate));
+        exception.append(
+          exceptionsTableLink,
+          document.createTextNode(" · "),
+          exceptionDateLink,
+          document.createTextNode(` · Exception type: ${exceptionType}`),
+        );
+        item.append(exception);
+      }
+
+      dateScheduleRuleList.append(item);
+      ruleCount++;
     }
     if (!ruleCount) {
       const item = document.createElement("li");
