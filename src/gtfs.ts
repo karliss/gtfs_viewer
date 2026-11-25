@@ -228,6 +228,13 @@ export interface RouteVariantMergeSummary {
   removedShapeIds: string[];
 }
 
+export interface FeedVariantMergeSummary {
+  routesAttempted: number;
+  routesMerged: number;
+  mergedVariantCount: number;
+  removedShapeIds: string[];
+}
+
 export interface VariantTimetableDeparture {
   minute: number;
   days: number[] | null;
@@ -692,6 +699,28 @@ export function mergeRouteVariants(
   return {
     variantsBefore: variantsBefore.length,
     variantsAfter: variantsAfter.length,
+    mergedVariantCount,
+    removedShapeIds: [...removedShapeIds],
+  };
+}
+
+export function mergeRouteVariantsInFeed(feed: GtfsFeed): FeedVariantMergeSummary {
+  const removedShapeIds = new Set<string>();
+  let routesAttempted = 0;
+  let routesMerged = 0;
+  let mergedVariantCount = 0;
+
+  for (const routeId of feed.indexes.tripsByRouteId.keys()) {
+    routesAttempted++;
+    const result = mergeRouteVariants(feed, routeId);
+    if (result.mergedVariantCount > 0) routesMerged++;
+    mergedVariantCount += result.mergedVariantCount;
+    for (const shapeId of result.removedShapeIds) removedShapeIds.add(shapeId);
+  }
+
+  return {
+    routesAttempted,
+    routesMerged,
     mergedVariantCount,
     removedShapeIds: [...removedShapeIds],
   };

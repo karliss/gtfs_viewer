@@ -5,7 +5,7 @@ const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, loadGtfsFiles, summarizeTripField,
   decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
-  canMergeRouteVariants, mergeRouteVariantPair, mergeRouteVariants,
+  canMergeRouteVariants, mergeRouteVariantPair, mergeRouteVariants, mergeRouteVariantsInFeed,
   WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
 } = require("../dist/gtfs.cjs");
 const {
@@ -708,6 +708,33 @@ test("does not merge variants with different stops, directions, names, or shape 
   const variants = getRouteVariants(feed, "r").variants;
   assert.equal(canMergeRouteVariants(feed, variants[0], variants[1]), false);
   assert.equal(mergeRouteVariantPair(feed, variants[0], variants[1]).merged, false);
+});
+
+test("attempts variant merging for every route in the feed", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id\nr1\nr2\nr3\n",
+    "trips.txt": "route_id,trip_id,shape_id,trip_headsign,direction_id\n"
+      + "r1,t1,shape-a,North,0\nr1,t2,shape-b,North,0\n"
+      + "r2,t3,shape-c,South,0\nr2,t4,shape-d,South,0\n"
+      + "r3,t5,shape-e,West,0\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\n"
+      + "t1,a,1\nt1,b,2\nt2,a,1\nt2,b,2\n"
+      + "t3,c,1\nt3,d,2\nt4,c,1\nt4,d,2\n"
+      + "t5,e,1\nt5,f,2\n",
+    "shapes.txt": "shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence\n"
+      + "shape-a,1,2,1\nshape-a,3,4,2\n"
+      + "shape-b,1,2,1\nshape-b,3,4,2\n"
+      + "shape-c,5,6,1\nshape-c,7,8,2\n"
+      + "shape-d,5,6,1\nshape-d,7,8,2\n"
+      + "shape-e,9,10,1\nshape-e,11,12,2\n",
+  }));
+  const result = mergeRouteVariantsInFeed(feed);
+  assert.equal(result.routesAttempted, 3);
+  assert.equal(result.routesMerged, 2);
+  assert.equal(result.mergedVariantCount, 2);
+  assert.equal(getRouteVariants(feed, "r1").variants.length, 1);
+  assert.equal(getRouteVariants(feed, "r2").variants.length, 1);
+  assert.equal(getRouteVariants(feed, "r3").variants.length, 1);
 });
 
 test("automatically merges all equivalent variants for a route", () => {

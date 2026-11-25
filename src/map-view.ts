@@ -103,6 +103,7 @@ export class MapView {
   private stopSizeReduced: boolean;
   private stopOrderEnabled: boolean;
   private allStopsEnabled = false;
+  private autoRefocusEnabled = true;
   private stopOrderVariant: number | null = null;
   private baseLayer: MapBaseLayerId;
   private rasterBlackAndWhite = false;
@@ -257,7 +258,7 @@ export class MapView {
       this.applyRouteColors();
       this.applyStopSize();
       this.applyStopOrder();
-      this.fit();
+      if (this.autoRefocusEnabled) this.fit();
       if (this.pendingZoom) {
         this.zoomTo(this.pendingZoom);
         this.pendingZoom = null;
@@ -349,7 +350,7 @@ export class MapView {
       this.applyRouteColors();
       this.applyStopSize();
       this.applyStopOrder();
-      if (fitView) this.fit();
+      if (fitView && this.autoRefocusEnabled) this.fit();
     }
   }
 
@@ -411,6 +412,14 @@ export class MapView {
 
   setAllStopsEnabled(enabled: boolean): void {
     this.allStopsEnabled = enabled;
+  }
+
+  setAutoRefocusEnabled(enabled: boolean): void {
+    this.autoRefocusEnabled = enabled;
+  }
+
+  get autoRefocusEnabledState(): boolean {
+    return this.autoRefocusEnabled;
   }
 
   setStopOrderVariant(index: number | null): void {

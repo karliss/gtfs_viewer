@@ -2,7 +2,7 @@ import {
   decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, summarizeTripField,
   getVariantTimetable, formatTimetableDayRange, getDateSchedule, getTripFares, isServiceActiveOnDate,
   gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
-  mergeRouteVariants,
+  mergeRouteVariants, mergeRouteVariantsInFeed,
   WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant, type FareResult,
 } from "./gtfs";
@@ -68,6 +68,7 @@ app.innerHTML = `
         <select id="table-select"></select>
         <button id="stops-map" type="button" hidden title="View stops on map" aria-label="View stops on map">🗺️</button>
         <button id="routes-map" type="button" hidden title="View routes on map" aria-label="View routes on map">🗺️</button>
+        <button id="feed-merge-variants" type="button" hidden>Merge variants for all routes</button>
         <span id="feed-summary"></span>
       </div>
       <p id="table-filter" hidden></p>
@@ -244,6 +245,10 @@ app.innerHTML = `
               <input id="map-stop-order" type="checkbox" />
               Display stop order numbers
             </label>
+            <label class="map-option" for="map-auto-refocus">
+              <input id="map-auto-refocus" type="checkbox" />
+              Disable automatic refocus
+            </label>
           </div>
         </details>
       </div>
@@ -309,6 +314,7 @@ const routeMergeVariants = element<HTMLButtonElement>("#route-merge-variants");
 const routeStopList = element<HTMLOListElement>("#route-stop-list");
 const tableFilter = element<HTMLParagraphElement>("#table-filter");
 const clearFilter = element<HTMLButtonElement>("#clear-filter");
+const feedMergeVariants = element<HTMLButtonElement>("#feed-merge-variants");
 const stopsMapButton = element<HTMLButtonElement>("#stops-map");
 const routesMapButton = element<HTMLButtonElement>("#routes-map");
 const routeMapButton = element<HTMLButtonElement>("#route-map");
@@ -356,6 +362,7 @@ const mapRandomColors = element<HTMLInputElement>("#map-random-colors");
 const mapAllStops = element<HTMLInputElement>("#map-all-stops");
 const mapReducedStops = element<HTMLInputElement>("#map-reduced-stops");
 const mapStopOrder = element<HTMLInputElement>("#map-stop-order");
+const mapAutoRefocus = element<HTMLInputElement>("#map-auto-refocus");
 const mapClearFilter = element<HTMLButtonElement>("#map-clear-filter");
 const mapSettings = element<HTMLDetailsElement>("#map-settings");
 const agencyDialog = element<HTMLDialogElement>("#agency-dialog");
@@ -2326,6 +2333,7 @@ function openMap(title: string): void {
     mapAllStops.checked = mapView.allStopsEnabledState;
     mapReducedStops.checked = mapView.reducedStopSizeEnabled;
     mapStopOrder.checked = mapView.stopOrderEnabledState;
+    mapAutoRefocus.checked = !mapView.autoRefocusEnabledState;
   } catch (error) {
     mapError.textContent = `Could not initialize the map: ${error instanceof Error ? error.message : "unknown error"}`;
   }
@@ -2758,6 +2766,7 @@ form.addEventListener("submit", async (event) => {
   historyControls.hidden = true;
   loadPanel.classList.remove("loaded");
   viewer.hidden = true;
+  feedMergeVariants.hidden = true;
   routeDetail.hidden = true;
   stopDetail.hidden = true;
   tripDetail.hidden = true;
@@ -2791,6 +2800,7 @@ form.addEventListener("submit", async (event) => {
       return option;
     }));
     feedSummary.textContent = `${feed.tables.length} ${feed.tables.length === 1 ? "table" : "tables"}`;
+    feedMergeVariants.hidden = false;
     page = 0;
     renderSelectedTable();
     pushViewState();
@@ -2862,6 +2872,9 @@ mapAllStops.addEventListener("change", () => {
 });
 mapReducedStops.addEventListener("change", () => mapView?.setStopSizeReduced(mapReducedStops.checked));
 mapStopOrder.addEventListener("change", () => mapView?.setStopOrderEnabled(mapStopOrder.checked));
+mapAutoRefocus.addEventListener("change", () => {
+  mapView?.setAutoRefocusEnabled(!mapAutoRefocus.checked);
+});
 mapBaseLayer.addEventListener("change", () => {
   mapView?.setBaseLayer(mapBaseLayer.value as MapBaseLayerId);
 });
@@ -2894,6 +2907,16 @@ routeMergeVariants.addEventListener("click", () => {
   const result = mergeRouteVariants(feed, currentRoute);
   showRoute(currentRoute);
   routeSummary.textContent = `${result.mergedVariantCount} ${result.mergedVariantCount === 1 ? "variant" : "variants"} merged.`;
+});
+
+feedMergeVariants.addEventListener("click", () => {
+  if (!feed) return;
+  const result = mergeRouteVariantsInFeed(feed);
+  if (currentRoute) showRoute(currentRoute);
+  tableSummary.textContent =
+    `${result.mergedVariantCount} ${result.mergedVariantCount === 1 ? "variant" : "variants"} merged across `
+    + `${result.routesMerged} ${result.routesMerged === 1 ? "route" : "routes"} `
+    + `(${result.routesAttempted} routes attempted).`;
 });
 
 routeDateSchedule.addEventListener("click", () => {
