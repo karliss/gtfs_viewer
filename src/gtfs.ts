@@ -212,7 +212,7 @@ export interface RouteVariant {
 
 export interface VariantTimetableDeparture {
   minute: number;
-  days: number[][] | null;
+  days: number[] | null;
 }
 
 export interface VariantTimetableRow {
@@ -447,14 +447,14 @@ export function formatTimetableDayRange(days: readonly number[]): string {
   return ranges.join(", ");
 }
 
-export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable {
+export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable[] {
   const firstStop = variant.stops[0];
   const tripIds = new Set(variant.trips.flatMap((trip) => trip.fields.trip_id ? [trip.fields.trip_id] : []));
 
-  const daySetsForService = (serviceId: string | null): number[][] | null => {
-    if (!serviceId) return null;
+  const daySetsForService = (serviceId: string | null): number[][] => {
+    if (!serviceId) return [];
     const rows = feed.indexes.calendarByServiceId.get(serviceId);
-    if (!rows?.length) return null;
+    if (!rows?.length) return [];
     const sets = rows.map((row) => [
       row.fields.monday === 1 ? 1 : null,
       row.fields.tuesday === 1 ? 2 : null,
@@ -467,68 +467,11 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
     return [...new Map(sets.map((days) => [days.join(","), days])).values()];
   };
 
-  const dayCounts = new Map<string, { days: number[]; count: number }>();
+  const allDaySets = new Map<string, number[]>();
   for (const trip of variant.trips) {
-    const sets = daySetsForService(trip.fields.service_id);
-    if (!sets) continue;
-    for (const days of sets) {
-      const key = days.join(",");
-      const existing = dayCounts.get(key);
-      if (existing) existing.count++;
-      else dayCounts.set(key, { days, count: 1 });
+    for (const days of daySetsForService(trip.fields.service_id)) {
+      allDaySets.set(days.join(","), days);
     }
-  }
-  const rankedDays = [...dayCounts.values()].sort((left, right) => right.count - left.count);
-  const popularDays: number[][] = rankedDays.map(({ days }) => days);
-
-  const grouped = new Map<number, Map<number, Map<string, number>>>();
-  for (const trip of variant.trips) {
-    const tripId = trip.fields.trip_id;
-    if (!tripId || !tripIds.has(tripId)) continue;
-    const rows = feed.indexes.stopTimesByTripId.get(tripId)?.filter((row) =>
-      firstStop !== null && row.fields.stop_id === firstStop) ?? [];
-    const days = daySetsForService(trip.fields.service_id);
-    const dayKey = days ? JSON.stringify(days) : "";
-    for (const row of rows) {
-      const time = row.fields.departure_time || row.fields.arrival_time;
-      if (!time) continue;
-      const match = /^(\d+):(\d{2})(:\d{2})?$/.exec(time);
-      if (!match) continue;
-      const hour = Number(match[1]);
-      const minute = Number(match[2]);
-      if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
-      let minutes = grouped.get(hour);
-      if (!minutes) {
-        minutes = new Map();
-        grouped.set(hour, minutes);
-      }
-      let dayCounts = minutes.get(minute);
-      if (!dayCounts) {
-        dayCounts = new Map();
-        minutes.set(minute, dayCounts);
-      }
-      dayCounts.set(dayKey, (dayCounts.get(dayKey) ?? 0) + 1);
-    }
-  }
-
-  const rows: VariantTimetableRow[] = [...grouped.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([hour, minuteMap]) => ({
-      hour,
-      departures: [...minuteMap.entries()].sort(([left], [right]) => left - right).flatMap(([minute, dayKeys]) =>
-        [...dayKeys.entries()].map(([dayKey]) => ({
-          minute,
-          days: dayKey ? JSON.parse(dayKey) as number[][] : null,
-        })),
-      ),
-    }));
-  if (rows.length > 0 && popularDays.length === 0) {
-    const knownDays = [...new Set(rows.flatMap((row) => row.departures
-      .flatMap((departure) => departure.days?.flat() ?? [])))]
-      .sort((left, right) => left - right);
-    popularDays.push(knownDays.length > 0
-      ? knownDays
-      : [1, 2, 3, 4, 5, 6, 7]);
   }
   const serviceIds = new Set(variant.trips.flatMap((trip) =>
     trip.fields.service_id ? [trip.fields.service_id] : []));
@@ -537,7 +480,54 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
       .map((row) => row.fields.date)
       .filter((date): date is string => date !== null))]
     .sort();
-  return { popularDays, exceptionDates, rows };
+
+  const buildTimetable = (targetDays: number[] | null): VariantTimetable => {
+    const grouped = new Map<number, Map<number, Map<string, number>>>();
+    for (const trip of variant.trips) {
+      const tripId = trip.fields.trip_id;
+      if (!tripId || !tripIds.has(tripId)) continue;
+      const sets = daySetsForService(trip.fields.service_id);
+      if (targetDays && !sets.some((days) => days.join(",") === targetDays.join(","))) continue;
+      const rows = feed.indexes.stopTimesByTripId.get(tripId)?.filter((row) =>
+        firstStop !== null && row.fields.stop_id === firstStop) ?? [];
+      for (const row of rows) {
+        const time = row.fields.departure_time || row.fields.arrival_time;
+        if (!time) continue;
+        const match = /^(\d+):(\d{2})(:\d{2})?$/.exec(time);
+        if (!match) continue;
+        const hour = Number(match[1]);
+        const minute = Number(match[2]);
+        if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
+        let minutes = grouped.get(hour);
+        if (!minutes) {
+          minutes = new Map();
+          grouped.set(hour, minutes);
+        }
+        let dayCounts = minutes.get(minute);
+        if (!dayCounts) {
+          dayCounts = new Map();
+          minutes.set(minute, dayCounts);
+        }
+        const dayKey = targetDays?.join(",") ?? "";
+        dayCounts.set(dayKey, (dayCounts.get(dayKey) ?? 0) + 1);
+      }
+    }
+    const rows: VariantTimetableRow[] = [...grouped.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([hour, minuteMap]) => ({
+        hour,
+        departures: [...minuteMap.entries()].sort(([left], [right]) => left - right).flatMap(([minute]) => [{
+          minute,
+          days: targetDays,
+        }]),
+      }));
+    const popularDays = targetDays ? [targetDays] : [[1, 2, 3, 4, 5, 6, 7]];
+    return { popularDays, exceptionDates, rows };
+  };
+
+  const daySets = [...allDaySets.values()];
+  if (daySets.length === 0) return [buildTimetable(null)];
+  return daySets.map((days) => buildTimetable(days));
 }
 
 export function getVariantTableRows(

@@ -1899,55 +1899,57 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     timetableDetails.addEventListener("toggle", () => {
       if (!timetableDetails.open || timetableLoaded) return;
       timetableLoaded = true;
-      const timetable = getVariantTimetable(activeFeed, variant);
-      if (timetable.rows.length === 0) {
+      const timetables = getVariantTimetable(activeFeed, variant);
+      if (timetables.every((timetable) => timetable.rows.length === 0)) {
         const message = document.createElement("p");
         message.textContent = "No timetable times found for this variant.";
         timetableDetails.append(message);
         return;
       }
-      const table = document.createElement("div");
-      table.className = "timetable";
-      table.style.setProperty("--timetable-columns", String(Math.max(timetable.popularDays.length, 1)));
-      const headings = document.createElement("div");
-      headings.className = "timetable-headings";
-      headings.append(document.createElement("span"));
-      for (const days of timetable.popularDays) {
-        const heading = document.createElement("span");
-        heading.className = "timetable-popular-days";
-        if (timetable.popularDays.length === 2) heading.classList.add("timetable-day-column");
-        heading.textContent = formatTimetableDayRange(days);
-        headings.append(heading);
-      }
-      table.append(headings);
-      for (const row of timetable.rows) {
-        const line = document.createElement("div");
-        line.className = "timetable-row";
-        const hour = document.createElement("span");
-        hour.className = "timetable-hour";
-        hour.textContent = `${String(row.hour)} `;
-        line.append(hour);
-        for (const popularDays of timetable.popularDays) {
-          const column = document.createElement("span");
-          column.className = "timetable-column";
-          if (timetable.popularDays.length === 2) column.classList.add("timetable-day-column");
-          for (const departure of row.departures) {
-            if (departure.days && !departure.days.some((days) => days.some((day) => popularDays.includes(day)))) continue;
-            const minute = document.createElement("span");
-            minute.className = "timetable-minute";
-            minute.textContent = String(departure.minute).padStart(2, "0");
-            column.append(minute, " ");
-          }
-          line.append(column);
+      for (const timetable of timetables) {
+        const table = document.createElement("div");
+        table.className = "timetable";
+        table.style.setProperty("--timetable-columns", String(Math.max(timetable.popularDays.length, 1)));
+        const headings = document.createElement("div");
+        headings.className = "timetable-headings";
+        headings.append(document.createElement("span"));
+        for (const days of timetable.popularDays) {
+          const heading = document.createElement("span");
+          heading.className = "timetable-popular-days";
+          if (timetable.popularDays.length === 2) heading.classList.add("timetable-day-column");
+          heading.textContent = formatTimetableDayRange(days);
+          headings.append(heading);
         }
-        table.append(line);
+        table.append(headings);
+        for (const row of timetable.rows) {
+          const line = document.createElement("div");
+          line.className = "timetable-row";
+          const hour = document.createElement("span");
+          hour.className = "timetable-hour";
+          hour.textContent = `${String(row.hour)} `;
+          line.append(hour);
+          for (const popularDays of timetable.popularDays) {
+            const column = document.createElement("span");
+            column.className = "timetable-column";
+            if (timetable.popularDays.length === 2) column.classList.add("timetable-day-column");
+            for (const departure of row.departures) {
+              if (departure.days && !departure.days.some((day) => popularDays.includes(day))) continue;
+              const minute = document.createElement("span");
+              minute.className = "timetable-minute";
+              minute.textContent = String(departure.minute).padStart(2, "0");
+              column.append(minute, " ");
+            }
+            line.append(column);
+          }
+          table.append(line);
+        }
+        timetableDetails.append(table);
       }
-      timetableDetails.append(table);
-      if (timetable.exceptionDates.length > 0) {
+      if (timetables[0]?.exceptionDates.length) {
         const exceptions = document.createElement("p");
         exceptions.className = "timetable-exception-dates";
         exceptions.append("Exceptions: ");
-        for (const [index, date] of timetable.exceptionDates.entries()) {
+        for (const [index, date] of timetables[0].exceptionDates.entries()) {
           if (index) exceptions.append(", ");
           const iso = gtfsDateToIso(date);
           const button = document.createElement("button");

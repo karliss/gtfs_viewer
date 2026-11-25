@@ -520,8 +520,8 @@ test("preserves valid single-trip calendar masks", () => {
         + `service,${monday},${tuesday},${wednesday},${thursday},${friday},${saturday},${sunday},20260101,20261231\n`,
     }));
     const variant = getRouteVariants(feed, "r").variants[0];
-    const timetable = getVariantTimetable(feed, variant);
-    assert.deepEqual(timetable.popularDays, [expected]);
+    const timetables = getVariantTimetable(feed, variant);
+    assert.deepEqual(timetables[0].popularDays, [expected]);
   }
 });
 
@@ -533,9 +533,9 @@ test("trims calendar IDs and values for single-trip timetables", () => {
       + "weekday-service, 1 ,1,1,1,1,0,0,20260101,20261231\n",
   }));
   const variant = getRouteVariants(feed, "r").variants[0];
-  const timetable = getVariantTimetable(feed, variant);
-  assert.deepEqual(timetable.popularDays, [[1, 2, 3, 4, 5]]);
-  assert.equal(formatTimetableDayRange(timetable.popularDays[0]), "1-5");
+  const timetables = getVariantTimetable(feed, variant);
+  assert.deepEqual(timetables[0].popularDays, [[1, 2, 3, 4, 5]]);
+  assert.equal(formatTimetableDayRange(timetables[0].popularDays[0]), "1-5");
 });
 
 test("groups trips by shape, headsign, short name and ordered stops", () => {
@@ -749,9 +749,9 @@ test("supports multiple calendar rows for one service ID", () => {
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-06-02"), true);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-06"), false);
   const variant = getRouteVariants(feed, "r").variants[0];
-  const timetable = getVariantTimetable(feed, variant);
-  assert.deepEqual(timetable.popularDays, [[1], [2]]);
-  assert.deepEqual(timetable.rows[0].departures[0].days, [[1], [2]]);
+  const timetables = getVariantTimetable(feed, variant);
+  assert.deepEqual(timetables.map((timetable) => timetable.popularDays), [[[1]], [[2]]]);
+  assert.deepEqual(timetables.map((timetable) => timetable.rows[0].departures[0].days), [[1], [2]]);
 });
 
 test("calculates legacy fares from a selected stop to following stops", () => {
