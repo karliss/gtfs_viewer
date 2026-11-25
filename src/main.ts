@@ -1,5 +1,5 @@
 import {
-  decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
+  decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, summarizeTripField,
   getVariantTimetable, formatTimetableDayRange, getDateSchedule, getTripFares, isServiceActiveOnDate,
   gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
@@ -734,25 +734,20 @@ function appendTripFieldSummary(
   trips: readonly GtfsRow<"trips.txt">[],
   field: "wheelchair_accessible" | "bikes_allowed",
 ): void {
-  if (!trips.length) {
+  const summary = summarizeTripField(trips, field);
+  if (!summary.length) {
     description.textContent = "No trips available";
     return;
   }
-  const counts = new Map<number | null, number>();
-  for (const trip of trips) {
-    const value = trip.fields[field];
-    counts.set(value, (counts.get(value) ?? 0) + 1);
-  }
-  for (const [index, [value, count]] of [...counts].entries()) {
+  for (const [index, item] of summary.entries()) {
     if (index > 0) description.append(", ");
     const icon = field === "wheelchair_accessible"
-      ? wheelchairIcon(value)
-      : bikesIcon(value);
+      ? wheelchairIcon(item.value)
+      : bikesIcon(item.value);
     if (icon) description.append(icon, " ");
-    const word = decodeTripFieldValue(value);
-    const rawValue = value === null ? "null" : String(value);
-    const percent = Number((count * 100 / trips.length).toFixed(1));
-    description.append(`${word} (${rawValue}) (${percent}%)`);
+    const word = decodeTripFieldValue(item.value);
+    const rawValue = item.value === null ? "null" : String(item.value);
+    description.append(`${word} (${rawValue}) (${item.percent}%)`);
   }
 }
 

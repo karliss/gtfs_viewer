@@ -125,22 +125,27 @@ export function getReferencedRoute(
   return routes.get(String(value));
 }
 
+export interface TripFieldSummary {
+  value: number | null;
+  count: number;
+  percent: number;
+}
+
 export function summarizeTripField(
   trips: readonly GtfsRow<"trips.txt">[],
   field: "wheelchair_accessible" | "bikes_allowed",
-): string {
-  if (!trips.length) return "No trips available";
+): TripFieldSummary[] {
+  if (!trips.length) return [];
   const counts = new Map<number | null, number>();
   for (const trip of trips) {
     const value = trip.fields[field];
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
-  return [...counts].map(([value, count]) => {
-    const word = decodeTripFieldValue(value);
-    const rawValue = value === null ? "null" : String(value);
-    const percent = Number((count * 100 / trips.length).toFixed(1));
-    return `${word} (${rawValue}) (${percent}%)`;
-  }).join(", ");
+  return [...counts].map(([value, count]) => ({
+    value,
+    count,
+    percent: Number((count * 100 / trips.length).toFixed(1)),
+  }));
 }
 
 export interface RouteVariant {

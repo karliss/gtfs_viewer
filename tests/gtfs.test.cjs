@@ -388,11 +388,23 @@ test("summarizes trip accessibility with missing values left unprovided", () => 
   assert.equal(decodeTripFieldValue(1), "Yes");
   assert.equal(decodeTripFieldValue(2), "No");
   assert.equal(decodeTripFieldValue(3), "Unrecognized");
-  assert.equal(summarizeTripField([], "bikes_allowed"), "No trips available");
-  assert.equal(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), "Yes (1) (100%)");
-  assert.equal(summarizeTripField(table.rows, "wheelchair_accessible"), "Yes (1) (40%), No (2) (20%), Unknown (null) (40%)");
-  assert.equal(summarizeTripField(table.rows, "bikes_allowed"), "No (2) (60%), Unknown (null) (40%)");
-  assert.equal(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), "No (2) (66.7%), Unknown (null) (33.3%)");
+  assert.deepEqual(summarizeTripField([], "bikes_allowed"), []);
+  assert.deepEqual(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), [
+    { value: 1, count: 2, percent: 100 },
+  ]);
+  assert.deepEqual(summarizeTripField(table.rows, "wheelchair_accessible"), [
+    { value: 1, count: 2, percent: 40 },
+    { value: 2, count: 1, percent: 20 },
+    { value: null, count: 2, percent: 40 },
+  ]);
+  assert.deepEqual(summarizeTripField(table.rows, "bikes_allowed"), [
+    { value: 2, count: 3, percent: 60 },
+    { value: null, count: 2, percent: 40 },
+  ]);
+  assert.deepEqual(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), [
+    { value: 2, count: 2, percent: 66.7 },
+    { value: null, count: 1, percent: 33.3 },
+  ]);
 });
 
 test("normalizes numeric fields and preserves missing values as null", () => {
