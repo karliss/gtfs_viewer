@@ -592,8 +592,8 @@ function formatDateWithWeekday(date: string | null): string {
   const iso = gtfsDateToIso(date) || date;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return date;
   const weekday = new Date(`${iso}T12:00:00Z`).getUTCDay();
-  const shortDays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-  return `${iso} (${shortDays[weekday]})`;
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return `${iso} (${dayNames[weekday]})`;
 }
 
 function renderRoutesCell(column: string, value: string | number | null): HTMLTableCellElement {
@@ -1470,7 +1470,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
           const button = document.createElement("button");
           button.type = "button";
           button.className = "schedule-exception-button";
-          button.textContent = formatDateWithWeekday(iso);
+          button.textContent = date;
           button.title = "Open date-specific schedule";
           button.disabled = !iso;
           if (iso) button.addEventListener("click", () => showDateSchedule(route, iso));
