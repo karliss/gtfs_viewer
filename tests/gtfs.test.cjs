@@ -665,6 +665,16 @@ test("includes shape_dist_traveled in the indexed shape points and warns when me
   const result = mergeRouteVariantPair(feed, variants[0], variants[1], collector);
   assert.equal(result.merged, true);
   assert.equal(collector.count("variant_merge"), 1);
+  assert.deepEqual(collector.all[0].parameters, {
+    routeId: "r",
+    field: "shapes",
+    first: "shape-a",
+    second: "shape-b",
+    firstTripId: "t1",
+    firstShapeId: "shape-a",
+    secondTripId: "t2",
+    secondShapeId: "shape-b",
+  });
 });
 
 test("variants contain trips from one route and reject cross-route merges", () => {
@@ -733,6 +743,12 @@ test("merges variants with different short names or shapes and reports warnings"
     "shapes",
     "trip short names",
   ]);
+  for (const warning of routeCollector.all) {
+    assert.equal(warning.parameters.firstTripId, "t1");
+    assert.equal(warning.parameters.firstShapeId, "shape-a");
+    assert.equal(warning.parameters.secondTripId, "t2");
+    assert.equal(warning.parameters.secondShapeId, "shape-b");
+  }
 });
 
 test("attempts variant merging for every route in the feed", () => {

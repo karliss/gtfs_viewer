@@ -63,10 +63,10 @@ export const WARNING_DESCRIPTIONS: Readonly<Record<WarningType, WarningDescripti
   },
   variant_merge: {
     id: "variant_merge",
-    messageTemplate: "Route {routeId}: variants merged despite different {field}",
+    messageTemplate: "Route {routeId}: variants merged despite different {field} (sample trip/shape: {firstTripId}/{firstShapeId} and {secondTripId}/{secondShapeId})",
     severity: "warning",
     scope: "element",
-    parameters: ["routeId", "field", "first", "second"],
+    parameters: ["routeId", "field", "first", "second", "firstTripId", "firstShapeId", "secondTripId", "secondShapeId"],
   },
 };
 

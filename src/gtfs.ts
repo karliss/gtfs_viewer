@@ -634,6 +634,8 @@ function variantMergeWarnings(
 ): GtfsWarning[] {
   const warnings: GtfsWarning[] = [];
   const routeId = first.routeId ?? "";
+  const firstTripId = first.trips[0]?.fields.trip_id ?? null;
+  const secondTripId = second.trips[0]?.fields.trip_id ?? null;
   if (first.tripShortName !== second.tripShortName) {
     warnings.push({
       type: "variant_merge",
@@ -642,8 +644,14 @@ function variantMergeWarnings(
         field: "trip short names",
         first: first.tripShortName,
         second: second.tripShortName,
+        firstTripId,
+        firstShapeId: first.shapeId,
+        secondTripId,
+        secondShapeId: second.shapeId,
       },
-      relatedObjectIds: [routeId].filter(Boolean),
+      relatedObjectIds: [routeId, firstTripId, first.shapeId, secondTripId, second.shapeId].filter(
+        (id): id is string => id !== null,
+      ),
     });
   }
   if (first.shapeId && second.shapeId) {
@@ -660,8 +668,14 @@ function variantMergeWarnings(
           field: "shapes",
           first: first.shapeId,
           second: second.shapeId,
+          firstTripId,
+          firstShapeId: first.shapeId,
+          secondTripId,
+          secondShapeId: second.shapeId,
         },
-        relatedObjectIds: [routeId, first.shapeId, second.shapeId].filter(Boolean),
+        relatedObjectIds: [routeId, firstTripId, first.shapeId, secondTripId, second.shapeId].filter(
+          (id): id is string => id !== null,
+        ),
       });
     }
   }
