@@ -1,7 +1,7 @@
 import {
-  decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, summarizeTripField,
+  decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, formatTimetableDayRange, getDateSchedule, getTripFares, isServiceActiveOnDate,
-  gtfsDateToIso, isoDateToGtfs,
+  gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
@@ -710,35 +710,50 @@ function prependRouteColorHeading(heading: HTMLElement, route: GtfsRow<"routes.t
 }
 
 function wheelchairIcon(value: number | null): HTMLElement | null {
-  if (value === null) return null;
-  if (value === 1) {
-    const icon = document.createElement("span");
-    icon.className = "accessibility-icon";
-    icon.textContent = "♿";
-    icon.title = "Wheelchair accessible";
-    icon.setAttribute("aria-label", "Wheelchair accessible");
-    return icon;
-  }
-  if (value === 2) {
-    const icon = document.createElement("span");
-    icon.className = "accessibility-icon";
-    icon.textContent = "♿";
-    icon.title = "Wheelchair boarding not available";
-    icon.setAttribute("aria-label", "Wheelchair boarding not available");
-    icon.classList.add("not-accessible");
-    return icon;
-  }
-  return null;
+  if (value !== WHEELCHAIR_ACCESSIBLE_VALUES.YES) return null;
+  const icon = document.createElement("span");
+  icon.className = "accessibility-icon";
+  icon.textContent = "♿";
+  icon.title = "Wheelchair accessible";
+  icon.setAttribute("aria-label", icon.title);
+  return icon;
 }
 
 function bikesIcon(value: number | null): HTMLElement | null {
-  if (value !== 1) return null;
+  if (value !== BIKES_ALLOWED_VALUES.YES) return null;
   const icon = document.createElement("span");
   icon.className = "bikes-icon";
   icon.textContent = "🚲";
   icon.title = "Bikes allowed";
-  icon.setAttribute("aria-label", "Bikes allowed");
+  icon.setAttribute("aria-label", icon.title);
   return icon;
+}
+
+function appendTripFieldSummary(
+  description: HTMLElement,
+  trips: readonly GtfsRow<"trips.txt">[],
+  field: "wheelchair_accessible" | "bikes_allowed",
+): void {
+  if (!trips.length) {
+    description.textContent = "No trips available";
+    return;
+  }
+  const counts = new Map<number | null, number>();
+  for (const trip of trips) {
+    const value = trip.fields[field];
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  for (const [index, [value, count]] of [...counts].entries()) {
+    if (index > 0) description.append(", ");
+    const icon = field === "wheelchair_accessible"
+      ? wheelchairIcon(value)
+      : bikesIcon(value);
+    if (icon) description.append(icon, " ");
+    const word = decodeTripFieldValue(value);
+    const rawValue = value === null ? "null" : String(value);
+    const percent = Number((count * 100 / trips.length).toFixed(1));
+    description.append(`${word} (${rawValue}) (${percent}%)`);
+  }
 }
 
 function routeCompactContent(route: GtfsRow<"routes.txt">, variantIndex: number | null): HTMLElement {
@@ -1002,11 +1017,19 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       description.textContent = String(value);
     }
     if (name === "wheelchair_accessible") {
-      const icon = wheelchairIcon(typeof value === "number" ? value : null);
-      if (icon) description.append(" ", icon);
+      const numericValue = typeof value === "number" ? value : null;
+      const word = decodeTripFieldValue(numericValue);
+      const rawValue = numericValue === null ? "null" : String(numericValue);
+      description.textContent = `${word} (${rawValue})`;
+      const icon = wheelchairIcon(numericValue);
+      if (icon) description.prepend(icon, document.createTextNode(" "));
     } else if (name === "bikes_allowed") {
-      const icon = bikesIcon(typeof value === "number" ? value : null);
-      if (icon) description.append(" ", icon);
+      const numericValue = typeof value === "number" ? value : null;
+      const word = decodeTripFieldValue(numericValue);
+      const rawValue = numericValue === null ? "null" : String(numericValue);
+      description.textContent = `${word} (${rawValue})`;
+      const icon = bikesIcon(numericValue);
+      if (icon) description.prepend(icon, document.createTextNode(" "));
     }
     properties.append(term, description);
   }
@@ -1057,21 +1080,6 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
         description.textContent = name === "route_type" ? routeTypeLabel(value) : String(value);
       }
       routeProperties.append(term, description);
-    }
-    if (trip.fields.route_id) {
-      const routeTrips = feed.indexes.tripsByRouteId.get(trip.fields.route_id) ?? [];
-      if (routeTrips.some((candidate) => candidate.fields.wheelchair_accessible === 1)) {
-        const icon = wheelchairIcon(1);
-        if (icon) {
-          icon.title = "At least one trip is wheelchair accessible";
-          icon.setAttribute("aria-label", icon.title);
-          tripRouteProperties.append(icon, document.createTextNode(" "));
-        }
-      }
-      if (routeTrips.some((candidate) => candidate.fields.bikes_allowed === 1)) {
-        const icon = bikesIcon(1);
-        if (icon) tripRouteProperties.append(icon);
-      }
     }
     tripRouteProperties.append(routeProperties);
   }
@@ -1504,15 +1512,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     const term = document.createElement("dt");
     const description = document.createElement("dd");
     term.textContent = field;
-    description.textContent = summarizeTripField(trips, field);
-    if (field === "wheelchair_accessible" && trips.some((trip) => trip.fields.wheelchair_accessible === 1)) {
-      const icon = wheelchairIcon(1);
-      if (icon) description.append(" ", icon);
-    }
-    if (field === "bikes_allowed" && trips.some((trip) => trip.fields.bikes_allowed === 1)) {
-      const icon = bikesIcon(1);
-      if (icon) description.append(" ", icon);
-    }
+    appendTripFieldSummary(description, trips, field);
     list.append(term, description);
   }
   routeProperties.replaceChildren(list);

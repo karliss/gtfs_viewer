@@ -4,6 +4,7 @@ const { strToU8, zipSync } = require("fflate");
 const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, summarizeTripField,
+  decodeTripFieldValue, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES,
 } = require("../dist/gtfs.cjs");
 const {
   WarningCollector, WARNING_DESCRIPTIONS, WARNING_TYPES,
@@ -376,11 +377,22 @@ test("summarizes trip accessibility with missing values left unprovided", () => 
   const [table] = loadGtfs(archive({
     "trips.txt": "trip_id,wheelchair_accessible,bikes_allowed\n1,1,2\n2,1,2\n3,2,\n4,,2\n5\n",
   })).tables;
+  assert.equal(WHEELCHAIR_ACCESSIBLE_VALUES.UNKNOWN, 0);
+  assert.equal(WHEELCHAIR_ACCESSIBLE_VALUES.YES, 1);
+  assert.equal(WHEELCHAIR_ACCESSIBLE_VALUES.NO, 2);
+  assert.equal(BIKES_ALLOWED_VALUES.UNKNOWN, 0);
+  assert.equal(BIKES_ALLOWED_VALUES.YES, 1);
+  assert.equal(BIKES_ALLOWED_VALUES.NO, 2);
+  assert.equal(decodeTripFieldValue(null), "Unknown");
+  assert.equal(decodeTripFieldValue(0), "Unknown");
+  assert.equal(decodeTripFieldValue(1), "Yes");
+  assert.equal(decodeTripFieldValue(2), "No");
+  assert.equal(decodeTripFieldValue(3), "Unrecognized");
   assert.equal(summarizeTripField([], "bikes_allowed"), "No trips available");
-  assert.equal(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), "1");
-  assert.equal(summarizeTripField(table.rows, "wheelchair_accessible"), "1 (40%), 2 (20%), Not provided (40%)");
-  assert.equal(summarizeTripField(table.rows, "bikes_allowed"), "2 (60%), Not provided (40%)");
-  assert.equal(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), "2 (66.7%), Not provided (33.3%)");
+  assert.equal(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), "Yes (1) (100%)");
+  assert.equal(summarizeTripField(table.rows, "wheelchair_accessible"), "Yes (1) (40%), No (2) (20%), Unknown (null) (40%)");
+  assert.equal(summarizeTripField(table.rows, "bikes_allowed"), "No (2) (60%), Unknown (null) (40%)");
+  assert.equal(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), "No (2) (66.7%), Unknown (null) (33.3%)");
 });
 
 test("normalizes numeric fields and preserves missing values as null", () => {

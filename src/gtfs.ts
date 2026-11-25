@@ -7,6 +7,30 @@ import type { GtfsWarning, WarningCollector } from "./warnings";
 
 export type { GtfsFields, GtfsTableName } from "./gtfs-schema";
 
+export const WHEELCHAIR_ACCESSIBLE_VALUES = {
+  UNKNOWN: 0,
+  YES: 1,
+  NO: 2,
+} as const;
+
+export const BIKES_ALLOWED_VALUES = {
+  UNKNOWN: 0,
+  YES: 1,
+  NO: 2,
+} as const;
+
+export function decodeTripFieldValue(
+  value: number | null,
+): "Unknown" | "Yes" | "No" | "Unrecognized" {
+  if (value === null || value === WHEELCHAIR_ACCESSIBLE_VALUES.UNKNOWN
+    || value === BIKES_ALLOWED_VALUES.UNKNOWN) return "Unknown";
+  if (value === WHEELCHAIR_ACCESSIBLE_VALUES.YES
+    || value === BIKES_ALLOWED_VALUES.YES) return "Yes";
+  if (value === WHEELCHAIR_ACCESSIBLE_VALUES.NO
+    || value === BIKES_ALLOWED_VALUES.NO) return "No";
+  return "Unrecognized";
+}
+
 interface RowExtras {
   unrecognizedColumns: Record<string, string | null>;
   extraValues: string[];
@@ -111,10 +135,12 @@ export function summarizeTripField(
     const value = trip.fields[field];
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
-  const label = (value: number | null): string => value === null ? "Not provided" : String(value);
-  return [...counts].map(([value, count]) => counts.size === 1
-    ? label(value)
-    : `${label(value)} (${Number((count * 100 / trips.length).toFixed(1))}%)`).join(", ");
+  return [...counts].map(([value, count]) => {
+    const word = decodeTripFieldValue(value);
+    const rawValue = value === null ? "null" : String(value);
+    const percent = Number((count * 100 / trips.length).toFixed(1));
+    return `${word} (${rawValue}) (${percent}%)`;
+  }).join(", ");
 }
 
 export interface RouteVariant {
