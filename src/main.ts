@@ -1447,27 +1447,35 @@ function appendCalendarExceptions(
   const heading = document.createElement("h4");
   heading.textContent = "Exceptions";
   container.append(heading);
-  if (serviceId) {
-    const tableLink = document.createElement("button");
-    tableLink.type = "button";
-    tableLink.className = "route-link";
-    tableLink.textContent = "calendar_dates.txt";
-    tableLink.addEventListener("click", () => showCalendarDatesTable(serviceId));
-    container.append(tableLink);
-  }
   const list = document.createElement("ul");
   for (const exception of sorted) {
     const item = document.createElement("li");
     const date = gtfsDateToIso(exception.fields.date);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "schedule-exception-button";
     const type = exception.fields.exception_type === 1
       ? "Added"
       : exception.fields.exception_type === 2 ? "Removed" : "Unknown";
-    button.textContent = `${date ? formatDateWithWeekday(date) : exception.fields.date} — ${type}`;
-    if (route && date) button.addEventListener("click", () => showDateSchedule(route, date));
-    item.append(button);
+    const exceptionLink = document.createElement("button");
+    exceptionLink.type = "button";
+    exceptionLink.className = "route-link";
+    exceptionLink.textContent = "Exception";
+    const exceptionServiceId = exception.fields.service_id ?? serviceId;
+    if (exceptionServiceId) {
+      exceptionLink.addEventListener("click", () => showCalendarDatesTable(exceptionServiceId));
+    }
+    item.append(exceptionLink);
+
+    if (date) {
+      const dateLink = document.createElement("button");
+      dateLink.type = "button";
+      dateLink.className = "schedule-exception-button";
+      const weekday = formatDateWithWeekday(date).match(/\(([^)]+)\)$/)?.[1] || "";
+      dateLink.textContent = `${date}${weekday ? ` (${weekday})` : ""} — ${type}`;
+      if (route) dateLink.addEventListener("click", () => showDateSchedule(route, date));
+      item.append(document.createTextNode(" — "), dateLink);
+    } else {
+      item.append(document.createTextNode(` — ${exception.fields.date || "Unknown date"} — ${type}`));
+    }
+
     if (exception.fields.service_id) {
       const serviceLink = document.createElement("button");
       serviceLink.type = "button";
