@@ -134,6 +134,200 @@ export interface VariantTimetable {
   rows: VariantTimetableRow[];
 }
 
+export function gtfsDateToIso(date: string | null): string | null {
+  if (!date || !/^\d{8}$/.test(date)) return null;
+  return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
+}
+
+export function isoDateToGtfs(date: string | null): string | null {
+  if (!date) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  return match ? `${match[1]}${match[2]}${match[3]}` : null;
+}
+
+export function isServiceActiveOnDate(feed: GtfsFeed, serviceId: string | null, date: string): boolean {
+  if (!serviceId) return false;
+  const gtfsDate = isoDateToGtfs(date);
+  if (!gtfsDate) return false;
+  let active: boolean | null = null;
+  const calendar = feed.indexes.calendarByServiceId.get(serviceId);
+  if (calendar) {
+    const start = calendar.fields.start_date;
+    const end = calendar.fields.end_date;
+    if (start && end && gtfsDate >= start && gtfsDate <= end) {
+      const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+      const days = [
+        null,
+        calendar.fields.monday,
+        calendar.fields.tuesday,
+        calendar.fields.wednesday,
+        calendar.fields.thursday,
+        calendar.fields.friday,
+        calendar.fields.saturday,
+        calendar.fields.sunday,
+      ];
+      active = days[weekday === 0 ? 7 : weekday] === 1;
+    } else {
+      active = false;
+    }
+  }
+  for (const exception of feed.indexes.calendarDatesByServiceId.get(serviceId) ?? []) {
+    if (exception.fields.date !== gtfsDate) continue;
+    if (exception.fields.exception_type === 1) active = true;
+    if (exception.fields.exception_type === 2) active = false;
+  }
+  if (active !== null) return active;
+  return (feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [])
+    .some((exception) => exception.fields.date === gtfsDate && exception.fields.exception_type === 1);
+}
+
+export interface DateScheduleDeparture {
+  tripId: string | null;
+  time: string;
+  minute: number;
+  hour: number;
+  headsign: string | null;
+  shortName: string | null;
+}
+
+export interface DateScheduleRow {
+  hour: number;
+  departures: DateScheduleDeparture[];
+}
+
+export interface DateScheduleVariant {
+  variant: RouteVariant;
+  rows: DateScheduleRow[];
+  tripCount: number;
+}
+
+export interface FareResult {
+  destinationStopId: string;
+  fareId: string | null;
+  price: number | null;
+  currency: string | null;
+  productName: string | null;
+  source: "legacy" | "modern";
+}
+
+export function getDateSchedule(feed: GtfsFeed, variant: RouteVariant, date: string): DateScheduleVariant {
+  const grouped = new Map<number, Map<number, DateScheduleDeparture[]>>();
+  let tripCount = 0;
+  const firstStop = variant.stops[0];
+  for (const trip of variant.trips) {
+    if (!isServiceActiveOnDate(feed, trip.fields.service_id, date)) continue;
+    tripCount++;
+    const tripId = trip.fields.trip_id;
+    if (!tripId) continue;
+    for (const stopTime of feed.indexes.stopTimesByTripId.get(tripId) ?? []) {
+      if (firstStop !== null && stopTime.fields.stop_id !== firstStop) continue;
+      const time = stopTime.fields.departure_time || stopTime.fields.arrival_time;
+      const match = time ? /^(\d+):(\d{2})(:\d{2})?$/.exec(time) : null;
+      if (!match) continue;
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
+      const minutes = grouped.get(hour) ?? new Map<number, DateScheduleDeparture[]>();
+      const departures = minutes.get(minute) ?? [];
+      departures.push({
+        tripId,
+        time: match[0],
+        hour,
+        minute,
+        headsign: trip.fields.trip_headsign,
+        shortName: trip.fields.trip_short_name,
+      });
+      minutes.set(minute, departures);
+      grouped.set(hour, minutes);
+    }
+  }
+  const rows = [...grouped.entries()].sort(([a], [b]) => a - b).map(([hour, minutes]) => ({
+    hour,
+    departures: [...minutes.entries()].sort(([a], [b]) => a - b)
+      .flatMap(([, departures]) => departures),
+  }));
+  return { variant, rows, tripCount };
+}
+
+export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
+  originStopId: string, destinationStopIds: readonly (string | null)[]): FareResult[] {
+  const routeId = trip.fields.route_id;
+  const fareAttributes = feed.tables.find((table) => table.kind === "fare_attributes.txt");
+  const fareRules = feed.tables.find((table) => table.kind === "fare_rules.txt");
+  const results: FareResult[] = [];
+
+  const legacyFareFor = (destinationStopId: string): FareResult | null => {
+    if (!fareAttributes || fareAttributes.kind !== "fare_attributes.txt") return null;
+    if (!fareRules || fareRules.kind !== "fare_rules.txt") return null;
+    const origin = feed.indexes.stopsById.get(originStopId);
+    const destination = feed.indexes.stopsById.get(destinationStopId);
+    const originZone = origin?.fields.zone_id;
+    const destinationZone = destination?.fields.zone_id;
+    for (const rule of fareRules.rows) {
+      if (rule.fields.route_id && routeId && rule.fields.route_id !== routeId) continue;
+      if (rule.fields.origin_id && originZone && rule.fields.origin_id !== originZone) continue;
+      if (rule.fields.destination_id && destinationZone && rule.fields.destination_id !== destinationZone) continue;
+      if (rule.fields.contains_id && originZone !== rule.fields.contains_id &&
+        destinationZone !== rule.fields.contains_id) continue;
+      if (rule.fields.fare_id) {
+        const attribute = fareAttributes.rows.find((row) => row.fields.fare_id === rule.fields.fare_id);
+        if (attribute) return {
+          destinationStopId,
+          fareId: rule.fields.fare_id,
+          price: attribute.fields.price,
+          currency: attribute.fields.currency_type,
+          productName: null,
+          source: "legacy",
+        };
+      }
+    }
+    return null;
+  };
+
+  const stopAreas = feed.tables.find((table) => table.kind === "stop_areas.txt");
+  const legRules = feed.tables.find((table) => table.kind === "fare_leg_rules.txt");
+  const fareProducts = feed.tables.find((table) => table.kind === "fare_products.txt");
+  const routeNetworks = feed.tables.find((table) => table.kind === "route_networks.txt");
+  for (const destinationStopId of destinationStopIds) {
+    if (!destinationStopId) continue;
+    let modern: FareResult | null = null;
+    if (stopAreas?.kind === "stop_areas.txt" && legRules?.kind === "fare_leg_rules.txt"
+      && fareProducts?.kind === "fare_products.txt") {
+      const originAreas = stopAreas.rows.filter((row) => row.fields.stop_id === originStopId)
+        .map((row) => row.fields.area_id).filter((id): id is string => id !== null);
+      const destinationAreas = stopAreas.rows.filter((row) => row.fields.stop_id === destinationStopId)
+        .map((row) => row.fields.area_id).filter((id): id is string => id !== null);
+      const networks = routeNetworks?.kind === "route_networks.txt"
+        ? routeNetworks.rows.filter((row) => row.fields.route_id === routeId)
+          .map((row) => row.fields.network_id).filter((id): id is string => id !== null)
+        : [];
+      for (const rule of legRules.rows) {
+        if (rule.fields.from_area_id && !originAreas.includes(rule.fields.from_area_id)) continue;
+        if (rule.fields.to_area_id && !destinationAreas.includes(rule.fields.to_area_id)) continue;
+        if (rule.fields.network_id && networks.length > 0 && !networks.includes(rule.fields.network_id)) continue;
+        if (!rule.fields.fare_product_id) continue;
+        const product = fareProducts.rows.find((row) => row.fields.fare_product_id === rule.fields.fare_product_id);
+        if (product) {
+          modern = {
+            destinationStopId,
+            fareId: rule.fields.fare_product_id,
+            price: product.fields.amount,
+            currency: product.fields.currency,
+            productName: product.fields.fare_product_name,
+            source: "modern",
+          };
+          break;
+        }
+      }
+    }
+    results.push(modern ?? legacyFareFor(destinationStopId) ?? {
+      destinationStopId, fareId: null, price: null, currency: null, productName: null,
+      source: "legacy",
+    });
+  }
+  return results;
+}
+
 export function formatTimetableDayRange(days: readonly number[]): string {
   if (days.length === 0) return "1-7";
   const sorted = [...new Set(days)].filter((day) => day >= 1 && day <= 7).sort((a, b) => a - b);

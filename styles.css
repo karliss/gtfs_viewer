@@ -369,6 +369,53 @@ input[type="file"] {
   margin-right: 1rem;
 }
 
+#trip-detail details,
+#trip-detail section,
+#date-schedule {
+  margin-top: 1rem;
+}
+
+#trip-route-details summary,
+#trip-detail section h3,
+#date-schedule h3 {
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#trip-stop-list {
+  padding-left: 1.5rem;
+}
+
+.trip-stop-button {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.trip-stop-button[aria-selected="true"] {
+  background: #eaf1fb;
+  outline: 1px solid #9bb7dd;
+}
+
+#trip-fares table,
+#schedule-variants table {
+  margin-top: 0.75rem;
+}
+
+.schedule-exception-button,
+.schedule-date-button {
+  margin-left: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #1554a0;
+  text-decoration: underline;
+}
+
 #back-to-route,
 #clear-filter {
   margin-top: 0.75rem;

@@ -2,6 +2,8 @@ export type ViewState =
   | { type: "table"; table: string; itemIndex: number; search: string; filter?: string; filterKind?: string }
   | { type: "route"; routeId: string }
   | { type: "stop"; stopId: string }
+  | { type: "trip"; tripId: string }
+  | { type: "date-schedule"; routeId: string; date: string }
   | { type: "warnings"; itemIndex: number }
   | { type: "map"; mode: "stops" | "routes" | "route"; routeId?: string; variantIndex?: number | "all" };
 

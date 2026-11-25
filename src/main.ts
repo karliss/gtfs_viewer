@@ -1,6 +1,7 @@
 import {
   decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, summarizeTripField,
-  getVariantTimetable, formatTimetableDayRange,
+  getVariantTimetable, formatTimetableDayRange, getDateSchedule, getTripFares, isServiceActiveOnDate,
+  gtfsDateToIso, isoDateToGtfs,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
@@ -101,6 +102,7 @@ app.innerHTML = `
       <div id="route-properties"></div>
       <p id="route-summary"></p>
       <button id="route-trips" type="button">View route trips</button>
+      <button id="route-date-schedule" type="button">Open date-specific schedule</button>
       <button id="route-map" type="button">🗺️ View route on map</button>
       <h3>Shapes and route variants</h3>
       <div id="route-variants"></div>
@@ -151,6 +153,38 @@ app.innerHTML = `
     <section id="stop-detail" class="panel viewer" aria-labelledby="stop-heading" hidden>
       <h2 id="stop-heading" tabindex="-1">Stop details</h2>
       <div id="stop-properties"></div>
+    </section>
+    <section id="trip-detail" class="panel viewer" aria-labelledby="trip-heading" hidden>
+      <h2 id="trip-heading" tabindex="-1">Trip details</h2>
+      <div id="trip-properties"></div>
+      <details id="trip-route-details">
+        <summary id="trip-route-summary">Route</summary>
+        <div id="trip-route-properties"></div>
+      </details>
+      <section>
+        <h3>Service calendar</h3>
+        <div id="trip-calendar"></div>
+        <div id="trip-exceptions"></div>
+      </section>
+      <section>
+        <h3>Frequencies</h3>
+        <div id="trip-frequencies"></div>
+      </section>
+      <section>
+        <h3>Stops and times</h3>
+        <p id="trip-stop-help">Select a stop to calculate fares to every following stop.</p>
+        <ol id="trip-stop-list"></ol>
+        <div id="trip-fares"></div>
+      </section>
+    </section>
+    <section id="date-schedule" class="panel viewer" aria-labelledby="date-schedule-heading" hidden>
+      <h2 id="date-schedule-heading" tabindex="-1">Date-specific schedule</h2>
+      <div class="form-controls">
+        <label for="schedule-date">Date</label>
+        <input id="schedule-date" type="date" />
+      </div>
+      <p id="schedule-summary"></p>
+      <div id="schedule-variants"></div>
     </section>
     <section id="map-panel" class="panel viewer" aria-labelledby="map-heading" hidden>
       <h2 id="map-heading" tabindex="-1">Map</h2>
@@ -263,6 +297,23 @@ const routeMapButton = element<HTMLButtonElement>("#route-map");
 const stopDetail = element<HTMLElement>("#stop-detail");
 const stopHeading = element<HTMLHeadingElement>("#stop-heading");
 const stopProperties = element<HTMLElement>("#stop-properties");
+const tripDetail = element<HTMLElement>("#trip-detail");
+const tripHeading = element<HTMLHeadingElement>("#trip-heading");
+const tripProperties = element<HTMLElement>("#trip-properties");
+const tripRouteDetails = element<HTMLDetailsElement>("#trip-route-details");
+const tripRouteSummary = element<HTMLElement>("#trip-route-summary");
+const tripRouteProperties = element<HTMLElement>("#trip-route-properties");
+const tripCalendar = element<HTMLElement>("#trip-calendar");
+const tripExceptions = element<HTMLElement>("#trip-exceptions");
+const tripFrequencies = element<HTMLElement>("#trip-frequencies");
+const tripStopList = element<HTMLOListElement>("#trip-stop-list");
+const tripFares = element<HTMLElement>("#trip-fares");
+const dateSchedule = element<HTMLElement>("#date-schedule");
+const dateScheduleHeading = element<HTMLHeadingElement>("#date-schedule-heading");
+const scheduleDate = element<HTMLInputElement>("#schedule-date");
+const scheduleSummary = element<HTMLParagraphElement>("#schedule-summary");
+const scheduleVariants = element<HTMLElement>("#schedule-variants");
+const routeDateSchedule = element<HTMLButtonElement>("#route-date-schedule");
 const mapPanel = element<HTMLElement>("#map-panel");
 const mapHeading = element<HTMLHeadingElement>("#map-heading");
 const mapCanvas = element<HTMLElement>("#map-canvas");
@@ -311,6 +362,8 @@ let routesById = new Map<string, GtfsRow<"routes.txt">>();
 let agenciesById = new Map<string, GtfsRow<"agency.txt">>();
 let filteredTable: GtfsTable | undefined;
 let currentRoute: GtfsRow<"routes.txt"> | undefined;
+let currentTrip: GtfsRow<"trips.txt"> | undefined;
+let currentScheduleRoute: GtfsRow<"routes.txt"> | undefined;
 let stopsById = new Map<string, GtfsRow<"stops.txt">>();
 let routesByStop = new Map<string, string[]>();
 let mapView: MapView | undefined;
@@ -359,6 +412,16 @@ function captureViewState(): ViewState {
   if (routeDetail && !routeDetail.hidden && currentRoute) {
     return { type: "route", routeId: currentRoute.fields.route_id ?? "" };
   }
+  if (tripDetail && !tripDetail.hidden && currentTrip?.fields.trip_id) {
+    return { type: "trip", tripId: currentTrip.fields.trip_id };
+  }
+  if (dateSchedule && !dateSchedule.hidden && currentScheduleRoute) {
+    return {
+      type: "date-schedule",
+      routeId: currentScheduleRoute.fields.route_id ?? "",
+      date: scheduleDate.value,
+    };
+  }
   if (stopDetail && !stopDetail.hidden) {
     const stopId = [...stopsById.entries()].find(([, stop]) =>
       `Stop details: ${stop.fields.stop_name || stop.fields.stop_id || "Stop"}` === stopHeading.textContent
@@ -392,6 +455,8 @@ function stateLabel(state: ViewState): string {
   if (state.type === "table") return state.filter ? `Table: ${state.filter}` : `Table: ${state.table || "feed"}`;
   if (state.type === "route") return `Route: ${routesById.get(state.routeId)?.fields.route_long_name || routesById.get(state.routeId)?.fields.route_short_name || state.routeId || "details"}`;
   if (state.type === "stop") return `Stop: ${stopsById.get(state.stopId)?.fields.stop_name || state.stopId || "details"}`;
+  if (state.type === "trip") return `Trip: ${feed?.indexes.tripsById.get(state.tripId)?.fields.trip_headsign || state.tripId}`;
+  if (state.type === "date-schedule") return `Schedule: ${routesById.get(state.routeId)?.fields.route_short_name || state.routeId} · ${state.date}`;
   if (state.type === "map") return state.mode === "stops" ? "Map: stops" : state.mode === "routes" ? "Map: routes" : "Map: route";
   return "Table";
 }
@@ -438,6 +503,8 @@ function restoreTableState(state: Extract<ViewState, { type: "table" }>): void {
   }
   routeDetail.hidden = true;
   stopDetail.hidden = true;
+  tripDetail.hidden = true;
+  dateSchedule.hidden = true;
   mapView?.remove();
   mapView = undefined;
   mapPanel.hidden = true;
@@ -462,6 +529,14 @@ function restoreViewState(state: ViewState): void {
     } else if (state.type === "stop") {
       const stop = stopsById.get(state.stopId);
       if (stop) showStop(stop);
+      else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
+    } else if (state.type === "trip") {
+      const trip = feed?.indexes.tripsById.get(state.tripId);
+      if (trip) showTrip(trip);
+      else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
+    } else if (state.type === "date-schedule") {
+      const route = routesById.get(state.routeId);
+      if (route) showDateSchedule(route, state.date);
       else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
     } else if (state.type === "map") {
       if (state.mode === "stops") showStopsMap();
@@ -741,6 +816,8 @@ function showStop(stop: GtfsRow<"stops.txt">): void {
   viewer.hidden = true;
   mapPanel.hidden = true;
   routeDetail.hidden = true;
+  tripDetail.hidden = true;
+  dateSchedule.hidden = true;
   warningsView.hidden = true;
   stopDetail.hidden = false;
   stopHeading.focus();
@@ -768,6 +845,352 @@ const tableCellRenderers: Record<string, CellRenderer> = {
   "stops.txt": (column, value) => column === "stop_url"
     ? renderUrlCell(column, value) : renderGenericCell(column, value),
 };
+
+function showTrip(trip: GtfsRow<"trips.txt">): void {
+  if (!feed) return;
+  currentTrip = trip;
+  const tripId = trip.fields.trip_id || "Trip";
+  tripHeading.textContent = `Trip details: ${trip.fields.trip_headsign || trip.fields.trip_short_name || tripId}`;
+
+  const properties = document.createElement("dl");
+  properties.className = "route-properties";
+  for (const [name, value] of [...Object.entries(trip.fields), ...Object.entries(trip.unrecognizedColumns)]) {
+    const term = document.createElement("dt");
+    term.textContent = name;
+    const description = document.createElement("dd");
+    if (value === null || value === "") {
+      description.textContent = value === null ? "Not provided" : "(empty)";
+      description.className = "not-provided";
+    } else if (name === "route_id") {
+      const route = routesById.get(String(value));
+      description.append(route ? routeStopRouteButton(route) : document.createTextNode(String(value)));
+    } else if (name === "service_id") {
+      description.textContent = String(value);
+    } else {
+      description.textContent = String(value);
+    }
+    properties.append(term, description);
+  }
+  if (trip.extraValues.length) {
+    const term = document.createElement("dt");
+    term.textContent = "Extra values";
+    const description = document.createElement("dd");
+    description.textContent = JSON.stringify(trip.extraValues);
+    properties.append(term, description);
+  }
+  tripProperties.replaceChildren(properties);
+
+  const route = trip.fields.route_id ? routesById.get(trip.fields.route_id) : undefined;
+  tripRouteDetails.open = false;
+  tripRouteSummary.replaceChildren();
+  tripRouteProperties.replaceChildren();
+  if (route) {
+    const label = `${route.fields.route_id || "Route"} — ${route.fields.route_short_name || route.fields.route_long_name || ""}`.replace(/ — $/, "");
+    tripRouteSummary.textContent = `Route: ${label}`;
+    tripRouteSummary.prepend(routeStopRouteButton(route), document.createTextNode(" "));
+  } else {
+    tripRouteSummary.textContent = "Route";
+  }
+  if (route) {
+    const routeProperties = document.createElement("dl");
+    routeProperties.className = "route-properties";
+    for (const [name, value] of Object.entries(route.fields)) {
+      const term = document.createElement("dt");
+      term.textContent = name;
+      const description = document.createElement("dd");
+      if (value === null || value === "") {
+        description.textContent = value === null ? "Not provided" : "(empty)";
+        description.className = "not-provided";
+      } else if (name === "route_url") {
+        description.append(renderLink(value, String(value)));
+      } else {
+        description.textContent = name === "route_type" ? routeTypeLabel(value) : String(value);
+      }
+      routeProperties.append(term, description);
+    }
+    tripRouteProperties.append(routeProperties);
+  }
+
+  const serviceId = trip.fields.service_id;
+  tripCalendar.replaceChildren();
+  tripExceptions.replaceChildren();
+  if (serviceId) {
+    const calendar = feed.indexes.calendarByServiceId.get(serviceId);
+    const calendarList = document.createElement("dl");
+    calendarList.className = "route-properties";
+    if (calendar) {
+      const dayNames = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+      for (const [name, value] of [
+        ...dayNames.map((day) => [day, calendar.fields[day as keyof typeof calendar.fields]] as const),
+        ["start_date", calendar.fields.start_date],
+        ["end_date", calendar.fields.end_date],
+      ]) {
+        const term = document.createElement("dt");
+        term.textContent = name;
+        const description = document.createElement("dd");
+        description.textContent = name === "start_date" || name === "end_date"
+          ? gtfsDateToIso(String(value)) || String(value ?? "Not provided")
+          : value === 1 ? "Yes" : value === 0 ? "No" : "Not provided";
+        calendarList.append(term, description);
+      }
+    } else {
+      const term = document.createElement("dt");
+      term.textContent = "calendar.txt";
+      const description = document.createElement("dd");
+      description.textContent = "No calendar row";
+      calendarList.append(term, description);
+    }
+    tripCalendar.append(calendarList);
+
+    const exceptions = feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [];
+    if (exceptions.length) {
+      const heading = document.createElement("h4");
+      heading.textContent = "Exceptions";
+      const list = document.createElement("ul");
+      for (const exception of exceptions) {
+        const item = document.createElement("li");
+        const date = gtfsDateToIso(exception.fields.date);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "schedule-exception-button";
+        button.textContent = `${date || exception.fields.date} — ${exception.fields.exception_type === 1 ? "Added" : exception.fields.exception_type === 2 ? "Removed" : "Unknown"}`;
+        if (route && date) button.addEventListener("click", () => showDateSchedule(route, date));
+        item.append(button);
+        list.append(item);
+      }
+      tripExceptions.append(heading, list);
+    }
+  } else {
+    tripCalendar.textContent = "No service_id provided";
+  }
+
+  const frequencies = feed.tables.find((table) => table.kind === "frequencies.txt");
+  tripFrequencies.replaceChildren();
+  const rows = tripId === "Trip" ? [] : frequencies?.kind === "frequencies.txt"
+    ? frequencies.rows.filter((row) => row.fields.trip_id === trip.fields.trip_id) : [];
+  if (rows.length) {
+    const table = document.createElement("table");
+    const head = document.createElement("tr");
+    for (const name of ["start_time", "end_time", "headway_secs", "exact_times"]) {
+      const th = document.createElement("th");
+      th.scope = "col";
+      th.textContent = name;
+      head.append(th);
+    }
+    table.append(head);
+    for (const row of rows) {
+      const tr = document.createElement("tr");
+      for (const name of ["start_time", "end_time", "headway_secs", "exact_times"] as const) {
+        const td = document.createElement("td");
+        td.textContent = row.fields[name] === null ? "" : String(row.fields[name]);
+        tr.append(td);
+      }
+      table.append(tr);
+    }
+    tripFrequencies.append(table);
+  } else {
+    tripFrequencies.textContent = "No frequency rows";
+  }
+
+  const stopRows = trip.fields.trip_id
+    ? [...(feed.indexes.stopTimesByTripId.get(trip.fields.trip_id) ?? [])].sort((left, right) =>
+      (left.fields.stop_sequence ?? Infinity) - (right.fields.stop_sequence ?? Infinity))
+    : [];
+  tripStopList.replaceChildren();
+  tripFares.replaceChildren();
+  for (const [index, stopTime] of stopRows.entries()) {
+    const stopId = stopTime.fields.stop_id;
+    const stop = stopId ? stopsById.get(stopId) : undefined;
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "trip-stop-button";
+    button.dataset.stopIndex = String(index);
+    const stopName = stop?.fields.stop_name || stopId || "Location";
+    const time = stopTime.fields.departure_time || stopTime.fields.arrival_time || "";
+    button.append(
+      document.createTextNode(`${stopName}${stopId ? ` (${stopId})` : ""}`),
+      document.createTextNode(time),
+    );
+    button.setAttribute("aria-selected", "false");
+    button.addEventListener("click", () => selectTripStop(trip, stopRows, index, button));
+    item.append(button);
+    tripStopList.append(item);
+  }
+  if (!stopRows.length) tripStopList.append(document.createTextNode("No stop times"));
+
+  viewer.hidden = true;
+  routeDetail.hidden = true;
+  stopDetail.hidden = true;
+  dateSchedule.hidden = true;
+  warningsView.hidden = true;
+  mapPanel.hidden = true;
+  tripDetail.hidden = false;
+  tripHeading.focus();
+  pushViewState();
+}
+
+function routeStopRouteButton(route: GtfsRow<"routes.txt">): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "route-link";
+  button.textContent = `${route.fields.route_id || ""}${route.fields.route_short_name || route.fields.route_long_name
+    ? ` (${route.fields.route_short_name || route.fields.route_long_name})` : ""}`.replace(/^\s*\(\)/, "");
+  button.addEventListener("click", () => showRoute(route));
+  return button;
+}
+
+function selectTripStop(
+  trip: GtfsRow<"trips.txt">,
+  stopRows: GtfsRow<"stop_times.txt">[],
+  selectedIndex: number,
+  selectedButton: HTMLButtonElement,
+): void {
+  if (!feed) return;
+  tripStopList.querySelectorAll<HTMLButtonElement>(".trip-stop-button")
+    .forEach((button) => button.setAttribute("aria-selected", String(button === selectedButton)));
+  const originId = stopRows[selectedIndex]?.fields.stop_id;
+  if (!originId) {
+    tripFares.textContent = "This stop has no stop_id, so fares cannot be calculated.";
+    return;
+  }
+  const destinations = stopRows.slice(selectedIndex + 1).map((row) => row.fields.stop_id);
+  const fares = getTripFares(feed, trip, originId, destinations);
+  if (!fares.length) {
+    tripFares.textContent = "No following stops.";
+    return;
+  }
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  for (const name of ["Destination", "Fare", "Price", "Currency", "Source"]) {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = name;
+    head.append(th);
+  }
+  table.append(head);
+  for (const fare of fares) {
+    const stop = stopsById.get(fare.destinationStopId);
+    const tr = document.createElement("tr");
+    const destination = document.createElement("td");
+    if (stop) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "route-link";
+      button.textContent = stop.fields.stop_name
+        ? `${stop.fields.stop_name} (${fare.destinationStopId})` : fare.destinationStopId;
+      button.addEventListener("click", () => showStop(stop));
+      destination.append(button);
+    } else destination.textContent = fare.destinationStopId;
+    const fareName = document.createElement("td");
+    fareName.textContent = fare.productName || fare.fareId || "No fare found";
+    const price = document.createElement("td");
+    price.textContent = fare.price === null ? "" : String(fare.price);
+    const currency = document.createElement("td");
+    currency.textContent = fare.currency || "";
+    const source = document.createElement("td");
+    source.textContent = fare.fareId ? fare.source : "";
+    tr.append(destination, fareName, price, currency, source);
+    table.append(tr);
+  }
+  tripFares.replaceChildren(table);
+}
+
+function showDateSchedule(route: GtfsRow<"routes.txt">, date: string): void {
+  if (!feed) return;
+  currentScheduleRoute = route;
+  let isoDate = gtfsDateToIso(date) || (/^\d{4}-\d{2}-\d{2}$/.test(date) ? date : "");
+  if (!isoDate) {
+    const calendar = [...feed.indexes.calendarByServiceId.values()][0];
+    isoDate = gtfsDateToIso(calendar?.fields.start_date ?? null)
+      || gtfsDateToIso(feed.tables.find((table) => table.kind === "feed_info.txt")?.kind === "feed_info.txt"
+        ? (feed.tables.find((table) => table.kind === "feed_info.txt") as GtfsTable & { kind: "feed_info.txt" }).rows[0]?.fields.feed_start_date
+        : null)
+      || "";
+  }
+  scheduleDate.value = isoDate;
+  const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
+  dateScheduleHeading.textContent = `Date-specific schedule: ${title || "Route"}`;
+  renderDateSchedule();
+  viewer.hidden = true;
+  routeDetail.hidden = true;
+  stopDetail.hidden = true;
+  tripDetail.hidden = true;
+  warningsView.hidden = true;
+  mapPanel.hidden = true;
+  dateSchedule.hidden = false;
+  dateScheduleHeading.focus();
+  pushViewState();
+}
+
+function renderDateSchedule(): void {
+  if (!feed || !currentScheduleRoute) return;
+  const routeId = currentScheduleRoute.fields.route_id;
+  if (!routeId) {
+    scheduleSummary.textContent = "This route has no route_id.";
+    scheduleVariants.replaceChildren();
+    return;
+  }
+  const date = scheduleDate.value;
+  const gtfsDate = isoDateToGtfs(date);
+  const { variants } = getRouteVariants(feed, routeId);
+  scheduleVariants.replaceChildren();
+  let scheduledTripCount = 0;
+  for (const variant of variants) {
+    const schedule = getDateSchedule(feed, variant, date);
+    scheduledTripCount += schedule.tripCount;
+    const section = document.createElement("section");
+    const heading = document.createElement("h3");
+    const firstStop = variant.stops[0];
+    const lastStop = variant.stops.length > 1 ? variant.stops[variant.stops.length - 1] : null;
+    const names = (id: string | null) => id ? stopsById.get(id)?.fields.stop_name || id : "";
+    heading.textContent = [variant.tripHeadsign, variant.tripShortName,
+      [names(firstStop), names(lastStop)].filter(Boolean).join(" → ")].filter(Boolean).join(" · ")
+      || "Variant";
+    section.append(heading);
+    if (!schedule.rows.length) {
+      const message = document.createElement("p");
+      message.textContent = "No departures run for this route variant on the selected date.";
+      section.append(message);
+    } else {
+      const table = document.createElement("div");
+      table.className = "timetable";
+      table.style.setProperty("--timetable-columns", "1");
+      for (const row of schedule.rows) {
+        const line = document.createElement("div");
+        line.className = "timetable-row";
+        const hour = document.createElement("span");
+        hour.className = "timetable-hour";
+        hour.textContent = `${row.hour} `;
+        line.append(hour);
+        const column = document.createElement("span");
+        column.className = "timetable-column";
+        for (const departure of row.departures) {
+          const minute = document.createElement("button");
+          minute.type = "button";
+          minute.className = "schedule-date-button";
+          minute.textContent = String(departure.minute).padStart(2, "0");
+          minute.title = departure.headsign || departure.shortName || departure.tripId || "Open trip";
+          if (departure.tripId) {
+            const trip = feed.indexes.tripsById.get(departure.tripId);
+            if (trip) minute.addEventListener("click", () => showTrip(trip));
+          }
+          column.append(minute, " ");
+        }
+        line.append(column);
+        table.append(line);
+      }
+      section.append(table);
+    }
+    scheduleVariants.append(section);
+  }
+  scheduleSummary.textContent = gtfsDate
+    ? `${scheduledTripCount} scheduled ${scheduledTripCount === 1 ? "trip" : "trips"} run on ${date}.`
+    : "Select a valid date.";
+  if (!variants.length) {
+    scheduleSummary.textContent = "No route variants could be formed.";
+  }
+}
 
 function showRoute(route: GtfsRow<"routes.txt">): void {
   if (!feed) return;
@@ -961,7 +1384,19 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       if (timetable.exceptionDates.length > 0) {
         const exceptions = document.createElement("p");
         exceptions.className = "timetable-exception-dates";
-        exceptions.textContent = `Exceptions: ${timetable.exceptionDates.join(", ")}`;
+        exceptions.append("Exceptions: ");
+        for (const [index, date] of timetable.exceptionDates.entries()) {
+          if (index) exceptions.append(", ");
+          const iso = gtfsDateToIso(date);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "schedule-exception-button";
+          button.textContent = date;
+          button.title = "Open date-specific schedule";
+          button.disabled = !iso;
+          if (iso) button.addEventListener("click", () => showDateSchedule(route, iso));
+          exceptions.append(button);
+        }
         timetableDetails.append(exceptions);
       }
     });
@@ -993,6 +1428,8 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
   viewer.hidden = true;
   routeDetail.hidden = false;
   stopDetail.hidden = true;
+  tripDetail.hidden = true;
+  dateSchedule.hidden = true;
   warningsView.hidden = true;
   mapPanel.hidden = true;
   routeHeading.focus();
@@ -1036,6 +1473,8 @@ function showFilteredTable(table: GtfsTable, message: string, fromRoute = true):
   clearFilter.hidden = false;
   backToRoute.hidden = !fromRoute;
   routeDetail.hidden = true;
+  tripDetail.hidden = true;
+  dateSchedule.hidden = true;
   viewer.hidden = false;
   renderSelectedTable();
   tableSelect.focus();
@@ -1104,6 +1543,24 @@ function renderTable(table: GtfsTable): void {
         button.className = "route-link";
         button.textContent = String(value);
         button.addEventListener("click", () => showRoute(referencedRoute));
+        cell.append(button);
+        row.append(cell);
+      } else if (column === "trip_id" && value && feed?.indexes.tripsById.get(String(value))) {
+        const cell = document.createElement("td");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "route-link";
+        button.textContent = String(value);
+        button.addEventListener("click", () => showTrip(feed!.indexes.tripsById.get(String(value))!));
+        cell.append(button);
+        row.append(cell);
+      } else if (column === "stop_id" && value && feed?.indexes.stopsById.get(String(value))) {
+        const cell = document.createElement("td");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "route-link";
+        button.textContent = String(value);
+        button.addEventListener("click", () => showStop(feed!.indexes.stopsById.get(String(value))!));
         cell.append(button);
         row.append(cell);
       } else {
@@ -1196,6 +1653,8 @@ function openMap(title: string): void {
   viewer.hidden = true;
   routeDetail.hidden = true;
   stopDetail.hidden = true;
+  tripDetail.hidden = true;
+  dateSchedule.hidden = true;
   warningsView.hidden = true;
   mapPanel.hidden = false;
   mapHeading.textContent = title;
@@ -1651,6 +2110,8 @@ form.addEventListener("submit", async (event) => {
   viewer.hidden = true;
   routeDetail.hidden = true;
   stopDetail.hidden = true;
+  tripDetail.hidden = true;
+  dateSchedule.hidden = true;
   mapPanel.hidden = true;
   warningsView.hidden = true;
   if (historyControls) historyControls.hidden = true;
@@ -1776,6 +2237,15 @@ routeTrips.addEventListener("click", () => {
   );
 });
 
+routeDateSchedule.addEventListener("click", () => {
+  if (currentRoute) showDateSchedule(currentRoute, scheduleDate.value);
+});
+
+scheduleDate.addEventListener("change", () => {
+  renderDateSchedule();
+  pushViewState();
+});
+
 clearFilter.addEventListener("click", () => {
   resetTableFilter();
   page = 0;
@@ -1856,6 +2326,8 @@ function showWarnings(): void {
   viewer.hidden = true;
   routeDetail.hidden = true;
   stopDetail.hidden = true;
+  tripDetail.hidden = true;
+  dateSchedule.hidden = true;
   mapPanel.hidden = true;
   warningsView.hidden = false;
 
