@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { strToU8, zipSync } = require("fflate");
 const {
   getRouteVariants,
@@ -8,28 +10,26 @@ const {
   loadGtfs,
 } = require("../dist/gtfs.cjs");
 
-function archive(files) {
+function archiveDirectory(directory) {
+  const files = Object.fromEntries(
+    fs.readdirSync(directory)
+      .filter((name) => name.endsWith(".txt"))
+      .map((name) => [name, fs.readFileSync(path.join(directory, name), "utf8")]),
+  );
   return zipSync(Object.fromEntries(
     Object.entries(files).map(([name, text]) => [name, strToU8(text)]),
   ));
 }
 
 test("single service ID supports separate calendar ranges and weekday masks", () => {
-  const feed = loadGtfs(archive({
-    "routes.txt": "route_id,route_short_name\nr,5\n",
-    "trips.txt": "route_id,trip_id,service_id,shape_id,trip_headsign\nr,t1,weekday,s,Center\n",
-    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\nt1,08:05:00,a,1\n",
-    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
-      + "weekday,1,0,0,0,0,0,0,20260101,20260331\n"
-      + "weekday,0,0,0,0,0,1,1,20260601,20260831\n",
-  }));
+  const feed = loadGtfs(archiveDirectory(path.join(__dirname, "multiple-calendar-ranges")));
 
   assert.equal(feed.indexes.calendarByServiceId.get("weekday").length, 2);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-05"), true);
   assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-06-06"), true);
-  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-06"), false);
+  assert.equal(isServiceActiveOnDate(feed, "weekday", "2026-01-07"), false);
 
-  const variant = getRouteVariants(feed, "r").variants[0];
+  const variant = getRouteVariants(feed, "R1").variants[0];
   const timetables = getVariantTimetable(feed, variant);
 
   assert.deepEqual(
