@@ -629,7 +629,7 @@ function getWeekdayCells(
     let title = `${name}: ${active ? "Active" : "Inactive"}`;
     if (exception) {
       const exceptionType = exception.fields.exception_type;
-      symbol = exceptionType === 1 ? "➕" : exceptionType === 2 ? "✖" : "?";
+      symbol = exceptionType === 1 ? "➕" : exceptionType === 2 ? "❌" : "?";
       title = exceptionType === 1 ? `${name}: Added exception`
         : exceptionType === 2 ? `${name}: Removed exception`
           : `${name}: Unrecognized exception`;
@@ -666,7 +666,7 @@ function createWeekdayGrid(
   wrapper.append(week);
   const legend = document.createElement("p");
   legend.className = "date-schedule-week-legend";
-  legend.textContent = "➕ Added exception · ✖ Regular service removed";
+  legend.textContent = "➕ Added exception · ❌ Regular service removed";
   wrapper.append(legend);
   return wrapper;
 }
