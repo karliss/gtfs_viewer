@@ -606,6 +606,64 @@ function formatDateWithWeekday(date: string | null): string {
   return `${iso} (${dayNames[weekday]})`;
 }
 
+interface WeekdayCell {
+  name: string;
+  active: boolean;
+  exceptionType: number | null;
+  current: boolean;
+  title: string;
+  symbol: string;
+}
+
+function getWeekdayCells(
+  calendar: GtfsRow<"calendar.txt"> | undefined,
+  currentDayIndex: number | null = null,
+  selectedException: GtfsRow<"calendar_dates.txt"> | undefined = undefined,
+): WeekdayCell[] {
+  const dayNames = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+  const dayFields = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+  return dayNames.map((name, index) => {
+    const active = calendar?.fields[dayFields[index]] === 1;
+    const exception = index === currentDayIndex ? selectedException : undefined;
+    let symbol = active ? "●" : "";
+    let title = `${name}: ${active ? "Active" : "Inactive"}`;
+    if (exception) {
+      const exceptionType = exception.fields.exception_type;
+      symbol = exceptionType === 1 ? "+" : exceptionType === 2 ? "X" : "?";
+      title = exceptionType === 1 ? `${name}: Added exception`
+        : exceptionType === 2 ? `${name}: Removed exception`
+          : `${name}: Unrecognized exception`;
+    }
+    return {
+      name,
+      active,
+      exceptionType: exception?.fields.exception_type ?? null,
+      current: index === currentDayIndex,
+      title,
+      symbol,
+    };
+  });
+}
+
+function createWeekdayGrid(
+  calendar: GtfsRow<"calendar.txt"> | undefined,
+  currentDayIndex: number | null = null,
+  selectedException: GtfsRow<"calendar_dates.txt"> | undefined = undefined,
+): HTMLElement {
+  const week = document.createElement("div");
+  week.className = "date-schedule-week";
+  for (const cellData of getWeekdayCells(calendar, currentDayIndex, selectedException)) {
+    const cell = document.createElement("span");
+    cell.className = "date-schedule-week-day";
+    if (cellData.current) cell.classList.add("date-schedule-week-day--current");
+    if (cellData.exceptionType !== null) cell.classList.add("date-schedule-week-day--exception");
+    cell.textContent = cellData.symbol || cellData.name;
+    cell.title = cellData.title;
+    week.append(cell);
+  }
+  return week;
+}
+
 function renderRoutesCell(column: string, value: string | number | null): HTMLTableCellElement {
   if (column === "route_url") return renderUrlCell(column, value);
   if (column === "route_type" && value !== null) {
@@ -1111,17 +1169,17 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     calendarList.append(head);
 
     if (calendar) {
-      const dayFields = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
       const start = gtfsDateToIso(calendar.fields.start_date);
       const end = gtfsDateToIso(calendar.fields.end_date);
       const row = document.createElement("tr");
       const range = document.createElement("td");
       range.textContent = `${start || "Not provided"} — ${end || "Not provided"}`;
       row.append(range);
-      for (const day of dayFields) {
+      for (const day of getWeekdayCells(calendar)) {
         const cell = document.createElement("td");
-        cell.textContent = calendar.fields[day] === 1 ? "●" : "";
-        cell.className = calendar.fields[day] === 1 ? "trip-calendar-active" : "";
+        cell.textContent = day.symbol;
+        cell.title = day.title;
+        cell.className = day.active ? "trip-calendar-active" : "";
         row.append(cell);
       }
       calendarList.append(row);
@@ -1548,45 +1606,10 @@ function renderDateSchedule(): void {
         range.textContent = `Date range: ${start || "Not provided"} — ${end || "Not provided"}`;
         item.append(range);
 
-        const week = document.createElement("div");
-        week.className = "date-schedule-week";
-        const dayNames = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-        const dayFields = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
-        for (const [dayIndex, dayName] of dayNames.entries()) {
-          const cell = document.createElement("span");
-          cell.className = "date-schedule-week-day";
-          if (dayIndex === weekdayIndex) cell.classList.add("date-schedule-week-day--current");
-          const exception = dayIndex === weekdayIndex ? selectedException : undefined;
-          if (exception) {
-            cell.textContent = exception.fields.exception_type === 1 ? "+" : "X";
-            cell.className += " date-schedule-week-day--exception";
-          } else if (calendar.fields[dayFields[dayIndex]] === 1) {
-            cell.textContent = "●";
-          } else {
-            cell.textContent = dayName;
-          }
-          cell.title = `${dayName}${exception
-            ? exception.fields.exception_type === 1 ? ": Added exception" : ": Removed exception"
-            : calendar.fields[dayFields[dayIndex]] === 1 ? ": Active" : ": Inactive"}`;
-          week.append(cell);
-        }
+        const week = createWeekdayGrid(calendar, weekdayIndex, selectedException);
         item.append(week);
       } else if (selectedException) {
-        const week = document.createElement("div");
-        week.className = "date-schedule-week";
-        const dayNames = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-        for (const [dayIndex, dayName] of dayNames.entries()) {
-          const cell = document.createElement("span");
-          cell.className = "date-schedule-week-day";
-          if (dayIndex === weekdayIndex) cell.classList.add("date-schedule-week-day--current");
-          if (dayIndex === weekdayIndex) {
-            cell.textContent = selectedException.fields.exception_type === 1 ? "+" : "X";
-            cell.className += " date-schedule-week-day--exception";
-          } else {
-            cell.textContent = dayName;
-          }
-          week.append(cell);
-        }
+        const week = createWeekdayGrid(undefined, weekdayIndex, selectedException);
         item.append(week);
       }
 
