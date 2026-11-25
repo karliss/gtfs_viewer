@@ -36,11 +36,11 @@ app.innerHTML = `
     </header>
     <section id="load-panel" class="panel" aria-labelledby="load-heading">
       <h2 id="load-heading">Load a GTFS feed</h2>
-      <p>Choose a GTFS ZIP file from your device. The file is processed locally in your browser.</p>
+      <p>Choose a GTFS ZIP file or multiple .txt files. The files are processed locally in your browser.</p>
       <form id="load-form">
-        <label for="feed-file">GTFS ZIP file</label>
+        <label for="feed-file">GTFS ZIP or TXT files</label>
         <div class="form-controls">
-          <input id="feed-file" type="file" accept=".zip,application/zip" required />
+          <input id="feed-file" type="file" accept=".zip,.txt" multiple required />
           <button type="submit">Load feed</button>
         </div>
       </form>
@@ -2656,7 +2656,7 @@ function renderRouteMap(preserveMapView = false): void {
   mapView?.setSelectedVariant(selected.length === 1 ? selected[0] : null);
 }
 
-function loadFeed(file: File): Promise<GtfsFeed> {
+function loadFeed(files: File[]): Promise<GtfsFeed> {
   const url = URL.createObjectURL(new Blob([workerSource], { type: "text/javascript" }));
   let worker: Worker;
   try {
@@ -2670,7 +2670,7 @@ function loadFeed(file: File): Promise<GtfsFeed> {
         const progress = event.data.progress;
         if (progress.phase === "extracting") {
           loadingProgress.value = progress.completed ? 10 : 5;
-          status.textContent = progress.completed ? "Archive extracted." : "Extracting GTFS archive…";
+          status.textContent = progress.completed ? "GTFS files read." : "Reading GTFS files…";
         } else if (progress.phase === "indexing") {
           loadingProgress.value = progress.completed ? 100 : 95;
           status.textContent = progress.completed ? "GTFS indexes built." : "Building GTFS indexes…";
@@ -2703,7 +2703,9 @@ function loadFeed(file: File): Promise<GtfsFeed> {
       reject(new Error("Could not read the parsed feed."));
     };
     try {
-      worker.postMessage(file);
+      worker.postMessage(files.length === 1 && /\.zip$/i.test(files[0].name)
+        ? { type: "zip", file: files[0] }
+        : { type: "files", files });
     } catch (error) {
       worker.terminate();
       reject(error);
@@ -2713,8 +2715,16 @@ function loadFeed(file: File): Promise<GtfsFeed> {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const file = input.files?.[0];
-  if (!file) return;
+  const files = [...(input.files ?? [])];
+  if (!files.length) return;
+  if (files.some((file) => !/\.zip$/i.test(file.name) && !/\.txt$/i.test(file.name))) {
+    status.textContent = "Select a ZIP file or TXT files only.";
+    return;
+  }
+  if (files.length > 1 && files.some((file) => /\.zip$/i.test(file.name))) {
+    status.textContent = "Select one ZIP file, or multiple TXT files, but not both.";
+    return;
+  }
 
   input.disabled = true;
   submit.disabled = true;
@@ -2743,7 +2753,7 @@ form.addEventListener("submit", async (event) => {
   agenciesById.clear();
 
   try {
-    feed = await loadFeed(file);
+    feed = await loadFeed(files);
     warningCollector.replace(feed.warnings ?? []);
     feed.warnings = [...warningCollector.all];
     updateWarningNavigation(feed.warnings.length);

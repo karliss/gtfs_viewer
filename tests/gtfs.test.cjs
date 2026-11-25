@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
-  getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, summarizeTripField,
+  getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, loadGtfsFiles, summarizeTripField,
   decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
   WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
 } = require("../dist/gtfs.cjs");
@@ -320,6 +320,16 @@ test("loads a header-only table and ignores directory entries", () => {
   assert.deepEqual(feed.tables[0], {
     name: "agency.txt", kind: "agency.txt", columns: ["agency_id"], rows: [], hasExtraValues: false,
   });
+});
+
+test("loads selected TXT files without an archive", () => {
+  const feed = loadGtfsFiles({
+    "routes.txt": strToU8("route_id,route_type\nR1,3\n"),
+    "stops.txt": strToU8("stop_id,stop_name\nS1,Main\n"),
+  });
+  assert.deepEqual(feed.tables.map((table) => table.name), ["routes.txt", "stops.txt"]);
+  assert.equal(feed.indexes.routesById.get("R1").fields.route_type, 3);
+  assert.equal(feed.indexes.stopsById.get("S1").fields.stop_name, "Main");
 });
 
 test("reports invalid archives, missing tables and duplicate filenames", () => {

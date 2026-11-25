@@ -913,8 +913,6 @@ export function loadGtfs(
   warningCollector?: WarningCollector,
 ): GtfsFeed {
   const onProgress = typeof onProgressOrWarnings === "function" ? onProgressOrWarnings : undefined;
-  const collector = typeof onProgressOrWarnings !== "function" ? onProgressOrWarnings ?? warningCollector : warningCollector;
-  collector?.clear();
   let files: Record<string, Uint8Array>;
   try {
     onProgress?.({ phase: "extracting", completed: 0, total: 1 });
@@ -923,6 +921,17 @@ export function loadGtfs(
     throw new Error("Could not read the ZIP file. Make sure it is a valid, unencrypted ZIP archive.");
   }
   onProgress?.({ phase: "extracting", completed: 1, total: 1 });
+  return loadGtfsFiles(files, onProgressOrWarnings, warningCollector);
+}
+
+export function loadGtfsFiles(
+  files: Record<string, Uint8Array>,
+  onProgressOrWarnings?: ((progress: GtfsLoadProgress) => void) | WarningCollector,
+  warningCollector?: WarningCollector,
+): GtfsFeed {
+  const onProgress = typeof onProgressOrWarnings === "function" ? onProgressOrWarnings : undefined;
+  const collector = typeof onProgressOrWarnings !== "function" ? onProgressOrWarnings ?? warningCollector : warningCollector;
+  collector?.clear();
 
   const tables: GtfsTable[] = [];
   const unrecognizedFiles: string[] = [];
@@ -958,7 +967,7 @@ export function loadGtfs(
     }
 
     if (names.has(key)) {
-      throw new Error(`The ZIP contains multiple files named ${name}.`);
+      throw new Error(`Multiple files named ${name} were selected.`);
     }
     names.add(key);
     onProgress?.({ phase: "parsing", completed: parsedFiles, total: textFiles.length, fileName: name });
@@ -1004,7 +1013,7 @@ export function loadGtfs(
   }
 
   if (tables.length === 0) {
-    throw new Error("The ZIP does not contain any GTFS .txt files.");
+    throw new Error("The selected files do not contain any GTFS .txt files.");
   }
 
   tables.sort((a, b) => a.name.localeCompare(b.name));

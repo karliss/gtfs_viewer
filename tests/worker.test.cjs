@@ -23,7 +23,7 @@ test("worker reads and parses a feed asynchronously", async () => {
   const bytes = zipSync({ "routes.txt": strToU8("route_id,route_type\nr, 3 \n") });
   let finishReading;
   const reading = new Promise((resolve) => { finishReading = resolve; });
-  const processing = handler({ data: { arrayBuffer: () => reading } });
+  const processing = handler({ data: { type: "zip", file: { arrayBuffer: () => reading } } });
   assert.equal(messages.length, 0);
   finishReading(bytes.buffer);
   await processing;
@@ -34,10 +34,27 @@ test("worker reads and parses a feed asynchronously", async () => {
   assert.ok(messages.some((message) => message.progress?.phase === "indexing"));
 });
 
+test("worker reads and parses multiple TXT files", async () => {
+  const { handler, messages } = createWorker();
+  await handler({
+    data: {
+      type: "files",
+      files: [
+        { name: "routes.txt", arrayBuffer: async () => strToU8("route_id,route_type\nr,3\n").buffer },
+        { name: "stops.txt", arrayBuffer: async () => strToU8("stop_id,stop_name\nS1,Main\n").buffer },
+      ],
+    },
+  });
+  const finalMessage = messages.find((message) => message.feed);
+  assert.equal(finalMessage.feed.tables.length, 2);
+  assert.equal(finalMessage.feed.indexes.routesById.get("r").fields.route_type, 3);
+  assert.ok(messages.some((message) => message.progress?.phase === "extracting"));
+});
+
 test("worker reports file-reading and archive errors", async () => {
   const { handler, messages } = createWorker();
-  await handler({ data: { arrayBuffer: async () => { throw new Error("Read failed"); } } });
-  await handler({ data: { arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer } });
+  await handler({ data: { type: "zip", file: { arrayBuffer: async () => { throw new Error("Read failed"); } } } });
+  await handler({ data: { type: "zip", file: { arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer } } });
   const errors = messages.filter((message) => message.error);
   assert.equal(errors[0].error, "Read failed");
   assert.match(errors[1].error, /ZIP/);
