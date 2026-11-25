@@ -298,6 +298,10 @@ export interface FareResult {
   currency: string | null;
   productName: string | null;
   source: "legacy" | "modern";
+  matchedRules: {
+    table: string;
+    fields: Record<string, string | number | null>;
+  }[];
 }
 
 export function getDateSchedule(feed: GtfsFeed, variant: RouteVariant, date: string): DateScheduleVariant {
@@ -367,6 +371,10 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
           currency: attribute.fields.currency_type,
           productName: null,
           source: "legacy",
+          matchedRules: [
+            { table: "fare_rules.txt", fields: { ...rule.fields } },
+            { table: "fare_attributes.txt", fields: { ...attribute.fields } },
+          ],
         };
       }
     }
@@ -380,7 +388,7 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
       const cached = feed.indexes.fareCache.get(cacheKey);
       results.push(cached ? { ...cached, destinationStopId } : {
         destinationStopId, fareId: null, price: null, currency: null, productName: null,
-        source: "legacy",
+        source: "legacy", matchedRules: [],
       });
       continue;
     }
@@ -407,6 +415,10 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
             currency: product.fields.currency,
             productName: product.fields.fare_product_name,
             source: "modern",
+            matchedRules: [
+              { table: "fare_leg_rules.txt", fields: { ...rule.fields } },
+              { table: "fare_products.txt", fields: { ...product.fields } },
+            ],
           };
           break;
         }
@@ -416,7 +428,7 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
     feed.indexes.fareCache.set(cacheKey, resolved);
     results.push(resolved ? { ...resolved, destinationStopId } : {
       destinationStopId, fareId: null, price: null, currency: null, productName: null,
-      source: "legacy",
+      source: "legacy", matchedRules: [],
     });
   }
   return results;

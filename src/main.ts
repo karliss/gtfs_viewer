@@ -3,7 +3,7 @@ import {
   getVariantTimetable, formatTimetableDayRange, getDateSchedule, getTripFares, isServiceActiveOnDate,
   gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
   WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
-  type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
+  type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant, type FareResult,
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
 import type { WorkerResponse } from "./gtfs-worker";
@@ -253,6 +253,11 @@ app.innerHTML = `
       <div id="agency-dialog-content"></div>
       <button id="agency-dialog-close" type="button">Close</button>
     </dialog>
+    <dialog id="fare-dialog" aria-labelledby="fare-dialog-heading">
+      <h2 id="fare-dialog-heading">Fare explanation</h2>
+      <div id="fare-dialog-content"></div>
+      <button id="fare-dialog-close" type="button">Close</button>
+    </dialog>
   </main>
 `;
 
@@ -347,6 +352,8 @@ const mapClearFilter = element<HTMLButtonElement>("#map-clear-filter");
 const mapSettings = element<HTMLDetailsElement>("#map-settings");
 const agencyDialog = element<HTMLDialogElement>("#agency-dialog");
 const agencyDialogContent = element<HTMLElement>("#agency-dialog-content");
+const fareDialog = element<HTMLDialogElement>("#fare-dialog");
+const fareDialogContent = element<HTMLElement>("#fare-dialog-content");
 const warningsView = element<HTMLElement>("#warnings-view");
 const warningTypes = element<HTMLElement>("#warning-types");
 const warningTables = element<HTMLElement>("#warning-tables");
@@ -725,6 +732,41 @@ function agencyLink(id: string, includeName = false): Node {
     ? `${id} (${agency.fields.agency_name})` : id;
   button.addEventListener("click", () => showAgency(agency));
   return button;
+}
+
+function showFareExplanation(fare: FareResult): void {
+  fareDialogContent.replaceChildren();
+  const summary = document.createElement("p");
+  const amount = fare.price === null
+    ? "No amount found"
+    : `${fare.price}${fare.currency ? ` ${fare.currency}` : ""}`;
+  summary.textContent = `Amount: ${amount}`;
+  fareDialogContent.append(summary);
+  if (!fare.matchedRules.length) {
+    const message = document.createElement("p");
+    message.textContent = "No matching fare rules found.";
+    fareDialogContent.append(message);
+  } else {
+    const list = document.createElement("ol");
+    for (const rule of fare.matchedRules) {
+      const item = document.createElement("li");
+      const heading = document.createElement("h3");
+      heading.textContent = rule.table;
+      const properties = document.createElement("dl");
+      properties.className = "route-properties";
+      for (const [name, value] of Object.entries(rule.fields)) {
+        const term = document.createElement("dt");
+        term.textContent = name;
+        const description = document.createElement("dd");
+        description.textContent = value === null ? "Not provided" : String(value);
+        properties.append(term, description);
+      }
+      item.append(heading, properties);
+      list.append(item);
+    }
+    fareDialogContent.append(list);
+  }
+  fareDialog.showModal();
 }
 
 function showZoneStops(zone: string): void {
@@ -1351,6 +1393,10 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       if (originFares.some((result) => result.fareId !== null || result.price !== null || result.productName !== null)) {
         fare.dataset.available = "true";
         fare.textContent = "💰";
+        const firstFare = originFares.find((result) => result.price !== null);
+        if (firstFare?.price !== null && firstFare?.price !== undefined) {
+          fare.dataset.amount = `${firstFare.price}${firstFare.currency ? ` ${firstFare.currency}` : ""}`;
+        }
       }
     }
     fare.title = "Calculate fares from this stop";
@@ -1421,7 +1467,7 @@ function selectTripStop(
   if (!feed) return;
   tripStopList.querySelectorAll<HTMLButtonElement>(".trip-stop-time")
     .forEach((button) => button.setAttribute("aria-selected", String(button === selectedButton)));
-  tripStopList.querySelectorAll<HTMLElement>(".trip-inline-fare")
+  tripStopList.querySelectorAll<HTMLButtonElement>(".trip-inline-fare")
     .forEach((fare) => { fare.textContent = fare.dataset.available === "true" ? "💰" : ""; });
   const originId = stopRows[selectedIndex]?.fields.stop_id;
   if (!originId) {
@@ -1436,15 +1482,20 @@ function selectTripStop(
   }
   tripFares.textContent = "";
   for (const [fareIndex, fare] of fares.entries()) {
-    const fareLabel = tripStopList.querySelector<HTMLElement>(
+    const fareLabel = tripStopList.querySelector<HTMLButtonElement>(
       `.trip-stop-item[data-stop-index="${selectedIndex + fareIndex + 1}"] .trip-inline-fare`,
     );
     if (!fareLabel) continue;
-    const name = fare.productName || fare.fareId || "No fare found";
-    const hasFare = fare.fareId !== null || fare.price !== null || fare.productName !== null;
-    fareLabel.textContent = `${hasFare ? "💰 " : ""}${fare.price === null
-      ? name
-      : `${name}: ${fare.price}${fare.currency ? ` ${fare.currency}` : ""}`}`;
+    if (fare.price === null) {
+      fareLabel.textContent = "";
+      fareLabel.onclick = null;
+    } else {
+      const amount = `${fare.price}${fare.currency ? ` ${fare.currency}` : ""}`;
+      fareLabel.textContent = `💰 ${amount}`;
+      fareLabel.title = "Show fare rules";
+      fareLabel.setAttribute("aria-label", `Show fare rules for ${amount}`);
+      fareLabel.onclick = () => showFareExplanation(fare);
+    }
   }
 }
 
@@ -2690,6 +2741,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 element<HTMLButtonElement>("#agency-dialog-close").addEventListener("click", () => agencyDialog.close());
+element<HTMLButtonElement>("#fare-dialog-close").addEventListener("click", () => fareDialog.close());
 stopsMapButton.addEventListener("click", showStopsMap);
 routesMapButton.addEventListener("click", showAllRoutesMap);
 routeMapButton.addEventListener("click", () => {

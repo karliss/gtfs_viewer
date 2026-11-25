@@ -750,6 +750,10 @@ test("calculates legacy fares from a selected stop to following stops", () => {
     { destinationStopId: "b", fareId: "base", price: 2.5, currency: "EUR" },
     { destinationStopId: "c", fareId: "base", price: 2.5, currency: "EUR" },
   ]);
+  assert.deepEqual(fares[0].matchedRules.map((rule) => rule.table), [
+    "fare_rules.txt",
+    "fare_attributes.txt",
+  ]);
   assert.equal(feed.indexes.fareAttributesById.get("base").fields.price, 2.5);
   assert.equal(feed.indexes.fareRulesByRouteId.get("r").length, 1);
   assert.equal(feed.indexes.fareCache.size, 2);
