@@ -135,7 +135,7 @@ app.innerHTML = `
         </div>
       </div>
       <div class="table-scroll" tabindex="0" role="region" aria-label="GTFS warnings">
-        <table>
+        <table class="warnings-table">
           <thead><tr><th scope="col">Severity</th><th scope="col">Type</th><th scope="col">Row</th><th scope="col">Message</th></tr></thead>
           <tbody id="warning-table-body"></tbody>
         </table>
