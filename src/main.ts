@@ -60,7 +60,6 @@ app.innerHTML = `
       <button id="history-warnings" type="button">Warnings</button>
     </div>
     <section id="viewer" class="panel viewer" hidden>
-      <button id="back-to-route" type="button" hidden>Back to route details</button>
       <div class="table-selection-row">
         <label for="table-select">Table</label>
         <select id="table-select"></select>
@@ -288,7 +287,6 @@ const routeVariants = element<HTMLElement>("#route-variants");
 const routeSummary = element<HTMLParagraphElement>("#route-summary");
 const routeTrips = element<HTMLButtonElement>("#route-trips");
 const routeStopList = element<HTMLOListElement>("#route-stop-list");
-const backToRoute = element<HTMLButtonElement>("#back-to-route");
 const tableFilter = element<HTMLParagraphElement>("#table-filter");
 const clearFilter = element<HTMLButtonElement>("#clear-filter");
 const stopsMapButton = element<HTMLButtonElement>("#stops-map");
@@ -660,7 +658,6 @@ function showZoneStops(zone: string): void {
   showFilteredTable(
     { ...table, rows: table.rows.filter((row) => row.fields.zone_id === zone) },
     `Showing stops in zone ${zone}.`,
-    false,
   );
 }
 
@@ -904,7 +901,6 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
         button.addEventListener("click", () => showFilteredTable(
           { ...shapeTable, rows: shapeTable.rows.filter((row) => row.fields.shape_id === String(value)) },
           `Showing rows for shape ${value}.`,
-          false,
         ));
         description.append(button);
       } else {
@@ -1068,7 +1064,6 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
           rows: stopTimesTable.rows.filter((row) => row.fields.trip_id === trip.fields.trip_id),
         },
         `Showing stop_times.txt rows for trip ${trip.fields.trip_id}.`,
-        false,
       ));
       tripStopHelp.append(" ", tableButton);
     }
@@ -1147,7 +1142,7 @@ function showServiceTable(serviceId: string): void {
   if (calendar?.kind === "calendar.txt") {
     const rows = calendar.rows.filter((row) => row.fields.service_id === serviceId);
     if (rows.length) {
-      showFilteredTable({ ...calendar, rows }, `Showing calendar rows for service ${serviceId}.`, false);
+      showFilteredTable({ ...calendar, rows }, `Showing calendar rows for service ${serviceId}.`);
       return;
     }
   }
@@ -1155,7 +1150,7 @@ function showServiceTable(serviceId: string): void {
   if (calendarDates?.kind === "calendar_dates.txt") {
     const rows = calendarDates.rows.filter((row) => row.fields.service_id === serviceId);
     if (rows.length) {
-      showFilteredTable({ ...calendarDates, rows }, `Showing calendar exceptions for service ${serviceId}.`, false);
+      showFilteredTable({ ...calendarDates, rows }, `Showing calendar exceptions for service ${serviceId}.`);
     }
   }
 }
@@ -1572,7 +1567,7 @@ function showVariantTable(variant: RouteVariant, kind: "shapes.txt" | "trips.txt
     : "Showing trips for this variant.");
 }
 
-function showFilteredTable(table: GtfsTable, message: string, fromRoute = true): void {
+function showFilteredTable(table: GtfsTable, message: string): void {
   if (!feed) return;
   filteredTable = table;
   tableSelect.selectedIndex = feed.tables.findIndex((candidate) => candidate.kind === table.kind);
@@ -1581,7 +1576,6 @@ function showFilteredTable(table: GtfsTable, message: string, fromRoute = true):
   tableFilter.textContent = message;
   tableFilter.hidden = false;
   clearFilter.hidden = false;
-  backToRoute.hidden = !fromRoute;
   routeDetail.hidden = true;
   tripDetail.hidden = true;
   dateSchedule.hidden = true;
@@ -1595,7 +1589,6 @@ function resetTableFilter(): void {
   filteredTable = undefined;
   tableFilter.hidden = true;
   clearFilter.hidden = true;
-  backToRoute.hidden = true;
 }
 
 function renderTable(table: GtfsTable): void {
@@ -2339,10 +2332,6 @@ mapClearFilter.addEventListener("click", () => {
   page = 0;
   renderSelectedTable();
   renderStopsMap();
-});
-
-backToRoute.addEventListener("click", () => {
-  if (currentRoute) showRoute(currentRoute);
 });
 
 routeTrips.addEventListener("click", () => {
