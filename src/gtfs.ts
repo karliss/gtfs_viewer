@@ -327,15 +327,16 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
 }
 
 export function formatTimetableDayRange(days: readonly number[]): string {
-  if (days.length === 0) return "1-7";
+  if (days.length === 0) return "All";
+  const names = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
   const sorted = [...new Set(days)].filter((day) => day >= 1 && day <= 7).sort((a, b) => a - b);
   const ranges: string[] = [];
   for (let index = 0; index < sorted.length;) {
     let end = index;
     while (end + 1 < sorted.length && sorted[end + 1] === sorted[end] + 1) end++;
     ranges.push(index === end
-      ? String(sorted[index])
-      : `${sorted[index]}-${sorted[end]}`);
+      ? names[sorted[index] - 1]
+      : `${names[sorted[index] - 1]}-${names[sorted[end] - 1]}`);
     index = end + 1;
   }
   return ranges.join(", ");

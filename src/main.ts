@@ -306,6 +306,7 @@ const tripRouteProperties = element<HTMLElement>("#trip-route-properties");
 const tripCalendar = element<HTMLElement>("#trip-calendar");
 const tripExceptions = element<HTMLElement>("#trip-exceptions");
 const tripFrequencies = element<HTMLElement>("#trip-frequencies");
+const tripStopHelp = element<HTMLParagraphElement>("#trip-stop-help");
 const tripStopList = element<HTMLOListElement>("#trip-stop-list");
 const tripFares = element<HTMLElement>("#trip-fares");
 const dateSchedule = element<HTMLElement>("#date-schedule");
@@ -584,6 +585,15 @@ function routeTypeLabel(value: string | number): string {
   const text = String(value);
   const name = decodeRouteType(text);
   return name === `Unknown route type (${text})` ? name : `${name} (${text})`;
+}
+
+function formatDateWithWeekday(date: string | null): string {
+  if (!date) return "";
+  const iso = gtfsDateToIso(date) || date;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return date;
+  const weekday = new Date(`${iso}T12:00:00Z`).getUTCDay();
+  const shortDays = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+  return `${iso} (${shortDays[weekday]})`;
 }
 
 function renderRoutesCell(column: string, value: string | number | null): HTMLTableCellElement {
@@ -952,29 +962,24 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
   tripExceptions.replaceChildren();
   if (serviceId) {
     const calendar = feed.indexes.calendarByServiceId.get(serviceId);
-    const calendarList = document.createElement("dl");
-    calendarList.className = "route-properties";
+    const calendarList = document.createElement("div");
+    calendarList.className = "trip-calendar-summary";
     if (calendar) {
-      const dayNames = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-      for (const [name, value] of [
-        ...dayNames.map((day) => [day, calendar.fields[day as keyof typeof calendar.fields]] as const),
-        ["start_date", calendar.fields.start_date],
-        ["end_date", calendar.fields.end_date],
-      ]) {
-        const term = document.createElement("dt");
-        term.textContent = name;
-        const description = document.createElement("dd");
-        description.textContent = name === "start_date" || name === "end_date"
-          ? gtfsDateToIso(String(value)) || String(value ?? "Not provided")
-          : value === 1 ? "Yes" : value === 0 ? "No" : "Not provided";
-        calendarList.append(term, description);
-      }
+      const dayFields = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+      const shortDays = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+      const activeDays = dayFields.flatMap((day, index) =>
+        calendar.fields[day] === 1 ? [shortDays[index]] : []);
+      const start = gtfsDateToIso(calendar.fields.start_date);
+      const end = gtfsDateToIso(calendar.fields.end_date);
+      const dateRange = document.createElement("p");
+      dateRange.textContent = `Date range: ${start || "Not provided"} — ${end || "Not provided"}`;
+      const days = document.createElement("p");
+      days.textContent = `Days: ${activeDays.length ? activeDays.join(", ") : "No active weekdays"}`;
+      calendarList.append(dateRange, days);
     } else {
-      const term = document.createElement("dt");
-      term.textContent = "calendar.txt";
-      const description = document.createElement("dd");
-      description.textContent = "No calendar row";
-      calendarList.append(term, description);
+      const message = document.createElement("p");
+      message.textContent = "calendar.txt: No calendar row";
+      calendarList.append(message);
     }
     tripCalendar.append(calendarList);
 
@@ -989,7 +994,7 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "schedule-exception-button";
-        button.textContent = `${date || exception.fields.date} — ${exception.fields.exception_type === 1 ? "Added" : exception.fields.exception_type === 2 ? "Removed" : "Unknown"}`;
+        button.textContent = `${date ? formatDateWithWeekday(date) : exception.fields.date} — ${exception.fields.exception_type === 1 ? "Added" : exception.fields.exception_type === 2 ? "Removed" : "Unknown"}`;
         if (route && date) button.addEventListener("click", () => showDateSchedule(route, date));
         item.append(button);
         list.append(item);
@@ -1032,6 +1037,24 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     ? [...(feed.indexes.stopTimesByTripId.get(trip.fields.trip_id) ?? [])].sort((left, right) =>
       (left.fields.stop_sequence ?? Infinity) - (right.fields.stop_sequence ?? Infinity))
     : [];
+  tripStopHelp.replaceChildren("Select a stop to calculate fares to every following stop.");
+  if (trip.fields.trip_id) {
+    const stopTimesTable = feed.tables.find((table) => table.kind === "stop_times.txt");
+    if (stopTimesTable?.kind === "stop_times.txt") {
+      const tableButton = document.createElement("button");
+      tableButton.type = "button";
+      tableButton.className = "route-link";
+      tableButton.textContent = "View filtered stop_times.txt";
+      tableButton.addEventListener("click", () => showFilteredTable(
+        {
+          ...stopTimesTable,
+          rows: stopTimesTable.rows.filter((row) => row.fields.trip_id === trip.fields.trip_id),
+        },
+        `Showing stop_times.txt rows for trip ${trip.fields.trip_id}.`,
+      ));
+      tripStopHelp.append(" ", tableButton);
+    }
+  }
   tripStopList.replaceChildren();
   tripFares.replaceChildren();
   for (const [index, stopTime] of stopRows.entries()) {
@@ -1447,7 +1470,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
           const button = document.createElement("button");
           button.type = "button";
           button.className = "schedule-exception-button";
-          button.textContent = date;
+          button.textContent = formatDateWithWeekday(iso);
           button.title = "Open date-specific schedule";
           button.disabled = !iso;
           if (iso) button.addEventListener("click", () => showDateSchedule(route, iso));

@@ -494,7 +494,7 @@ test("trims calendar IDs and values for single-trip timetables", () => {
   const variant = getRouteVariants(feed, "r").variants[0];
   const timetable = getVariantTimetable(feed, variant);
   assert.deepEqual(timetable.popularDays, [[1, 2, 3, 4, 5]]);
-  assert.equal(formatTimetableDayRange(timetable.popularDays[0]), "1-5");
+  assert.equal(formatTimetableDayRange(timetable.popularDays[0]), "Mo-Fr");
 });
 
 test("groups trips by shape, headsign, short name and ordered stops", () => {
