@@ -3041,6 +3041,7 @@ function showWarnings(): void {
   renderWarningFilters();
   renderWarningTable();
   updateHistoryUi();
+  pushViewState();
 }
 
 function warningTableKey(warning: GtfsWarning): string {
