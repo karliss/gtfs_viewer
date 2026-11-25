@@ -176,9 +176,7 @@ export function isServiceActiveOnDate(feed: GtfsFeed, serviceId: string | null, 
     if (exception.fields.exception_type === 1) active = true;
     if (exception.fields.exception_type === 2) active = false;
   }
-  if (active !== null) return active;
-  return (feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [])
-    .some((exception) => exception.fields.date === gtfsDate && exception.fields.exception_type === 1);
+  return active ?? false;
 }
 
 export interface DateScheduleDeparture {
