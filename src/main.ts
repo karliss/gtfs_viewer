@@ -1911,6 +1911,15 @@ function renderTable(table: GtfsTable): void {
           }
         });
         cell.append(button);
+        const trip = values as GtfsRow<"trips.txt">;
+        const mapButton = document.createElement("button");
+        mapButton.type = "button";
+        mapButton.className = "route-map-icon";
+        mapButton.textContent = "🗺️";
+        mapButton.title = "Open the trip variant on map";
+        mapButton.setAttribute("aria-label", "Open the trip variant on map");
+        mapButton.addEventListener("click", () => showTripVariantOnMap(trip));
+        cell.append(" ", mapButton);
         row.append(cell);
       } else if (column === "stop_id" && value && feed?.indexes.stopsById.get(String(value))) {
         const cell = document.createElement("td");
