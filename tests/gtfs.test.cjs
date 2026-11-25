@@ -4,6 +4,8 @@ const { strToU8, zipSync } = require("fflate");
 const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, summarizeTripField,
+  decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
+  WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
 } = require("../dist/gtfs.cjs");
 const {
   WarningCollector, WARNING_DESCRIPTIONS, WARNING_TYPES,
@@ -372,15 +374,54 @@ test("trims recognized fields while preserving unrecognized values except IDs", 
   assert.deepEqual(variants[0].trips.map(({ fields }) => fields.trip_id), ["t", "t2"]);
 });
 
+test("processes and validates GTFS colors", () => {
+  assert.deepEqual(processGtfsColor("A1b2C3"), { raw: "a1b2c3", css: "#a1b2c3" });
+  assert.deepEqual(processGtfsColor(" 00ff80 "), { raw: "00ff80", css: "#00ff80" });
+  assert.equal(processGtfsColor(null), null);
+  assert.equal(processGtfsColor("#A1B2C3"), null);
+  assert.equal(processGtfsColor("12345"), null);
+  assert.equal(processGtfsColor("GGGGGG"), null);
+});
+
+test("decodes GTFS pickup and drop-off types", () => {
+  assert.equal(decodePickupType(null), "regular pickup");
+  assert.equal(decodePickupType(PICKUP_TYPES.NO_SERVICE), "no pickup");
+  assert.equal(decodeDropOffType(DROP_OFF_TYPES.PHONE_AGENCY), "drop-off by phone");
+  assert.equal(decodePickupType(99), "pickup type 99");
+});
+
 test("summarizes trip accessibility with missing values left unprovided", () => {
   const [table] = loadGtfs(archive({
-    "trips.txt": "trip_id,wheelchair_accessible,bikes_allowed\n1,1,2\n2,1,2\n3,2,\n4,,2\n5\n",
+    "trips.txt": "trip_id,wheelchair_accessible,bikes_allowed,cars_allowed\n1,1,2,1\n2,1,2,0\n3,2,,2\n4,,2,\n5\n",
   })).tables;
-  assert.equal(summarizeTripField([], "bikes_allowed"), "No trips available");
-  assert.equal(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), "1");
-  assert.equal(summarizeTripField(table.rows, "wheelchair_accessible"), "1 (40%), 2 (20%), Not provided (40%)");
-  assert.equal(summarizeTripField(table.rows, "bikes_allowed"), "2 (60%), Not provided (40%)");
-  assert.equal(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), "2 (66.7%), Not provided (33.3%)");
+  assert.equal(decodeTripFieldValue(null), "Unknown");
+  assert.equal(decodeTripFieldValue(WHEELCHAIR_ACCESSIBLE_VALUES.UNKNOWN), "Unknown");
+  assert.equal(decodeTripFieldValue(BIKES_ALLOWED_VALUES.YES), "Yes");
+  assert.equal(decodeTripFieldValue(CARS_ALLOWED_VALUES.NO), "No");
+  assert.equal(decodeTripFieldValue(3), "Unrecognized");
+  assert.deepEqual(summarizeTripField([], "bikes_allowed"), []);
+  assert.deepEqual(summarizeTripField(table.rows.slice(0, 2), "wheelchair_accessible"), [
+    { value: 1, count: 2, percent: null },
+  ]);
+  assert.deepEqual(summarizeTripField(table.rows, "wheelchair_accessible"), [
+    { value: 1, count: 2, percent: 40 },
+    { value: 2, count: 1, percent: 20 },
+    { value: null, count: 2, percent: 40 },
+  ]);
+  assert.deepEqual(summarizeTripField(table.rows, "bikes_allowed"), [
+    { value: 2, count: 3, percent: 60 },
+    { value: null, count: 2, percent: 40 },
+  ]);
+  assert.deepEqual(summarizeTripField(table.rows.slice(0, 3), "bikes_allowed"), [
+    { value: 2, count: 2, percent: 66.7 },
+    { value: null, count: 1, percent: 33.3 },
+  ]);
+  assert.deepEqual(summarizeTripField(table.rows, "cars_allowed"), [
+    { value: 1, count: 1, percent: 20 },
+    { value: 0, count: 1, percent: 20 },
+    { value: 2, count: 1, percent: 20 },
+    { value: null, count: 2, percent: 40 },
+  ]);
 });
 
 test("normalizes numeric fields and preserves missing values as null", () => {
@@ -708,6 +749,10 @@ test("calculates legacy fares from a selected stop to following stops", () => {
     ({ destinationStopId, fareId, price, currency })), [
     { destinationStopId: "b", fareId: "base", price: 2.5, currency: "EUR" },
     { destinationStopId: "c", fareId: "base", price: 2.5, currency: "EUR" },
+  ]);
+  assert.deepEqual(fares[0].matchedRules.map((rule) => rule.table), [
+    "fare_rules.txt",
+    "fare_attributes.txt",
   ]);
   assert.equal(feed.indexes.fareAttributesById.get("base").fields.price, 2.5);
   assert.equal(feed.indexes.fareRulesByRouteId.get("r").length, 1);

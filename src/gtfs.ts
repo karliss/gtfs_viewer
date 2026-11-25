@@ -7,6 +7,82 @@ import type { GtfsWarning, WarningCollector } from "./warnings";
 
 export type { GtfsFields, GtfsTableName } from "./gtfs-schema";
 
+export interface GtfsColor {
+  raw: string;
+  css: string;
+}
+
+export function processGtfsColor(value: string | null | undefined): GtfsColor | null {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!/^[\da-f]{6}$/i.test(raw)) return null;
+  const normalized = raw.toLowerCase();
+  return { raw: normalized, css: `#${normalized}` };
+}
+
+export const WHEELCHAIR_ACCESSIBLE_VALUES = {
+  UNKNOWN: 0,
+  YES: 1,
+  NO: 2,
+} as const;
+
+export const BIKES_ALLOWED_VALUES = {
+  UNKNOWN: 0,
+  YES: 1,
+  NO: 2,
+} as const;
+
+export const CARS_ALLOWED_VALUES = {
+  UNKNOWN: 0,
+  YES: 1,
+  NO: 2,
+} as const;
+
+export const PICKUP_TYPES = {
+  REGULAR: 0,
+  NO_SERVICE: 1,
+  PHONE_AGENCY: 2,
+  COORDINATE: 3,
+} as const;
+
+export const DROP_OFF_TYPES = {
+  REGULAR: 0,
+  NO_SERVICE: 1,
+  PHONE_AGENCY: 2,
+  COORDINATE: 3,
+} as const;
+
+export function decodePickupType(value: number | null): string {
+  if (value === null || value === PICKUP_TYPES.REGULAR) return "regular pickup";
+  if (value === PICKUP_TYPES.NO_SERVICE) return "no pickup";
+  if (value === PICKUP_TYPES.PHONE_AGENCY) return "pickup by phone";
+  if (value === PICKUP_TYPES.COORDINATE) return "pickup by coordinate";
+  return `pickup type ${value}`;
+}
+
+export function decodeDropOffType(value: number | null): string {
+  if (value === null || value === DROP_OFF_TYPES.REGULAR) return "regular drop-off";
+  if (value === DROP_OFF_TYPES.NO_SERVICE) return "no drop-off";
+  if (value === DROP_OFF_TYPES.PHONE_AGENCY) return "drop-off by phone";
+  if (value === DROP_OFF_TYPES.COORDINATE) return "drop-off by coordinate";
+  return `drop-off type ${value}`;
+}
+
+export function decodeTripFieldValue(
+  value: number | null,
+): "Unknown" | "Yes" | "No" | "Unrecognized" {
+  if (value === null || value === WHEELCHAIR_ACCESSIBLE_VALUES.UNKNOWN
+    || value === BIKES_ALLOWED_VALUES.UNKNOWN
+    || value === CARS_ALLOWED_VALUES.UNKNOWN) return "Unknown";
+  if (value === WHEELCHAIR_ACCESSIBLE_VALUES.YES
+    || value === BIKES_ALLOWED_VALUES.YES
+    || value === CARS_ALLOWED_VALUES.YES) return "Yes";
+  if (value === WHEELCHAIR_ACCESSIBLE_VALUES.NO
+    || value === BIKES_ALLOWED_VALUES.NO
+    || value === CARS_ALLOWED_VALUES.NO) return "No";
+  return "Unrecognized";
+}
+
 interface RowExtras {
   unrecognizedColumns: Record<string, string | null>;
   extraValues: string[];
@@ -101,20 +177,28 @@ export function getReferencedRoute(
   return routes.get(String(value));
 }
 
+export interface TripFieldSummary {
+  value: number | null;
+  count: number;
+  percent: number | null;
+}
+
 export function summarizeTripField(
   trips: readonly GtfsRow<"trips.txt">[],
-  field: "wheelchair_accessible" | "bikes_allowed",
-): string {
-  if (!trips.length) return "No trips available";
+  field: "wheelchair_accessible" | "bikes_allowed" | "cars_allowed",
+): TripFieldSummary[] {
+  if (!trips.length) return [];
   const counts = new Map<number | null, number>();
   for (const trip of trips) {
     const value = trip.fields[field];
     counts.set(value, (counts.get(value) ?? 0) + 1);
   }
-  const label = (value: number | null): string => value === null ? "Not provided" : String(value);
-  return [...counts].map(([value, count]) => counts.size === 1
-    ? label(value)
-    : `${label(value)} (${Number((count * 100 / trips.length).toFixed(1))}%)`).join(", ");
+  const showPercent = counts.size > 1;
+  return [...counts].map(([value, count]) => ({
+    value,
+    count,
+    percent: showPercent ? Number((count * 100 / trips.length).toFixed(1)) : null,
+  }));
 }
 
 export interface RouteVariant {
@@ -214,6 +298,10 @@ export interface FareResult {
   currency: string | null;
   productName: string | null;
   source: "legacy" | "modern";
+  matchedRules: {
+    table: string;
+    fields: Record<string, string | number | null>;
+  }[];
 }
 
 export function getDateSchedule(feed: GtfsFeed, variant: RouteVariant, date: string): DateScheduleVariant {
@@ -283,6 +371,10 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
           currency: attribute.fields.currency_type,
           productName: null,
           source: "legacy",
+          matchedRules: [
+            { table: "fare_rules.txt", fields: { ...rule.fields } },
+            { table: "fare_attributes.txt", fields: { ...attribute.fields } },
+          ],
         };
       }
     }
@@ -296,7 +388,7 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
       const cached = feed.indexes.fareCache.get(cacheKey);
       results.push(cached ? { ...cached, destinationStopId } : {
         destinationStopId, fareId: null, price: null, currency: null, productName: null,
-        source: "legacy",
+        source: "legacy", matchedRules: [],
       });
       continue;
     }
@@ -323,6 +415,10 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
             currency: product.fields.currency,
             productName: product.fields.fare_product_name,
             source: "modern",
+            matchedRules: [
+              { table: "fare_leg_rules.txt", fields: { ...rule.fields } },
+              { table: "fare_products.txt", fields: { ...product.fields } },
+            ],
           };
           break;
         }
@@ -332,7 +428,7 @@ export function getTripFares(feed: GtfsFeed, trip: GtfsRow<"trips.txt">,
     feed.indexes.fareCache.set(cacheKey, resolved);
     results.push(resolved ? { ...resolved, destinationStopId } : {
       destinationStopId, fareId: null, price: null, currency: null, productName: null,
-      source: "legacy",
+      source: "legacy", matchedRules: [],
     });
   }
   return results;
