@@ -1097,9 +1097,13 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     time.dataset.stopIndex = String(index);
     const arrival = stopTime.fields.arrival_time;
     const departure = stopTime.fields.departure_time;
-    time.textContent = arrival && departure && arrival !== departure
-      ? `${arrival} — ${departure}`
-      : departure || arrival || "";
+    const arrivalLabel = document.createElement("span");
+    arrivalLabel.className = "trip-arrival-time";
+    arrivalLabel.textContent = arrival || "";
+    const departureLabel = document.createElement("span");
+    departureLabel.className = "trip-departure-time";
+    departureLabel.textContent = departure || arrival || "";
+    time.append(arrivalLabel, departureLabel);
     time.setAttribute("aria-selected", "false");
     time.addEventListener("click", () => selectTripStop(trip, stopRows, index, time));
     if (stop) {
@@ -1119,6 +1123,14 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
     row.append(stopLink, time);
     const fare = document.createElement("span");
     fare.className = "trip-inline-fare";
+    if (stopId) {
+      const destinations = stopRows.slice(index + 1).map((row) => row.fields.stop_id);
+      const originFares = getTripFares(feed, trip, stopId, destinations);
+      if (originFares.some((result) => result.fareId !== null || result.price !== null || result.productName !== null)) {
+        fare.dataset.available = "true";
+        fare.textContent = "💰";
+      }
+    }
     row.append(fare);
     item.append(row);
     tripStopList.append(item);
@@ -1175,7 +1187,7 @@ function selectTripStop(
   tripStopList.querySelectorAll<HTMLButtonElement>(".trip-stop-time")
     .forEach((button) => button.setAttribute("aria-selected", String(button === selectedButton)));
   tripStopList.querySelectorAll<HTMLElement>(".trip-inline-fare")
-    .forEach((fare) => { fare.textContent = ""; });
+    .forEach((fare) => { fare.textContent = fare.dataset.available === "true" ? "💰" : ""; });
   const originId = stopRows[selectedIndex]?.fields.stop_id;
   if (!originId) {
     tripFares.textContent = "This stop has no stop_id, so fares cannot be calculated.";

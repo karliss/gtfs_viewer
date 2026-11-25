@@ -393,19 +393,28 @@ input[type="file"] {
 
 .trip-stop-row {
   display: grid;
-  grid-template-columns: 2rem 14rem 8rem 10rem;
+  grid-template-columns: 2rem 14rem 12rem 10rem;
   align-items: center;
   gap: 0.5rem;
 }
 
 .trip-stop-time {
-  width: 100%;
+  display: grid;
+  grid-template-columns: 5.5rem 5.5rem;
+  width: 12rem;
   padding: 0.35rem 0.5rem;
   border: 0;
   background: transparent;
   font-family: monospace;
   text-align: left;
   font-variant-numeric: tabular-nums;
+}
+
+.trip-arrival-time,
+.trip-departure-time {
+  display: block;
+  white-space: nowrap;
+  text-align: left;
 }
 
 .trip-stop-details {
