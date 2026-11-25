@@ -114,6 +114,8 @@ export interface GtfsIndexes {
   stopsById: Map<string, GtfsRow<"stops.txt">>;
   tripsById: Map<string, GtfsRow<"trips.txt">>;
   shapesById: Map<string, GtfsRow<"shapes.txt">[]>;
+  shapePointsById: Map<string, [number | null, number | null, number | null][]>;
+  routeVariantsByRouteId: Map<string, RouteVariant[]>;
   tripsByRouteId: Map<string, GtfsRow<"trips.txt">[]>;
   routesByTripId: Map<string, string>;
   stopTimesByTripId: Map<string, GtfsRow<"stop_times.txt">[]>;
@@ -202,12 +204,35 @@ export function summarizeTripField(
 }
 
 export interface RouteVariant {
+  routeId: string | null;
   shapeId: string | null;
+  shapeIds: string[];
   tripHeadsign: string | null;
   tripShortName: string | null;
   directionIds: (number | null)[];
   stops: (string | null)[];
   trips: GtfsRow<"trips.txt">[];
+}
+
+export interface VariantMergeResult {
+  merged: boolean;
+  mergedVariantCount: number;
+  canonicalShapeId: string | null;
+  removedShapeIds: string[];
+}
+
+export interface RouteVariantMergeSummary {
+  variantsBefore: number;
+  variantsAfter: number;
+  mergedVariantCount: number;
+  removedShapeIds: string[];
+}
+
+export interface FeedVariantMergeSummary {
+  routesAttempted: number;
+  routesMerged: number;
+  mergedVariantCount: number;
+  removedShapeIds: string[];
 }
 
 export interface VariantTimetableDeparture {
@@ -564,12 +589,169 @@ export function getVariantTableRows(
   }
 }
 
+function normalizedVariantValues(values: readonly (number | null)[]): (number | null)[] {
+  return [...new Set(values)].sort((a, b) => {
+    if (a === null) return b === null ? 0 : 1;
+    if (b === null) return -1;
+    return a - b;
+  });
+}
+
+function arraysEqual<T>(first: readonly T[], second: readonly T[]): boolean {
+  return first.length === second.length
+    && first.every((value, index) => Object.is(value, second[index]));
+}
+
+function shapePointsEqual(
+  first: readonly (readonly [number | null, number | null, number | null])[],
+  second: readonly (readonly [number | null, number | null, number | null])[],
+): boolean {
+  return first.length === second.length && first.every((point, index) => {
+    const other = second[index];
+    return point.length === other.length && point.every((value, coordinateIndex) =>
+      Object.is(value, other[coordinateIndex]));
+  });
+}
+
+export function canMergeRouteVariants(
+  feed: GtfsFeed,
+  first: RouteVariant,
+  second: RouteVariant,
+): boolean {
+  if (!first.shapeId || !second.shapeId || first.shapeId === second.shapeId) return false;
+  if (!first.routeId || first.routeId !== second.routeId) return false;
+  if (first.tripHeadsign !== second.tripHeadsign) return false;
+  if (first.tripShortName !== second.tripShortName) return false;
+  if (!arraysEqual(first.stops, second.stops)) return false;
+  if (!arraysEqual(normalizedVariantValues(first.directionIds),
+    normalizedVariantValues(second.directionIds))) return false;
+
+  const firstPoints = feed.indexes.shapePointsById.get(first.shapeId);
+  const secondPoints = feed.indexes.shapePointsById.get(second.shapeId);
+  if (!firstPoints || !secondPoints) return false;
+  if (firstPoints.some(([lat, lon]) => lat === null || lon === null)
+    || secondPoints.some(([lat, lon]) => lat === null || lon === null)) return false;
+  return shapePointsEqual(firstPoints, secondPoints);
+}
+
+export function mergeRouteVariantPair(
+  feed: GtfsFeed,
+  first: RouteVariant,
+  second: RouteVariant,
+): VariantMergeResult {
+  if (!canMergeRouteVariants(feed, first, second)) {
+    return {
+      merged: false,
+      mergedVariantCount: 0,
+      canonicalShapeId: first.shapeId,
+      removedShapeIds: [],
+    };
+  }
+
+  const canonicalShapeId = first.shapeId;
+  const secondaryShapeId = second.shapeId;
+  for (const shapeId of [canonicalShapeId, secondaryShapeId]) {
+    if (shapeId && !first.shapeIds.includes(shapeId)) first.shapeIds.push(shapeId);
+  }
+  const trips = new Set(first.trips);
+  for (const trip of second.trips) trips.add(trip);
+  first.trips = [...trips];
+
+  if (first.routeId) {
+    const variants = feed.indexes.routeVariantsByRouteId.get(first.routeId);
+    if (variants) {
+      feed.indexes.routeVariantsByRouteId.set(first.routeId,
+        variants.filter((variant) => variant !== second));
+    }
+  }
+  return {
+    merged: true,
+    mergedVariantCount: 1,
+    canonicalShapeId,
+    removedShapeIds: [],
+  };
+}
+
+export function mergeRouteVariants(
+  feed: GtfsFeed,
+  route: GtfsRow<"routes.txt"> | string,
+): RouteVariantMergeSummary {
+  const routeId = typeof route === "string" ? route : route.fields.route_id;
+  const variantsBefore = routeId ? getRouteVariants(feed, routeId).variants : [];
+  const removedShapeIds = new Set<string>();
+  let mergedVariantCount = 0;
+
+  const canonicalVariants: RouteVariant[] = [];
+  for (const variant of variantsBefore) {
+    const canonical = canonicalVariants.find((candidate) => canMergeRouteVariants(feed, candidate, variant));
+    if (canonical) {
+      const result = mergeRouteVariantPair(feed, canonical, variant);
+      if (result.merged) {
+        mergedVariantCount += result.mergedVariantCount;
+        for (const shapeId of result.removedShapeIds) removedShapeIds.add(shapeId);
+      }
+    } else {
+      canonicalVariants.push(variant);
+    }
+  }
+
+  const variantsAfter = routeId ? getRouteVariants(feed, routeId).variants : [];
+  return {
+    variantsBefore: variantsBefore.length,
+    variantsAfter: variantsAfter.length,
+    mergedVariantCount,
+    removedShapeIds: [...removedShapeIds],
+  };
+}
+
+export function mergeRouteVariantsInFeed(feed: GtfsFeed): FeedVariantMergeSummary {
+  const removedShapeIds = new Set<string>();
+  let routesAttempted = 0;
+  let routesMerged = 0;
+  let mergedVariantCount = 0;
+
+  for (const routeId of feed.indexes.tripsByRouteId.keys()) {
+    routesAttempted++;
+    const result = mergeRouteVariants(feed, routeId);
+    if (result.mergedVariantCount > 0) routesMerged++;
+    mergedVariantCount += result.mergedVariantCount;
+    for (const shapeId of result.removedShapeIds) removedShapeIds.add(shapeId);
+  }
+
+  return {
+    routesAttempted,
+    routesMerged,
+    mergedVariantCount,
+    removedShapeIds: [...removedShapeIds],
+  };
+}
+
 export function getRouteVariants(feed: GtfsFeed, routeId: string): {
   variants: RouteVariant[];
   tripsCount: number;
   tripsWithoutVariant: number;
 } {
+  const cached = feed.indexes.routeVariantsByRouteId.get(routeId);
+  if (cached) {
+    const tripsCount = feed.indexes.tripsByRouteId.get(routeId)?.length ?? 0;
+    return { variants: cached, tripsCount, tripsWithoutVariant: 0 };
+  }
   const routeTrips = feed.indexes.tripsByRouteId.get(routeId) ?? [];
+  const variantKeyPart = (value: string | null): string =>
+    value === null ? "n" : `v${value.length}:${value}`;
+  const variantKey = (
+    shapeId: string | null,
+    headsign: string | null,
+    shortName: string | null,
+    directionId: number | null,
+    stops: readonly (string | null)[],
+  ): string => [
+    variantKeyPart(shapeId),
+    variantKeyPart(headsign),
+    variantKeyPart(shortName),
+    directionId === null ? "n" : `d${directionId}`,
+    ...stops.map((stop) => variantKeyPart(stop)),
+  ].join("|");
 
   const sequence = (value: number | null): number => value ?? Infinity;
   const stopsByTrip = new Map<string, (string | null)[]>();
@@ -590,11 +772,15 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
       tripsWithoutVariant++;
       continue;
     }
-    const key = JSON.stringify([fields.shape_id, fields.trip_headsign, fields.trip_short_name, stops]);
+    const key = variantKey(fields.shape_id, fields.trip_headsign,
+      fields.trip_short_name, fields.direction_id, stops);
     let variant = variantsByKey.get(key);
     if (!variant) {
+      const shapeId = fields.shape_id || null;
       variant = {
-        shapeId: fields.shape_id || null, tripHeadsign: fields.trip_headsign,
+        routeId,
+        shapeId, shapeIds: shapeId ? [shapeId] : [],
+        tripHeadsign: fields.trip_headsign,
         tripShortName: fields.trip_short_name, directionIds: [], stops, trips: [],
       };
       variantsByKey.set(key, variant);
@@ -602,11 +788,9 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
     if (!variant.directionIds.includes(fields.direction_id)) variant.directionIds.push(fields.direction_id);
     variant.trips.push(trip);
   }
-  return {
-    variants: [...variantsByKey.values()],
-    tripsCount: routeTrips.length,
-    tripsWithoutVariant,
-  };
+  const variants = [...variantsByKey.values()];
+  feed.indexes.routeVariantsByRouteId.set(routeId, variants);
+  return { variants, tripsCount: routeTrips.length, tripsWithoutVariant };
 }
 
 export const ROUTE_TYPE_NAMES: Readonly<Record<string, string>> = {
@@ -756,9 +940,10 @@ export interface GtfsLoadProgress {
   fileName?: string;
 }
 
-function initializeFeedIndexes(feed: GtfsFeed): void {
+export function reinitializeFeedIndexes(feed: GtfsFeed): void {
   const getRows = <Name extends GtfsTableName>(kind: Name): GtfsRow<Name>[] =>
     (feed.tables.find((table) => table.kind === kind)?.rows as GtfsRow<Name>[] | undefined) ?? [];
+  const routeVariantsByRouteId = new Map<string, RouteVariant[]>();
 
   const agenciesById = new Map<string, GtfsRow<"agency.txt">>();
   for (const row of getRows("agency.txt")) {
@@ -801,6 +986,21 @@ function initializeFeedIndexes(feed: GtfsFeed): void {
       rows.push(row);
       shapesById.set(id, rows);
     }
+  }
+  const shapePointsById = new Map<string, [number | null, number | null, number | null][]>();
+  for (const [shapeId, rows] of shapesById) {
+    const ordered = [...rows].sort((a, b) => {
+      const aSequence = a.fields.shape_pt_sequence;
+      const bSequence = b.fields.shape_pt_sequence;
+      if (aSequence === null) return bSequence === null ? 0 : 1;
+      if (bSequence === null) return -1;
+      return aSequence - bSequence;
+    });
+    shapePointsById.set(shapeId, ordered.map((row) => [
+      row.fields.shape_pt_lat,
+      row.fields.shape_pt_lon,
+      row.fields.shape_dist_traveled,
+    ]));
   }
 
   const stopTimesByTripId = new Map<string, GtfsRow<"stop_times.txt">[]>();
@@ -909,6 +1109,8 @@ function initializeFeedIndexes(feed: GtfsFeed): void {
     stopsById,
     tripsById,
     shapesById,
+    shapePointsById,
+    routeVariantsByRouteId,
     tripsByRouteId,
     routesByTripId,
     stopTimesByTripId,
@@ -1044,7 +1246,7 @@ export function loadGtfsFiles(
     warnings: collector ? [...collector.all] : undefined,
   } as GtfsFeed;
   onProgress?.({ phase: "indexing", completed: 0, total: 1 });
-  initializeFeedIndexes(feed);
+  reinitializeFeedIndexes(feed);
   onProgress?.({ phase: "indexing", completed: 1, total: 1 });
   return feed;
 }

@@ -9,6 +9,7 @@ class FakeMap {
   constructor(options) {
     map = this;
     this.options = options;
+    this.fitBoundsCount = 0;
     this.style = options?.style;
     this.events = {};
     this.sources = {};
@@ -32,7 +33,7 @@ class FakeMap {
   queryRenderedFeatures() { return this.features; }
   getCanvas() { return this.canvas; }
   resize() {}
-  fitBounds() {}
+  fitBounds() { this.fitBoundsCount++; }
   getBounds() { return { getWest: () => -10, getEast: () => 10, getSouth: () => -10, getNorth: () => 10 }; }
   getZoom() { return 3; }
   easeTo(options) { this.lastEase = options; }
@@ -261,6 +262,21 @@ test("clicking a route line opens compact route details", () => {
   map.events.click({ point: {}, lngLat: [1, 2] });
   assert.equal(detailPopup.content, content);
   assert.equal(detailPopup.visible, true);
+});
+
+test("can disable automatic refocus after route or variant updates", () => {
+  const view = new MapView({}, () => {}, () => {});
+  assert.equal(view.autoRefocusEnabledState, true);
+  view.setAutoRefocusEnabled(false);
+  assert.equal(view.autoRefocusEnabledState, false);
+  view.update([{ id: "s", name: "Stop", coordinate: [1, 2] }], [
+    { coordinates: [[1, 2], [3, 4]], approximate: false, variantIndex: 0, label: "Variant", routeId: "r" },
+  ], true);
+  map.events.load();
+  assert.equal(view.autoRefocusEnabledState, false);
+  assert.equal(map.fitBoundsCount, 0);
+  view.update([{ id: "t", name: "Other", coordinate: [5, 6] }], [], true);
+  assert.equal(map.fitBoundsCount, 0);
 });
 
 test("hovering a stop without an ID changes its color and clears it on mouseout", () => {
