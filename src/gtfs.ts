@@ -7,6 +7,19 @@ import type { GtfsWarning, WarningCollector } from "./warnings";
 
 export type { GtfsFields, GtfsTableName } from "./gtfs-schema";
 
+export interface GtfsColor {
+  raw: string;
+  css: string;
+}
+
+export function processGtfsColor(value: string | null | undefined): GtfsColor | null {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!/^[\da-f]{6}$/i.test(raw)) return null;
+  const normalized = raw.toLowerCase();
+  return { raw: normalized, css: `#${normalized}` };
+}
+
 export const WHEELCHAIR_ACCESSIBLE_VALUES = {
   UNKNOWN: 0,
   YES: 1,

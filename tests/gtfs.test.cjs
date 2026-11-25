@@ -4,7 +4,7 @@ const { strToU8, zipSync } = require("fflate");
 const {
   decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, summarizeTripField,
-  decodeTripFieldValue, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES,
+  decodeTripFieldValue, processGtfsColor, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES,
 } = require("../dist/gtfs.cjs");
 const {
   WarningCollector, WARNING_DESCRIPTIONS, WARNING_TYPES,
@@ -371,6 +371,15 @@ test("trims recognized fields while preserving unrecognized values except IDs", 
   assert.equal(variants[0].shapeId, "s");
   assert.deepEqual(variants[0].stops, ["a"]);
   assert.deepEqual(variants[0].trips.map(({ fields }) => fields.trip_id), ["t", "t2"]);
+});
+
+test("processes and validates GTFS colors", () => {
+  assert.deepEqual(processGtfsColor("A1b2C3"), { raw: "a1b2c3", css: "#a1b2c3" });
+  assert.deepEqual(processGtfsColor(" 00ff80 "), { raw: "00ff80", css: "#00ff80" });
+  assert.equal(processGtfsColor(null), null);
+  assert.equal(processGtfsColor("#A1B2C3"), null);
+  assert.equal(processGtfsColor("12345"), null);
+  assert.equal(processGtfsColor("GGGGGG"), null);
 });
 
 test("summarizes trip accessibility with missing values left unprovided", () => {

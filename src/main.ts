@@ -1,7 +1,8 @@
 import {
   decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, summarizeTripField,
   getVariantTimetable, formatTimetableDayRange, getDateSchedule, getTripFares, isServiceActiveOnDate,
-  gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES,
+  gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, processGtfsColor,
+  WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES,
   type GtfsFeed, type GtfsRow, type GtfsTable, type RouteVariant,
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
@@ -633,22 +634,15 @@ function renderRoutesCell(column: string, value: string | number | null): HTMLTa
   if (column === "route_type" && value !== null) {
     return renderGenericCell(column, routeTypeLabel(value));
   }
-  if (column === "route_color" && typeof value === "string" && /^[\da-f]{6}$/i.test(value)) {
+  if (column === "route_color" || column === "route_text_color") {
+    const color = processGtfsColor(typeof value === "string" ? value : null);
+    if (!color) return renderGenericCell(column, value);
     const swatch = document.createElement("span");
     swatch.className = "route-color-swatch";
-    swatch.style.backgroundColor = `#${value}`;
+    swatch.style.backgroundColor = color.css;
     swatch.setAttribute("aria-hidden", "true");
     const cell = document.createElement("td");
-    cell.append(swatch, document.createTextNode(value));
-    return cell;
-  }
-  if (column === "route_text_color" && typeof value === "string" && /^[\da-f]{6}$/i.test(value)) {
-    const swatch = document.createElement("span");
-    swatch.className = "route-color-swatch";
-    swatch.style.backgroundColor = `#${value}`;
-    swatch.setAttribute("aria-hidden", "true");
-    const cell = document.createElement("td");
-    cell.append(swatch, document.createTextNode(value));
+    cell.append(swatch, document.createTextNode(color.raw));
     return cell;
   }
 
@@ -709,13 +703,11 @@ function routeListLabel(route: GtfsRow<"routes.txt">): string {
 }
 
 function routeColor(route: GtfsRow<"routes.txt"> | undefined): string | null {
-  const value = route?.fields.route_color;
-  return value && /^[\da-f]{6}$/i.test(value) ? `#${value}` : null;
+  return processGtfsColor(route?.fields.route_color)?.css ?? null;
 }
 
 function routeTextColor(route: GtfsRow<"routes.txt"> | undefined): string | null {
-  const value = route?.fields.route_text_color;
-  return value && /^[\da-f]{6}$/i.test(value) ? `#${value}` : null;
+  return processGtfsColor(route?.fields.route_text_color)?.css ?? null;
 }
 
 function appendColorSwatch(description: HTMLElement, color: string): void {
@@ -824,12 +816,9 @@ function routeCompactContent(route: GtfsRow<"routes.txt">, variantIndex: number 
     } else {
       description.textContent = name === "route_type" ? routeTypeLabel(value) : String(value);
     }
-    if (name === "route_color" && typeof value === "string" && /^[\da-f]{6}$/i.test(value)) {
-      const swatch = document.createElement("span");
-      swatch.className = "route-color-swatch";
-      swatch.style.backgroundColor = `#${value}`;
-      swatch.setAttribute("aria-hidden", "true");
-      description.prepend(swatch);
+    if (name === "route_color") {
+      const color = processGtfsColor(typeof value === "string" ? value : null);
+      if (color) appendColorSwatch(description, color.css);
     }
     properties.append(term, description);
   }
@@ -1131,12 +1120,14 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
         description.append(agencyLink(String(value), true));
       } else if (name === "route_url") {
         description.append(renderLink(value, String(value)));
-      } else if (name === "route_color" && typeof value === "string" && /^[\da-f]{6}$/i.test(value)) {
-        appendColorSwatch(description, `#${value}`);
-        description.append(document.createTextNode(value));
-      } else if (name === "route_text_color" && typeof value === "string" && /^[\da-f]{6}$/i.test(value)) {
-        appendColorSwatch(description, `#${value}`);
-        description.append(document.createTextNode(value));
+      } else if (name === "route_color" || name === "route_text_color") {
+        const color = processGtfsColor(typeof value === "string" ? value : null);
+        if (color) {
+          appendColorSwatch(description, color.css);
+          description.append(document.createTextNode(color.raw));
+        } else {
+          description.textContent = String(value);
+        }
       } else {
         description.textContent = name === "route_type" ? routeTypeLabel(value) : String(value);
       }
