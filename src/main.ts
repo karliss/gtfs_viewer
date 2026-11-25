@@ -179,7 +179,6 @@ app.innerHTML = `
     </section>
     <section id="date-schedule" class="panel viewer" aria-labelledby="date-schedule-heading" hidden>
       <h2 id="date-schedule-heading" tabindex="-1">Schedule on date</h2>
-      <p id="date-schedule-trips"></p>
       <p id="date-schedule-route"></p>
       <div class="form-controls">
         <label for="schedule-date">Date</label>
@@ -322,7 +321,6 @@ const scheduleDate = element<HTMLInputElement>("#schedule-date");
 const scheduleDatePrev = element<HTMLButtonElement>("#schedule-date-prev");
 const scheduleDateNext = element<HTMLButtonElement>("#schedule-date-next");
 const dateScheduleRoute = element<HTMLParagraphElement>("#date-schedule-route");
-const dateScheduleTrips = element<HTMLParagraphElement>("#date-schedule-trips");
 const dateScheduleRuleList = element<HTMLUListElement>("#date-schedule-rule-list");
 const scheduleSummary = element<HTMLParagraphElement>("#schedule-summary");
 const scheduleVariants = element<HTMLElement>("#schedule-variants");
@@ -1389,8 +1387,6 @@ function showDateSchedule(route: GtfsRow<"routes.txt">, date: string): void {
   }
   scheduleDate.value = isoDate;
   dateScheduleHeading.textContent = isoDate ? `Schedule on ${formatDateWithWeekday(gtfsDateToIso(isoDate) || isoDate)}` : "Schedule on date";
-  dateScheduleTrips.replaceChildren();
-  dateScheduleTrips.append(document.createTextNode("Trip: "));
   dateScheduleRoute.replaceChildren();
   dateScheduleRoute.append(document.createTextNode("Route: "));
   const color = routeColor(route);
@@ -1437,9 +1433,6 @@ function renderDateSchedule(): void {
     : "Schedule on date";
   const { variants } = getRouteVariants(feed, routeId);
   scheduleVariants.replaceChildren();
-  dateScheduleTrips.replaceChildren();
-  dateScheduleTrips.append(document.createTextNode("Trip: "));
-  const activeTripIds = new Set<string>();
   const activeServiceIds = new Set<string>();
   let scheduledTripCount = 0;
   for (const variant of variants) {
@@ -1447,7 +1440,6 @@ function renderDateSchedule(): void {
     scheduledTripCount += schedule.tripCount;
     for (const trip of variant.trips) {
       if (!isServiceActiveOnDate(feed, trip.fields.service_id, date)) continue;
-      if (trip.fields.trip_id) activeTripIds.add(trip.fields.trip_id);
       if (trip.fields.service_id) activeServiceIds.add(trip.fields.service_id);
     }
     const section = document.createElement("section");
@@ -1494,24 +1486,6 @@ function renderDateSchedule(): void {
       section.append(table);
     }
     scheduleVariants.append(section);
-  }
-  if (!activeTripIds.size) {
-    dateScheduleTrips.append(document.createTextNode("None"));
-  } else {
-    for (const [index, tripId] of [...activeTripIds].entries()) {
-      if (index) dateScheduleTrips.append(", ");
-      const trip = feed.indexes.tripsById.get(tripId);
-      if (trip) {
-        const link = document.createElement("button");
-        link.type = "button";
-        link.className = "route-link";
-        link.textContent = tripId;
-        link.addEventListener("click", () => showTrip(trip));
-        dateScheduleTrips.append(link);
-      } else {
-        dateScheduleTrips.append(tripId);
-      }
-    }
   }
   scheduleSummary.textContent = gtfsDate
     ? `${scheduledTripCount} scheduled ${scheduledTripCount === 1 ? "trip" : "trips"} run on ${date}.`
