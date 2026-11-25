@@ -42,13 +42,14 @@ app.innerHTML = `
         <div class="form-controls">
           <input id="feed-file" type="file" accept=".zip,.txt" multiple required />
           <button type="submit">Load feed</button>
+          <button id="ultrawide-toggle" type="button" title="Toggle ultrawidescreen friendly mode" aria-label="Toggle ultrawidescreen friendly mode" aria-pressed="false">&lt;-&gt;</button>
         </div>
       </form>
       <span id="loading-spinner" class="loading-spinner" aria-label="Loading feed" hidden></span>
       <progress id="loading-progress" max="100" value="0" hidden></progress>
       <p id="status" role="status" aria-live="polite"></p>
     </section>
-    <div class="history-controls" aria-label="View history">
+    <div class="history-controls" aria-label="View history" hidden>
       <label class="history-select-label">History</label>
       <button id="history-back" type="button" title="Back" aria-label="Back">←</button>
       <button id="history-forward" type="button" title="Forward" aria-label="Forward">→</button>
@@ -270,8 +271,10 @@ function element<T extends HTMLElement>(selector: string): T {
 
 const form = element<HTMLFormElement>("#load-form");
 const loadPanel = element<HTMLElement>("#load-panel");
+const pageElement = element<HTMLElement>(".page");
 const input = element<HTMLInputElement>("#feed-file");
 const submit = element<HTMLButtonElement>("#load-form button");
+const ultrawideToggle = element<HTMLButtonElement>("#ultrawide-toggle");
 const status = element<HTMLParagraphElement>("#status");
 const loadingSpinner = element<HTMLSpanElement>("#loading-spinner");
 const loadingProgress = element<HTMLProgressElement>("#loading-progress");
@@ -293,6 +296,7 @@ const historyStops = element<HTMLButtonElement>("#history-stops");
 const historyWarnings = element<HTMLButtonElement>("#history-warnings");
 const historySelect = element<HTMLButtonElement>("#history-select");
 const historyMenu = element<HTMLElement>("#history-menu");
+const historyControls = element<HTMLElement>(".history-controls");
 const routeDetail = element<HTMLElement>("#route-detail");
 const routeHeading = element<HTMLHeadingElement>("#route-heading");
 const routeProperties = element<HTMLElement>("#route-properties");
@@ -2747,6 +2751,7 @@ form.addEventListener("submit", async (event) => {
   loadingProgress.hidden = false;
   loadingProgress.value = 0;
   status.textContent = "Loading feed…";
+  historyControls.hidden = true;
   loadPanel.classList.remove("loaded");
   viewer.hidden = true;
   routeDetail.hidden = true;
@@ -2787,6 +2792,7 @@ form.addEventListener("submit", async (event) => {
     pushViewState();
     viewer.hidden = false;
     loadPanel.classList.add("loaded");
+    historyControls.hidden = false;
     status.textContent = "Feed loaded.";
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : "Could not load the feed.";
@@ -2800,6 +2806,10 @@ form.addEventListener("submit", async (event) => {
 
 element<HTMLButtonElement>("#agency-dialog-close").addEventListener("click", () => agencyDialog.close());
 element<HTMLButtonElement>("#fare-dialog-close").addEventListener("click", () => fareDialog.close());
+ultrawideToggle.addEventListener("click", () => {
+  const enabled = pageElement.classList.toggle("ultrawide");
+  ultrawideToggle.setAttribute("aria-pressed", String(enabled));
+});
 stopsMapButton.addEventListener("click", showStopsMap);
 routesMapButton.addEventListener("click", showAllRoutesMap);
 routeMapButton.addEventListener("click", () => {
