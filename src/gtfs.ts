@@ -500,10 +500,9 @@ export function collectTimetableCalendarData(
   const serviceIds = new Set(variant.trips.flatMap((trip) =>
     trip.fields.service_id ? [trip.fields.service_id] : []));
   const calendarItems: TimetableCalendarItem[] = [];
-  const calendarKeys = new Set<string>();
   for (const serviceId of serviceIds) {
     for (const row of feed.indexes.calendarByServiceId.get(serviceId) ?? []) {
-      const item: TimetableCalendarItem = {
+      calendarItems.push({
         serviceId,
         days: [
           row.fields.monday === 1 ? 1 : null,
@@ -515,12 +514,7 @@ export function collectTimetableCalendarData(
           row.fields.sunday === 1 ? 7 : null,
         ].filter((day): day is number => day !== null),
         dateRange: [row.fields.start_date, row.fields.end_date],
-      };
-      const key = JSON.stringify([serviceId, item.days, ...item.dateRange]);
-      if (!calendarKeys.has(key)) {
-        calendarKeys.add(key);
-        calendarItems.push(item);
-      }
+      });
     }
   }
   const exceptionDates = [...new Set(
