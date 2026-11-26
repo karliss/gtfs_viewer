@@ -266,6 +266,11 @@ test("shape colors remain distinct and range highlighting can zoom to selected p
   view.highlightLines([[[1, 2], [3, 4]], [[5, 6]]]);
   assert.equal(map.sources["range-highlight-lines"].data.features.length, 1);
   assert.equal(map.sources["range-highlight-points"].data.features.length, 1);
+  view.setComparisonRangeColors([[[1, 2], [3, 4]]], [[[5, 6]]], true);
+  assert.deepEqual(map.sources["range-highlight-lines"].data.features.map((feature) => feature.properties.color), ["#2e7d32", "#f58220"]);
+  assert.deepEqual(map.sources["range-highlight-points"].data.features.map((feature) => feature.properties.color), ["#c62828", "#f58220"]);
+  view.setComparisonRangeColors([[[1, 2], [3, 4]]], [[[5, 6]]], false);
+  assert.deepEqual(map.sources["range-highlight-lines"].data.features.map((feature) => feature.properties.color), ["#f58220"]);
   view.focusPoints([[1, 2], [5, 6]]);
   assert.equal(map.fitBoundsCount, 2);
 });

@@ -99,6 +99,7 @@ export class MapView {
   private hoveredStop: string | null = null;
   private hoveredStopIndex: number | null = null;
   private highlightedLines: Coordinate[][] | null = null;
+  private comparisonRangeLines: Array<{ coordinates: Coordinate[]; color: string }> = [];
   private pendingFocusPoints: Coordinate[] | null = null;
   private routeColorsEnabled: boolean;
   private randomColorsEnabled: boolean;
@@ -224,12 +225,12 @@ export class MapView {
       this.map.addSource("range-highlight-lines", { type: "geojson", data: this.rangeLineFeatures() });
       this.map.addLayer({
         id: "range-highlight-lines", type: "line", source: "range-highlight-lines",
-        paint: { "line-color": "#f58220", "line-width": 8 },
+        paint: { "line-color": ["get", "color"], "line-width": 8 },
       });
       this.map.addSource("range-highlight-points", { type: "geojson", data: this.rangePointFeatures() });
       this.map.addLayer({
         id: "range-highlight-points", type: "circle", source: "range-highlight-points",
-        paint: { "circle-radius": 7, "circle-color": "#f58220", "circle-stroke-color": "#fff", "circle-stroke-width": 2 },
+        paint: { "circle-radius": 7, "circle-color": ["get", "color"], "circle-stroke-color": "#fff", "circle-stroke-width": 2 },
       });
       this.map.addLayer({
         id: "route-hit", type: "line", source: "route-lines",
@@ -356,6 +357,7 @@ export class MapView {
     this.pendingZoom = null;
     this.pendingFocusPoints = null;
     this.highlightedLines = null;
+    this.comparisonRangeLines = [];
     this.hoveredStop = null;
     this.hoveredStopIndex = null;
     this.popup.remove();
@@ -531,6 +533,19 @@ export class MapView {
     }
   }
 
+  setComparisonRangeColors(common: Coordinate[][], differing: Coordinate[][], enabled: boolean): void {
+    this.comparisonRangeLines = enabled
+      ? [
+        ...common.map((coordinates) => ({ coordinates, color: "#2e7d32" })),
+        ...differing.map((coordinates) => ({ coordinates, color: "#c62828" })),
+      ]
+      : [];
+    if (this.loaded) {
+      (this.map.getSource("range-highlight-lines") as GeoJSONSource).setData(this.rangeLineFeatures());
+      (this.map.getSource("range-highlight-points") as GeoJSONSource).setData(this.rangePointFeatures());
+    }
+  }
+
   focusPoints(points: Coordinate[]): void {
     if (!this.loaded) {
       this.pendingFocusPoints = points;
@@ -632,21 +647,29 @@ export class MapView {
   }
 
   private rangeLineFeatures(): FeatureCollection<LineString> {
+    const highlighted = (this.highlightedLines ?? []).map((coordinates) => ({
+      coordinates,
+      color: "#f58220",
+    }));
     return {
       type: "FeatureCollection",
-      features: (this.highlightedLines ?? []).filter((line) => line.length >= 2).map((coordinates) => ({
+      features: [...this.comparisonRangeLines, ...highlighted].filter((line) => line.coordinates.length >= 2).map((line) => ({
         type: "Feature",
-        properties: {},
-        geometry: { type: "LineString", coordinates },
+        properties: { color: line.color },
+        geometry: { type: "LineString", coordinates: line.coordinates },
       })),
     };
   }
 
   private rangePointFeatures(): FeatureCollection<Point> {
+    const highlighted = (this.highlightedLines ?? []).map((coordinates) => ({
+      coordinates,
+      color: "#f58220",
+    }));
     return {
       type: "FeatureCollection",
-      features: (this.highlightedLines ?? []).flatMap((coordinates) => coordinates.length === 1
-        ? [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: coordinates[0] } }]
+      features: [...this.comparisonRangeLines, ...highlighted].flatMap((line) => line.coordinates.length === 1
+        ? [{ type: "Feature", properties: { color: line.color }, geometry: { type: "Point", coordinates: line.coordinates[0] } }]
         : []),
     };
   }

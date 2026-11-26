@@ -2483,6 +2483,11 @@ function showShapeComparison(firstShapeId: string, secondShapeId: string): boole
     document.createTextNode(" "),
     shapeLegendItem(secondShapeId, "#1565c0"),
   );
+  const rangeColorLabel = document.createElement("label");
+  rangeColorLabel.className = "shape-range-color-toggle";
+  const rangeColorToggle = document.createElement("input");
+  rangeColorToggle.type = "checkbox";
+  rangeColorLabel.append(rangeColorToggle, " Color common ranges green and differing ranges red");
   const summary = document.createElement("p");
   summary.textContent = `${comparison.matches.length} common points; `
     + `${comparison.differingFirstRanges.reduce((count, range) => count + range.endIndex - range.startIndex + 1, 0)} `
@@ -2492,10 +2497,21 @@ function showShapeComparison(firstShapeId: string, secondShapeId: string): boole
     + (first.invalidShapePoints || second.invalidShapePoints
       ? ` Invalid points omitted: ${firstShapeId} ${first.invalidShapePoints}, ${secondShapeId} ${second.invalidShapePoints}.`
       : "");
-  mapSidebar.append(colorLegend, summary);
-
   const rangeCoordinates = (points: typeof first.points, range: ShapePointRange): Coordinate[] =>
     points.slice(range.startIndex, range.endIndex + 1).map((point) => point.coordinate);
+  const commonRangeLines = comparison.commonRanges.flatMap((range) => [
+    rangeCoordinates(first.points, range.first),
+    rangeCoordinates(second.points, range.second),
+  ]);
+  const differingRangeLines = [
+    ...comparison.differingFirstRanges.map((range) => rangeCoordinates(first.points, range)),
+    ...comparison.differingSecondRanges.map((range) => rangeCoordinates(second.points, range)),
+  ];
+  rangeColorToggle.addEventListener("change", () => {
+    mapView?.setComparisonRangeColors(commonRangeLines, differingRangeLines, rangeColorToggle.checked);
+  });
+  mapSidebar.append(rangeColorLabel, colorLegend, summary);
+
   const rangeLabel = (points: typeof first.points, range: ShapePointRange): string => {
     const start = points[range.startIndex]?.sequence;
     const end = points[range.endIndex]?.sequence;
