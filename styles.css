@@ -311,6 +311,23 @@ input[type="file"] {
   width: 100%;
 }
 
+#shape-comparison-form input.shape-id-invalid {
+  border: 2px solid #c62828;
+  outline-color: #c62828;
+}
+
+#shape-comparison-form input.shape-id-invalid:focus {
+  outline: 2px solid #c62828;
+  outline-offset: 1px;
+}
+
+.shape-id-status {
+  display: inline-block;
+  min-height: 1.25rem;
+  margin-top: 0.25rem;
+  font-size: 1rem;
+}
+
 #shape-comparison-error:not(:empty) {
   margin-top: 0.75rem;
   color: #a32121;

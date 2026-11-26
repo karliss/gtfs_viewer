@@ -274,8 +274,10 @@ app.innerHTML = `
       <form id="shape-comparison-form">
         <label for="shape-comparison-first">First shape ID</label>
         <input id="shape-comparison-first" name="firstShapeId" list="shape-id-options" required />
+        <span id="shape-comparison-first-status" class="shape-id-status" aria-live="polite"></span>
         <label for="shape-comparison-second">Second shape ID</label>
         <input id="shape-comparison-second" name="secondShapeId" list="shape-id-options" required />
+        <span id="shape-comparison-second-status" class="shape-id-status" aria-live="polite"></span>
         <datalist id="shape-id-options"></datalist>
         <p id="shape-comparison-error" role="alert"></p>
         <div class="form-controls">
@@ -391,6 +393,8 @@ const shapeComparisonDialog = element<HTMLDialogElement>("#shape-comparison-dial
 const shapeComparisonForm = element<HTMLFormElement>("#shape-comparison-form");
 const shapeComparisonFirst = element<HTMLInputElement>("#shape-comparison-first");
 const shapeComparisonSecond = element<HTMLInputElement>("#shape-comparison-second");
+const shapeComparisonFirstStatus = element<HTMLSpanElement>("#shape-comparison-first-status");
+const shapeComparisonSecondStatus = element<HTMLSpanElement>("#shape-comparison-second-status");
 const shapeIdOptions = element<HTMLDataListElement>("#shape-id-options");
 const shapeComparisonError = element<HTMLParagraphElement>("#shape-comparison-error");
 const warningsView = element<HTMLElement>("#warnings-view");
@@ -3046,6 +3050,28 @@ element<HTMLButtonElement>("#agency-dialog-close").addEventListener("click", () 
 element<HTMLButtonElement>("#fare-dialog-close").addEventListener("click", () => fareDialog.close());
 element<HTMLButtonElement>("#shape-comparison-cancel").addEventListener("click", () => shapeComparisonDialog.close());
 historyCompareShapes.addEventListener("click", () => openShapeComparisonDialog());
+function updateShapeIdVerification(): void {
+  const compareButton = shapeComparisonForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+  for (const [input, status] of [
+    [shapeComparisonFirst, shapeComparisonFirstStatus],
+    [shapeComparisonSecond, shapeComparisonSecondStatus],
+  ] as const) {
+    const shapeId = input.value.trim();
+    const valid = Boolean(shapeId && feed?.indexes.shapesById.has(shapeId));
+    input.classList.toggle("shape-id-invalid", !valid);
+    input.setAttribute("aria-invalid", String(!valid));
+    status.textContent = valid ? "✔️" : "❌";
+  }
+  if (compareButton) {
+    compareButton.disabled = !shapeComparisonFirst.value.trim()
+      || !shapeComparisonSecond.value.trim()
+      || !feed?.indexes.shapesById.has(shapeComparisonFirst.value.trim())
+      || !feed?.indexes.shapesById.has(shapeComparisonSecond.value.trim());
+  }
+  shapeComparisonError.textContent = "";
+}
+shapeComparisonFirst.addEventListener("input", updateShapeIdVerification);
+shapeComparisonSecond.addEventListener("input", updateShapeIdVerification);
 shapeComparisonForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const firstShapeId = shapeComparisonFirst.value.trim();
@@ -3460,6 +3486,7 @@ function openShapeComparisonDialog(firstShapeId = "", secondShapeId = ""): void 
   shapeComparisonFirst.value = firstShapeId;
   shapeComparisonSecond.value = secondShapeId;
   shapeComparisonError.textContent = "";
+  updateShapeIdVerification();
   shapeComparisonDialog.showModal();
   shapeComparisonFirst.focus();
 }
