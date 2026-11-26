@@ -698,6 +698,14 @@ tbody tr:last-child td {
   white-space: nowrap;
 }
 
+.warnings-table th:nth-child(2),
+.warnings-table td:nth-child(2) {
+  width: 12rem;
+  min-width: 12rem;
+  max-width: 12rem;
+  overflow-wrap: anywhere;
+}
+
 .warnings-table th:nth-child(3),
 .warnings-table td:nth-child(3) {
   width: 4rem;
