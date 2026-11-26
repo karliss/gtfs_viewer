@@ -558,25 +558,28 @@ export function splitTimetableCalendarRanges(
 ): TimetableDateRange[] {
   const validRanges = dateRanges.filter(isValidTimetableDateRange);
   if (validRanges.length === 0) return [];
-  const boundaries = new Set<string>();
+  const events = new Map<string, number>();
+  let activeRangeCount = 0;
+  const addEvent = (date: string, change: number): void => {
+    events.set(date, (events.get(date) ?? 0) + change);
+  };
   for (const [startDate, endDate] of validRanges) {
-    if (startDate) boundaries.add(startDate);
-    if (endDate) boundaries.add(shiftTimetableDate(endDate, 1));
+    if (startDate) addEvent(startDate, 1);
+    else activeRangeCount++;
+    if (endDate) addEvent(shiftTimetableDate(endDate, 1), -1);
   }
-  const sortedBoundaries = [...boundaries].sort();
-  const candidateRanges: TimetableDateRange[] = [];
-  if (sortedBoundaries.length === 0) {
-    candidateRanges.push([null, null]);
-  } else {
-    let startDate: string | null = null;
-    for (const boundary of sortedBoundaries) {
-      candidateRanges.push([startDate, shiftTimetableDate(boundary, -1)]);
-      startDate = boundary;
+  const sortedEventDates = [...events.keys()].sort();
+  const splitRanges: TimetableDateRange[] = [];
+  let startDate: string | null = null;
+  for (const eventDate of sortedEventDates) {
+    if (activeRangeCount > 0) {
+      splitRanges.push([startDate, shiftTimetableDate(eventDate, -1)]);
     }
-    candidateRanges.push([startDate, null]);
+    activeRangeCount += events.get(eventDate) ?? 0;
+    startDate = eventDate;
   }
-  return candidateRanges.filter((candidate) =>
-    validRanges.some((range) => timetableDateRangesOverlap(range, candidate)));
+  if (activeRangeCount > 0) splitRanges.push([startDate, null]);
+  return splitRanges;
 }
 
 export function collectTimetableServiceDateRanges(
