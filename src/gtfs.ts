@@ -653,13 +653,7 @@ export function getPopularTimetableDayMasks(serviceMasks: readonly number[]): nu
   }
   candidates.sort((leftMask, rightMask) => {
     const countDifference = (counts.get(rightMask) ?? 0) - (counts.get(leftMask) ?? 0);
-    if (countDifference !== 0) return countDifference;
-    const left = timetableDayMaskToDays(leftMask);
-    const right = timetableDayMaskToDays(rightMask);
-    for (let index = 0; index < Math.min(left.length, right.length); index++) {
-      if (left[index] !== right[index]) return left[index] - right[index];
-    }
-    return left.length - right.length;
+    return countDifference || leftMask - rightMask;
   });
   const mostPopular = candidates[0];
   if (!mostPopular) return [];

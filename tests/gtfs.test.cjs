@@ -1105,6 +1105,13 @@ test("timetable range and popular-day stages can be tested independently", () =>
     ]).map(daysFromDayMask),
     [[1, 2], [3, 4, 5, 6, 7]],
   );
+  assert.deepEqual(
+    getPopularTimetableDayMasks([
+      dayMaskFromDays([3]),
+      dayMaskFromDays([1, 3]),
+    ]).map(daysFromDayMask),
+    [[3], [1]],
+  );
   assert.deepEqual(getPopularTimetableDayMasks([0]), []);
 
   const repeatedServiceCalendarItems = [
