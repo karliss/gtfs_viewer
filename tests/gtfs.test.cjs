@@ -966,6 +966,7 @@ test("supports multiple calendar rows for one service ID", () => {
 });
 
 test("ignores calendar rows with missing or invalid date bounds", () => {
+  const collector = new WarningCollector();
   const feed = loadGtfs(archive({
     "routes.txt": "route_id,route_short_name\nr,5\n",
     "trips.txt": "route_id,trip_id,service_id,shape_id\nr,t,weekday,s\n",
@@ -977,7 +978,7 @@ test("ignores calendar rows with missing or invalid date bounds", () => {
       + "weekday,0,0,0,1,0,0,0,2026-04-01,20260430\n"
       + "weekday,0,0,0,0,1,0,0,20260230,20260531\n"
       + "weekday,0,0,0,0,0,1,0,20260731,20260701\n",
-  }));
+  }), collector);
   const variant = getRouteVariants(feed, "r").variants[0];
   const { calendarItems } = collectTimetableCalendarData(feed, variant);
 
@@ -985,6 +986,21 @@ test("ignores calendar rows with missing or invalid date bounds", () => {
     ({ serviceId, days, dateRange })), [
     { serviceId: "weekday", days: [1], dateRange: ["20260101", "20260131"] },
   ]);
+  assert.deepEqual(
+    collector.all
+      .filter(({ type }) => type === "invalid_values")
+      .map(({ csvRowNumber, parameters }) => ({
+        csvRowNumber,
+        column: parameters.column,
+        value: parameters.value,
+      })),
+    [
+      { csvRowNumber: 3, column: "start_date", value: "" },
+      { csvRowNumber: 4, column: "end_date", value: "" },
+      { csvRowNumber: 5, column: "start_date", value: "2026-04-01" },
+      { csvRowNumber: 6, column: "start_date", value: "20260230" },
+    ],
+  );
   assert.deepEqual(
     getVariantTimetable(feed, variant).map(({ dateRange }) => dateRange),
     [["20260101", "20260131"]],

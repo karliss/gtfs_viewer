@@ -1056,6 +1056,19 @@ function parseTable(name: string, columns: string[], records: string[][], collec
     record: string[], column: string, index: number | undefined, rowIndex: number,
   ): string | number | null => {
     const value = index === undefined ? null : record[index] ?? null;
+    if (kind === "calendar.txt" && (column === "start_date" || column === "end_date")) {
+      const date = value?.trim() || null;
+      if (!isValidTimetableDate(date)) {
+        collector?.add({
+          type: "invalid_values",
+          parameters: { file: name, row: rowIndex + 2, column, value },
+          relatedObjectIds: [],
+          csvRowNumber: rowIndex + 2,
+        });
+        return null;
+      }
+      return date;
+    }
     if (value === null) return null;
     if (fieldNames.has(column)) {
       const normalized = value.trim();
