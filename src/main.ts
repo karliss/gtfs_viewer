@@ -2553,6 +2553,8 @@ function setMapSettingsOpen(open: boolean): void {
 mapSettingsButton.addEventListener("click", () => {
   setMapSettingsOpen(mapSettingsMenu.hidden === true);
 });
+mapSettings.addEventListener("pointerdown", (event) => event.stopPropagation());
+mapSettings.addEventListener("click", (event) => event.stopPropagation());
 
 function configureShapeMapSettings(): void {
   mapVariantControls.hidden = false;
