@@ -462,6 +462,16 @@ export class MapView {
     }
   }
 
+  addOverlayControl(control: HTMLElement): void {
+    this.map.addControl({
+      onAdd: () => {
+        control.classList.add("maplibregl-ctrl", "maplibregl-ctrl-group");
+        return control;
+      },
+      onRemove: () => {},
+    }, "top-right");
+  }
+
   setBaseLayer(id: MapBaseLayerId): void {
     if (id === this.baseLayer) return;
     const option = MAP_BASE_LAYERS.find((candidate) => candidate.id === id);

@@ -303,12 +303,25 @@ input[type="file"] {
   background: rgb(0 0 0 / 35%);
 }
 
-#shape-comparison-form label {
+#shape-comparison-form input {
+  width: 100%;
+  min-width: 0;
+}
+
+.shape-id-field {
   margin-top: 0.75rem;
 }
 
-#shape-comparison-form input {
-  width: 100%;
+.shape-id-field label {
+  display: block;
+  margin: 0 0 0.25rem;
+}
+
+.shape-id-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 1.5rem;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 #shape-comparison-form input.shape-id-invalid {
@@ -324,7 +337,8 @@ input[type="file"] {
 .shape-id-status {
   display: inline-block;
   min-height: 1.25rem;
-  margin-top: 0.25rem;
+  margin: 0;
+  text-align: center;
   font-size: 1rem;
 }
 
@@ -798,18 +812,6 @@ tbody tr:last-child td {
   min-width: 0;
 }
 
-#map-canvas-container > .map-settings {
-  position: absolute;
-  z-index: 2;
-  top: 0.75rem;
-  right: 0.75rem;
-}
-
-#map-canvas-container > .map-settings summary {
-  background: #fff;
-  box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
-}
-
 #map-canvas.map-canvas--no-basemap {
   background-color: #f8fafc;
 }
@@ -853,14 +855,6 @@ tbody tr:last-child td {
 
 .map-settings {
   position: relative;
-}
-
-.map-settings summary {
-  cursor: pointer;
-  list-style: none;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #aebbd0;
-  border-radius: 0.35rem;
 }
 
 .map-settings summary::-webkit-details-marker {

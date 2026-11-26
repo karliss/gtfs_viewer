@@ -220,8 +220,8 @@ app.innerHTML = `
       <div class="map-layout">
         <div id="map-canvas-container">
           <div id="map-canvas" aria-label="Map of transit stops and routes"></div>
-          <details id="map-settings" class="map-settings">
-            <summary title="View options" aria-label="View options">⚙</summary>
+          <details id="map-settings" class="map-settings maplibregl-ctrl maplibregl-ctrl-group">
+            <summary class="maplibregl-ctrl-icon" title="View options" aria-label="View options">⚙</summary>
             <div class="map-settings-menu">
               <label class="map-option" for="map-base-layer">
                 <span>Background map</span>
@@ -274,12 +274,20 @@ app.innerHTML = `
     <dialog id="shape-comparison-dialog" aria-labelledby="shape-comparison-dialog-heading">
       <h2 id="shape-comparison-dialog-heading">Compare shapes</h2>
       <form id="shape-comparison-form">
-        <label for="shape-comparison-first">First shape ID</label>
-        <input id="shape-comparison-first" name="firstShapeId" list="shape-id-options" required />
-        <span id="shape-comparison-first-status" class="shape-id-status" aria-live="polite"></span>
-        <label for="shape-comparison-second">Second shape ID</label>
-        <input id="shape-comparison-second" name="secondShapeId" list="shape-id-options" required />
-        <span id="shape-comparison-second-status" class="shape-id-status" aria-live="polite"></span>
+        <div class="shape-id-field">
+          <label for="shape-comparison-first">First shape ID</label>
+          <div class="shape-id-input-row">
+            <input id="shape-comparison-first" name="firstShapeId" list="shape-id-options" required />
+            <span id="shape-comparison-first-status" class="shape-id-status" aria-live="polite"></span>
+          </div>
+        </div>
+        <div class="shape-id-field">
+          <label for="shape-comparison-second">Second shape ID</label>
+          <div class="shape-id-input-row">
+            <input id="shape-comparison-second" name="secondShapeId" list="shape-id-options" required />
+            <span id="shape-comparison-second-status" class="shape-id-status" aria-live="polite"></span>
+          </div>
+        </div>
         <datalist id="shape-id-options"></datalist>
         <p id="shape-comparison-error" role="alert"></p>
         <div class="form-controls">
@@ -2394,7 +2402,7 @@ function openMap(title: string): void {
       false,
       false,
       false,
-      false,
+      mapAllStops.checked,
       () => {
         if (mapMode === "shape-comparison" && activeShapeComparison && feed) {
           const first = shapeMapPoints(feed.indexes.shapesById, activeShapeComparison.firstShapeId).points;
@@ -2418,6 +2426,7 @@ function openMap(title: string): void {
         mapView?.focusSelection(routeId, variantIndex);
       },
     );
+    mapView.addOverlayControl(mapSettings);
     mapRasterBlackAndWhite.checked = mapView.rasterBlackAndWhiteEnabled;
     mapRouteColors.checked = mapView.routeColorsEnabledState;
     mapRandomColors.checked = mapView.randomColorsEnabledState;
@@ -2505,7 +2514,7 @@ function routeVariantForWarning(warning: GtfsWarning): {
     : { routeId };
 }
 
-function stopsForShapeIds(shapeIds: readonly string[], routeVariant?: RouteVariant): MapStop[] {
+function stopsForShapeComparison(routeVariant?: RouteVariant): MapStop[] {
   if (!feed) return [];
   if (mapAllStops.checked) {
     return (feed.tables.find((table) => table.kind === "stops.txt")?.rows ?? []).map(mapStop);
@@ -2517,19 +2526,7 @@ function stopsForShapeIds(shapeIds: readonly string[], routeVariant?: RouteVaria
       return stop ? [mapStop(stop)] : [];
     });
   }
-  const stopIds = new Set<string>();
-  for (const trip of feed.indexes.tripsById.values()) {
-    if (!trip.fields.shape_id || !shapeIds.includes(trip.fields.shape_id)) continue;
-    const tripId = trip.fields.trip_id;
-    if (!tripId) continue;
-    for (const stopTime of feed.indexes.stopTimesByTripId.get(tripId) ?? []) {
-      if (stopTime.fields.stop_id) stopIds.add(stopTime.fields.stop_id);
-    }
-  }
-  return [...stopIds].flatMap((stopId) => {
-    const stop = stopsById.get(stopId);
-    return stop ? [mapStop(stop)] : [];
-  });
+  return [];
 }
 
 function appendShapeStopToggle(container: HTMLElement): void {
@@ -2540,7 +2537,7 @@ function appendShapeStopToggle(container: HTMLElement): void {
   checkbox.checked = shapeStopsHidden;
   checkbox.addEventListener("change", () => {
     shapeStopsHidden = checkbox.checked;
-    mapView?.setStopsVisible(!shapeStopsHidden);
+    mapView?.setStopsVisible(mapAllStops.checked || !shapeStopsHidden);
   });
   label.append(checkbox, " Hide stops");
   container.append(label);
@@ -2551,7 +2548,7 @@ function configureShapeMapSettings(): void {
   mapRouteControl.hidden = true;
   mapVariantControl.hidden = true;
   mapSettings.open = false;
-  mapView?.setStopsVisible(!shapeStopsHidden);
+  mapView?.setStopsVisible(mapAllStops.checked || !shapeStopsHidden);
   mapView?.setStopOrderVariant(null);
 }
 
@@ -2572,9 +2569,10 @@ function showShapeMap(shapeId: string): void {
   details.textContent = `${points.length} valid shape points`
     + (invalidShapePoints ? `; ${invalidShapePoints} invalid points omitted.` : ".");
   mapSidebar.append(heading, details);
-  appendShapeStopToggle(mapSidebar);
   mapSummary.textContent = details.textContent;
-  mapView?.update(stopsForShapeIds([shapeId]), [{
+  mapView?.update(mapAllStops.checked
+    ? (feed.tables.find((table) => table.kind === "stops.txt")?.rows ?? []).map(mapStop)
+    : [], [{
     coordinates: points.map((point) => point.coordinate),
     approximate: false,
     variantIndex: 0,
@@ -2613,7 +2611,7 @@ function showShapeComparison(
   mapSidebar.setAttribute("aria-label", "Shape comparison ranges");
   configureShapeMapSettings();
   mapClearFilter.hidden = true;
-  appendShapeStopToggle(mapSidebar);
+  if (routeVariant) appendShapeStopToggle(mapSidebar);
 
   if (warningIndex !== undefined) {
     const warning = warningCollector.all[warningIndex];
@@ -2794,7 +2792,7 @@ function showShapeComparison(
   }
   mapSidebar.append(differingSection);
   mapSummary.textContent = summary.textContent;
-  mapView?.update(stopsForShapeIds([firstShapeId, secondShapeId], routeVariant), [
+  mapView?.update(stopsForShapeComparison(routeVariant), [
     {
       coordinates: first.points.map((point) => point.coordinate),
       approximate: false,
