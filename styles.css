@@ -786,10 +786,28 @@ tbody tr:last-child td {
 }
 
 #map-canvas {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   height: 65vh;
   min-height: 24rem;
+}
+
+#map-canvas-container {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+#map-canvas-container > .map-settings {
+  position: absolute;
+  z-index: 2;
+  top: 0.75rem;
+  right: 0.75rem;
+}
+
+#map-canvas-container > .map-settings summary {
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
 }
 
 #map-canvas.map-canvas--no-basemap {
@@ -861,6 +879,10 @@ tbody tr:last-child td {
 }
 
 #map-variant-controls .map-settings-menu .map-option + .map-option {
+  margin-top: 0.5rem;
+}
+
+#map-canvas-container .map-settings-menu .map-option + .map-option {
   margin-top: 0.5rem;
 }
 
@@ -981,6 +1003,11 @@ tbody tr:last-child td {
 @media (max-width: 700px) {
   .map-layout {
     flex-direction: column;
+  }
+
+  #map-canvas-container {
+    flex: none;
+    width: 100%;
   }
 
   #map-canvas {

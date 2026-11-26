@@ -216,46 +216,48 @@ app.innerHTML = `
           <select id="map-variant"></select>
           <button id="map-variant-reset" type="button" title="Show all variants" aria-label="Show all variants">X</button>
         </div>
-        <details id="map-settings" class="map-settings">
-          <summary title="Map settings" aria-label="Map settings">⚙</summary>
-          <div class="map-settings-menu">
-            <label class="map-option" for="map-base-layer">
-              <span>Background map</span>
-              <select id="map-base-layer"></select>
-            </label>
-            <label class="map-option" for="map-raster-black-and-white">
-              <input id="map-raster-black-and-white" type="checkbox" />
-              Black and white
-            </label>
-            <label class="map-option" for="map-route-colors">
-              <input id="map-route-colors" type="checkbox" />
-              Use route colors
-            </label>
-            <label class="map-option" for="map-random-colors">
-              <input id="map-random-colors" type="checkbox" />
-              Use random colors
-            </label>
-            <label class="map-option" for="map-all-stops">
-              <input id="map-all-stops" type="checkbox" />
-              Show all stops
-            </label>
-            <label class="map-option" for="map-reduced-stops">
-              <input id="map-reduced-stops" type="checkbox" />
-              Reduce stop size
-            </label>
-            <label class="map-option" for="map-stop-order">
-              <input id="map-stop-order" type="checkbox" />
-              Display stop order numbers
-            </label>
-            <label class="map-option" for="map-auto-refocus">
-              <input id="map-auto-refocus" type="checkbox" />
-              Disable automatic refocus
-            </label>
-          </div>
-        </details>
       </div>
       <div class="map-layout">
-        <div id="map-canvas" aria-label="Map of transit stops and routes"></div>
+        <div id="map-canvas-container">
+          <div id="map-canvas" aria-label="Map of transit stops and routes"></div>
+          <details id="map-settings" class="map-settings">
+            <summary title="View options" aria-label="View options">⚙</summary>
+            <div class="map-settings-menu">
+              <label class="map-option" for="map-base-layer">
+                <span>Background map</span>
+                <select id="map-base-layer"></select>
+              </label>
+              <label class="map-option" for="map-raster-black-and-white">
+                <input id="map-raster-black-and-white" type="checkbox" />
+                Black and white
+              </label>
+              <label class="map-option" for="map-route-colors">
+                <input id="map-route-colors" type="checkbox" />
+                Use route colors
+              </label>
+              <label class="map-option" for="map-random-colors">
+                <input id="map-random-colors" type="checkbox" />
+                Use random colors
+              </label>
+              <label class="map-option" for="map-all-stops">
+                <input id="map-all-stops" type="checkbox" />
+                Show all stops
+              </label>
+              <label class="map-option" for="map-reduced-stops">
+                <input id="map-reduced-stops" type="checkbox" />
+                Reduce stop size
+              </label>
+              <label class="map-option" for="map-stop-order">
+                <input id="map-stop-order" type="checkbox" />
+                Display stop order numbers
+              </label>
+              <label class="map-option" for="map-auto-refocus">
+                <input id="map-auto-refocus" type="checkbox" />
+                Disable automatic refocus
+              </label>
+            </div>
+          </details>
+        </div>
         <aside id="map-sidebar" aria-label="Route stops" hidden></aside>
       </div>
     </section>
@@ -454,6 +456,7 @@ let activeShapeComparison: {
   variantIndex?: number;
 } | undefined;
 let shapeStopsHidden = false;
+let shapeComparisonRangeColors = false;
 let selectedWarningTypes = new Set<WarningType>(WARNING_TYPES);
 let selectedWarningTables = new Set<string>();
 let warningTablesInitialized = false;
@@ -2539,7 +2542,7 @@ function appendShapeStopToggle(container: HTMLElement): void {
     shapeStopsHidden = checkbox.checked;
     mapView?.setStopsVisible(!shapeStopsHidden);
   });
-  label.append(checkbox, " Hide stop overlay");
+  label.append(checkbox, " Hide stops");
   container.append(label);
 }
 
@@ -2695,6 +2698,7 @@ function showShapeComparison(
   rangeColorLabel.className = "shape-range-color-toggle";
   const rangeColorToggle = document.createElement("input");
   rangeColorToggle.type = "checkbox";
+  rangeColorToggle.checked = shapeComparisonRangeColors;
   rangeColorLabel.append(rangeColorToggle, " Color common ranges green and differing ranges red");
   const summary = document.createElement("p");
   summary.textContent = `${comparison.matches.length} common points; `
@@ -2716,6 +2720,7 @@ function showShapeComparison(
     ...comparison.differingSecondRanges.map((range) => rangeCoordinates(second.points, range)),
   ];
   rangeColorToggle.addEventListener("change", () => {
+    shapeComparisonRangeColors = rangeColorToggle.checked;
     mapView?.setComparisonRangeColors(commonRangeLines, differingRangeLines, rangeColorToggle.checked);
   });
   mapSidebar.append(rangeColorLabel, colorLegend, summary);
@@ -2805,6 +2810,11 @@ function showShapeComparison(
       color: "#1565c0",
     },
   ]);
+  mapView?.setComparisonRangeColors(
+    commonRangeLines,
+    differingRangeLines,
+    shapeComparisonRangeColors,
+  );
   pushViewState();
   return true;
 }
