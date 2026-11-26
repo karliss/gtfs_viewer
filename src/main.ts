@@ -3342,17 +3342,17 @@ routeMapButton.addEventListener("click", () => {
 mapRoute.addEventListener("change", () => {
   setMapSettingsOpen(false);
   populateMapVariants();
-  renderRouteMap(true);
+  renderRouteMap();
   pushViewState();
 });
 mapRouteReset.addEventListener("click", () => {
   setMapSettingsOpen(false);
   mapRoute.value = "all";
   populateMapVariants();
-  renderRouteMap(true);
+  renderRouteMap();
 });
 mapVariant.addEventListener("change", () => {
-  renderRouteMap(true);
+  renderRouteMap();
   setMapSettingsOpen(false);
   if (mapVariant.value !== "all") {
     const section = [...mapSidebar.querySelectorAll<HTMLElement>("section[data-variant-index]")]
@@ -3364,7 +3364,7 @@ mapVariant.addEventListener("change", () => {
 mapVariantReset.addEventListener("click", () => {
   setMapSettingsOpen(false);
   mapVariant.value = "all";
-  renderRouteMap(true);
+  renderRouteMap();
 });
 mapRouteColors.addEventListener("change", () => {
   if (mapRouteColors.checked) mapRandomColors.checked = false;
