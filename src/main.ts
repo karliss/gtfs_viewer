@@ -206,12 +206,12 @@ app.innerHTML = `
       <p id="map-summary" role="status"></p>
       <button id="map-clear-filter" type="button" hidden>Clear stop filter</button>
       <div id="map-variant-controls" hidden>
-        <div>
+        <div id="map-route-control">
           <label for="map-route">Route</label>
           <select id="map-route"></select>
           <button id="map-route-reset" type="button" title="Show all routes" aria-label="Show all routes">X</button>
         </div>
-        <div>
+        <div id="map-variant-control">
           <label for="map-variant">Route variant</label>
           <select id="map-variant"></select>
           <button id="map-variant-reset" type="button" title="Show all variants" aria-label="Show all variants">X</button>
@@ -375,6 +375,8 @@ const mapRoute = element<HTMLSelectElement>("#map-route");
 const mapRouteReset = element<HTMLButtonElement>("#map-route-reset");
 const mapVariant = element<HTMLSelectElement>("#map-variant");
 const mapVariantReset = element<HTMLButtonElement>("#map-variant-reset");
+const mapRouteControl = element<HTMLElement>("#map-route-control");
+const mapVariantControl = element<HTMLElement>("#map-variant-control");
 const mapBaseLayer = element<HTMLSelectElement>("#map-base-layer");
 const mapRasterBlackAndWhite = element<HTMLInputElement>("#map-raster-black-and-white");
 const mapRouteColors = element<HTMLInputElement>("#map-route-colors");
@@ -443,7 +445,7 @@ const viewHistory = new ViewHistory();
 let viewHistoryRestoring = false;
 let mapMode: "stops" | "routes" | "route" | "shape" | "shape-comparison" = "routes";
 let activeShapeMapId: string | undefined;
-let activeShapeComparison: { firstShapeId: string; secondShapeId: string } | undefined;
+let activeShapeComparison: { firstShapeId: string; secondShapeId: string; warningIndex?: number } | undefined;
 let selectedWarningTypes = new Set<WarningType>(WARNING_TYPES);
 let selectedWarningTables = new Set<string>();
 let warningTablesInitialized = false;
@@ -636,7 +638,7 @@ function restoreViewState(state: ViewState): void {
         else showAllRoutesMap();
       }
     } else if (state.type === "shape-comparison") {
-      showShapeComparison(state.firstShapeId, state.secondShapeId);
+      showShapeComparison(state.firstShapeId, state.secondShapeId, state.warningIndex);
     }
   } finally {
     viewHistoryRestoring = false;
@@ -1893,6 +1895,25 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
     mapButton.setAttribute("aria-label", `View ${heading.textContent} on map`);
     mapButton.addEventListener("click", () => showRouteMap(route, index));
     heading.append(" ", mapButton);
+    if (variant.mergedWithDifferentShapes) {
+      const pair = variant.differentShapePairs[0]
+        ?? (variant.shapeIds.length >= 2
+          ? { firstShapeId: variant.shapeIds[0], secondShapeId: variant.shapeIds[1] }
+          : null);
+      if (pair) {
+        const warningButton = document.createElement("button");
+        warningButton.type = "button";
+        warningButton.className = "route-map-icon";
+        warningButton.textContent = "⚠️";
+        const warningText = `Merged variant uses different shapes ${pair.firstShapeId} and ${pair.secondShapeId}; click to compare`;
+        warningButton.title = warningText;
+        warningButton.setAttribute("aria-label", warningText);
+        warningButton.addEventListener("click", () => {
+          showShapeComparison(pair.firstShapeId, pair.secondShapeId);
+        });
+        heading.append(" ", warningButton);
+      }
+    }
     section.append(heading);
     const properties = document.createElement("dl");
     properties.className = "route-properties";
@@ -2436,6 +2457,48 @@ function showTripVariantOnMap(trip: GtfsRow<"trips.txt">): void {
   showRouteMap(route, index < 0 ? "all" : index);
 }
 
+function stopsForShapeIds(shapeIds: readonly string[]): MapStop[] {
+  if (!feed) return [];
+  if (mapAllStops.checked) {
+    return (feed.tables.find((table) => table.kind === "stops.txt")?.rows ?? []).map(mapStop);
+  }
+  const stopIds = new Set<string>();
+  for (const trip of feed.indexes.tripsById.values()) {
+    if (!trip.fields.shape_id || !shapeIds.includes(trip.fields.shape_id)) continue;
+    const tripId = trip.fields.trip_id;
+    if (!tripId) continue;
+    for (const stopTime of feed.indexes.stopTimesByTripId.get(tripId) ?? []) {
+      if (stopTime.fields.stop_id) stopIds.add(stopTime.fields.stop_id);
+    }
+  }
+  return [...stopIds].flatMap((stopId) => {
+    const stop = stopsById.get(stopId);
+    return stop ? [mapStop(stop)] : [];
+  });
+}
+
+function appendShapeStopToggle(container: HTMLElement): void {
+  const label = document.createElement("label");
+  label.className = "map-option";
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = false;
+  checkbox.addEventListener("change", () => mapView?.setStopsVisible(!checkbox.checked));
+  label.append(checkbox, " Hide stop overlay");
+  container.append(label);
+}
+
+function configureShapeMapSettings(): void {
+  mapVariantControls.hidden = false;
+  mapRouteControl.hidden = true;
+  mapVariantControl.hidden = true;
+  mapSettings.open = false;
+  mapAllStops.checked = false;
+  mapView?.setAllStopsEnabled(false);
+  mapView?.setStopsVisible(true);
+  mapView?.setStopOrderVariant(null);
+}
+
 function showShapeMap(shapeId: string): void {
   if (!feed || !feed.indexes.shapesById.has(shapeId)) return;
   activeShapeMapId = shapeId;
@@ -2445,7 +2508,7 @@ function showShapeMap(shapeId: string): void {
   openMap(`Shape map: ${shapeId}`);
   mapSidebar.hidden = false;
   mapSidebar.setAttribute("aria-label", `Shape ${shapeId} details`);
-  mapVariantControls.hidden = true;
+  configureShapeMapSettings();
   mapClearFilter.hidden = true;
   const heading = document.createElement("h3");
   heading.textContent = shapeId;
@@ -2453,8 +2516,9 @@ function showShapeMap(shapeId: string): void {
   details.textContent = `${points.length} valid shape points`
     + (invalidShapePoints ? `; ${invalidShapePoints} invalid points omitted.` : ".");
   mapSidebar.append(heading, details);
+  appendShapeStopToggle(mapSidebar);
   mapSummary.textContent = details.textContent;
-  mapView?.update([], [{
+  mapView?.update(stopsForShapeIds([shapeId]), [{
     coordinates: points.map((point) => point.coordinate),
     approximate: false,
     variantIndex: 0,
@@ -2464,12 +2528,12 @@ function showShapeMap(shapeId: string): void {
   pushViewState();
 }
 
-function showShapeComparison(firstShapeId: string, secondShapeId: string): boolean {
+function showShapeComparison(firstShapeId: string, secondShapeId: string, warningIndex?: number): boolean {
   if (!feed || !feed.indexes.shapesById.has(firstShapeId) || !feed.indexes.shapesById.has(secondShapeId)) {
     return false;
   }
   activeShapeMapId = undefined;
-  activeShapeComparison = { firstShapeId, secondShapeId };
+  activeShapeComparison = { firstShapeId, secondShapeId, warningIndex };
   mapMode = "shape-comparison";
   const first = shapeMapPoints(feed.indexes.shapesById, firstShapeId);
   const second = shapeMapPoints(feed.indexes.shapesById, secondShapeId);
@@ -2477,8 +2541,73 @@ function showShapeComparison(firstShapeId: string, secondShapeId: string): boole
   openMap(`Shape comparison: ${firstShapeId} and ${secondShapeId}`);
   mapSidebar.hidden = false;
   mapSidebar.setAttribute("aria-label", "Shape comparison ranges");
-  mapVariantControls.hidden = true;
+  configureShapeMapSettings();
   mapClearFilter.hidden = true;
+  appendShapeStopToggle(mapSidebar);
+
+  if (warningIndex !== undefined) {
+    const warning = warningCollector.all[warningIndex];
+    if (warning) {
+      const warningNavigation = document.createElement("div");
+      warningNavigation.className = "shape-comparison-warning-navigation";
+
+      const comparableWarnings = warningCollector.all
+        .map((candidate, index) => ({ warning: candidate, index }))
+        .filter(({ warning: candidate }) =>
+          typeof candidate.parameters.firstShapeId === "string"
+          && typeof candidate.parameters.secondShapeId === "string");
+      const position = comparableWarnings.findIndex(({ index }) => index === warningIndex);
+
+      const previousWarning = document.createElement("button");
+      previousWarning.type = "button";
+      previousWarning.textContent = "Previous warning";
+      previousWarning.disabled = position <= 0;
+      const nextWarning = document.createElement("button");
+      nextWarning.type = "button";
+      nextWarning.textContent = "Next warning";
+      nextWarning.disabled = position < 0 || position >= comparableWarnings.length - 1;
+
+      previousWarning.addEventListener("click", () => {
+        if (position > 0) {
+          const target = comparableWarnings[position - 1];
+          showShapeComparison(
+            String(target.warning.parameters.firstShapeId),
+            String(target.warning.parameters.secondShapeId),
+            target.index,
+          );
+        }
+      });
+      nextWarning.addEventListener("click", () => {
+        if (position >= 0 && position < comparableWarnings.length - 1) {
+          const target = comparableWarnings[position + 1];
+          showShapeComparison(
+            String(target.warning.parameters.firstShapeId),
+            String(target.warning.parameters.secondShapeId),
+            target.index,
+          );
+        }
+      });
+      warningNavigation.append(previousWarning, nextWarning);
+      mapSidebar.append(warningNavigation);
+
+      const routeId = typeof warning.parameters.routeId === "string" ? warning.parameters.routeId : null;
+      if (routeId) {
+        const route = routesById.get(routeId);
+        const routeLink = document.createElement("button");
+        routeLink.type = "button";
+        routeLink.className = "route-link";
+        routeLink.textContent = route
+          ? route.fields.route_short_name || route.fields.route_long_name || routeId
+          : routeId;
+        routeLink.addEventListener("click", () => {
+          if (route) showRoute(route);
+        });
+        const routeParagraph = document.createElement("p");
+        routeParagraph.append(document.createTextNode("Route: "), routeLink);
+        mapSidebar.append(routeParagraph);
+      }
+    }
+  }
 
   const colorLegend = document.createElement("p");
   colorLegend.className = "shape-comparison-legend";
@@ -2585,7 +2714,7 @@ function showShapeComparison(firstShapeId: string, secondShapeId: string): boole
   }
   mapSidebar.append(differingSection);
   mapSummary.textContent = summary.textContent;
-  mapView?.update([], [
+  mapView?.update(stopsForShapeIds([firstShapeId, secondShapeId]), [
     {
       coordinates: first.points.map((point) => point.coordinate),
       approximate: false,
@@ -2706,6 +2835,8 @@ function prepareRouteMap(routes: GtfsRow<"routes.txt">[]): void {
   mapSidebar.hidden = false;
   mapSidebar.setAttribute("aria-label", "Route variants and stops");
   mapVariantControls.hidden = false;
+  mapRouteControl.hidden = false;
+  mapVariantControl.hidden = false;
   mapClearFilter.hidden = true;
   mapRoute.replaceChildren();
   const allRoutes = document.createElement("option");
@@ -3134,7 +3265,17 @@ mapRandomColors.addEventListener("change", () => {
 });
 mapAllStops.addEventListener("change", () => {
   mapView?.setAllStopsEnabled(mapAllStops.checked);
-  renderRouteMap(true);
+  if (mapMode === "shape-comparison" && activeShapeComparison) {
+    showShapeComparison(
+      activeShapeComparison.firstShapeId,
+      activeShapeComparison.secondShapeId,
+      activeShapeComparison.warningIndex,
+    );
+  } else if (mapMode === "shape" && activeShapeMapId) {
+    showShapeMap(activeShapeMapId);
+  } else {
+    renderRouteMap(true);
+  }
 });
 mapReducedStops.addEventListener("change", () => mapView?.setStopSizeReduced(mapReducedStops.checked));
 mapStopOrder.addEventListener("change", () => mapView?.setStopOrderEnabled(mapStopOrder.checked));
@@ -3312,6 +3453,9 @@ function showWarnings(): void {
 
 function warningTableKey(warning: GtfsWarning): string {
   if (WARNING_DESCRIPTIONS[warning.type].scope === "archive") return "Global";
+  if (warning.type === "variant_merge_different_shapes"
+    || warning.type === "variant_merge_identical_shapes") return "shapes.txt";
+  if (warning.type === "variant_merge_different_short_names") return "trips.txt";
   return typeof warning.parameters.file === "string" ? warning.parameters.file : "Global";
 }
 
@@ -3405,7 +3549,9 @@ function renderWarningTable(): void {
       compareButton.type = "button";
       compareButton.className = "route-link warning-shape-compare";
       compareButton.textContent = "Compare shapes";
-      compareButton.addEventListener("click", () => showShapeComparison(firstShapeId, secondShapeId));
+      compareButton.addEventListener("click", () => {
+        showShapeComparison(firstShapeId, secondShapeId, warningCollector.all.indexOf(warning));
+      });
       message.append(document.createTextNode(" "), compareButton);
     }
 

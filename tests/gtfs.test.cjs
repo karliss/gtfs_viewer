@@ -599,7 +599,11 @@ test("handles missing tables and shape trips without stop times", () => {
   assert.equal(tripsCount, 2);
   assert.equal(tripsWithoutVariant, 1);
   assert.deepEqual(variants.map(({ trips, ...variant }) => variant), [
-    { routeId: "r", shapeId: "s", shapeIds: ["s"], tripHeadsign: null, tripShortName: null, directionIds: [null], stops: [] },
+    {
+      routeId: "r", shapeId: "s", shapeIds: ["s"],
+      mergedWithDifferentShapes: false, differentShapePairs: [],
+      tripHeadsign: null, tripShortName: null, directionIds: [null], stops: [],
+    },
   ]);
   assert.equal(getVariantTableRows(feed, variants[0], "shapes.txt"), undefined);
   assert.deepEqual(getRouteVariants(feed, "other"), {
@@ -655,6 +659,8 @@ test("checks and merges route variants that differ only by shape ID with identic
   const mergedVariants = getRouteVariants(feed, "r").variants;
   assert.equal(mergedVariants.length, 1);
   assert.deepEqual(mergedVariants[0].shapeIds, ["shape-a", "shape-b"]);
+  assert.equal(mergedVariants[0].mergedWithDifferentShapes, false);
+  assert.deepEqual(mergedVariants[0].differentShapePairs, []);
   assert.deepEqual(mergedVariants[0].trips.map((trip) => trip.fields.trip_id), ["t1", "t2"]);
 });
 
@@ -682,6 +688,11 @@ test("includes shape_dist_traveled in the indexed shape points and warns when me
     secondTripId: "t2",
     secondShapeId: "shape-b",
   });
+  const mergedVariants = getRouteVariants(feed, "r").variants;
+  assert.equal(mergedVariants[0].mergedWithDifferentShapes, true);
+  assert.deepEqual(mergedVariants[0].differentShapePairs, [
+    { firstShapeId: "shape-a", secondShapeId: "shape-b" },
+  ]);
 });
 
 test("variants contain trips from one route and reject cross-route merges", () => {

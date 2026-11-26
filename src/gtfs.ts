@@ -207,6 +207,8 @@ export interface RouteVariant {
   routeId: string | null;
   shapeId: string | null;
   shapeIds: string[];
+  mergedWithDifferentShapes: boolean;
+  differentShapePairs: Array<{ firstShapeId: string; secondShapeId: string }>;
   tripHeadsign: string | null;
   tripShortName: string | null;
   directionIds: (number | null)[];
@@ -695,7 +697,20 @@ export function mergeRouteVariantPair(
   const canonicalShapeId = first.shapeId;
   const secondaryShapeId = second.shapeId;
   const warnings = variantMergeWarnings(feed, first, second);
-  for (const warning of warnings) warningCollector?.add(warning);
+  for (const warning of warnings) {
+    warningCollector?.add(warning);
+    if (warning.type === "variant_merge_different_shapes"
+      && canonicalShapeId
+      && secondaryShapeId) {
+      first.mergedWithDifferentShapes = true;
+      const pair = { firstShapeId: canonicalShapeId, secondShapeId: secondaryShapeId };
+      if (!first.differentShapePairs.some((candidate) =>
+        candidate.firstShapeId === pair.firstShapeId
+        && candidate.secondShapeId === pair.secondShapeId)) {
+        first.differentShapePairs.push(pair);
+      }
+    }
+  }
   for (const shapeId of [canonicalShapeId, secondaryShapeId]) {
     if (shapeId && !first.shapeIds.includes(shapeId)) first.shapeIds.push(shapeId);
   }
@@ -830,6 +845,8 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
       variant = {
         routeId,
         shapeId, shapeIds: shapeId ? [shapeId] : [],
+        mergedWithDifferentShapes: false,
+        differentShapePairs: [],
         tripHeadsign: fields.trip_headsign,
         tripShortName: fields.trip_short_name, directionIds: [], stops, trips: [],
       };

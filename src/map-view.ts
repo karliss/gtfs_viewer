@@ -106,6 +106,7 @@ export class MapView {
   private stopSizeReduced: boolean;
   private stopOrderEnabled: boolean;
   private allStopsEnabled = false;
+  private stopsVisible = true;
   private autoRefocusEnabled = true;
   private stopOrderVariant: number | null = null;
   private baseLayer: MapBaseLayerId;
@@ -436,6 +437,15 @@ export class MapView {
     this.allStopsEnabled = enabled;
   }
 
+  setStopsVisible(enabled: boolean): void {
+    this.stopsVisible = enabled;
+    if (this.loaded) {
+      this.map.setLayoutProperty("stops", "visibility", enabled ? "visible" : "none");
+      this.map.setLayoutProperty("stop-order", "visibility",
+        enabled && this.stopOrderEnabled && this.stopOrderVariant !== null ? "visible" : "none");
+    }
+  }
+
   setAutoRefocusEnabled(enabled: boolean): void {
     this.autoRefocusEnabled = enabled;
   }
@@ -713,7 +723,7 @@ export class MapView {
   }
 
   private applyStopOrder(): void {
-    const visible = this.stopOrderEnabled && this.stopOrderVariant !== null;
+    const visible = this.stopsVisible && this.stopOrderEnabled && this.stopOrderVariant !== null;
     if (typeof (this.map as LibreMap & { setLayoutProperty?: (id: string, name: string, value: unknown) => void }).setLayoutProperty === "function") {
       this.map.setLayoutProperty("stop-order", "visibility", visible ? "visible" : "none");
     }

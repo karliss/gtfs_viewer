@@ -6,7 +6,7 @@ export type ViewState =
   | { type: "date-schedule"; routeId: string; date: string }
   | { type: "warnings"; itemIndex: number }
   | { type: "map"; mode: "stops" | "routes" | "route" | "shape"; routeId?: string; variantIndex?: number | "all"; shapeId?: string }
-  | { type: "shape-comparison"; firstShapeId: string; secondShapeId: string };
+  | { type: "shape-comparison"; firstShapeId: string; secondShapeId: string; warningIndex?: number };
 
 export const DEFAULT_VIEW_STATE: ViewState = {
   type: "table",
