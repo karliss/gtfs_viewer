@@ -250,8 +250,24 @@ export interface VariantTimetableRow {
 export interface VariantTimetable {
   popularDays: number[][];
   dateRange: [string | null, string | null];
-  exceptionDates: string[];
   rows: VariantTimetableRow[];
+}
+
+export type TimetableDateRange = [string | null, string | null];
+
+export interface TimetableCalendarItem {
+  serviceId: string;
+  dayMask: number;
+  dateRange: [string, string];
+}
+
+export interface TimetableCalendarData {
+  calendarItems: TimetableCalendarItem[];
+}
+
+export interface TimetableServiceDateRange {
+  dateRange: TimetableDateRange;
+  serviceDays: Map<string, number>;
 }
 
 export function gtfsDateToIso(date: string | null): string | null {
@@ -475,45 +491,51 @@ export function formatTimetableDayRange(days: readonly number[]): string {
   return ranges.join(", ");
 }
 
-export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable[] {
-  const firstStop = variant.stops[0];
-  const tripIds = new Set(variant.trips.flatMap((trip) => trip.fields.trip_id ? [trip.fields.trip_id] : []));
+function validTimetableCalendarDateRange(
+  startDate: string | null,
+  endDate: string | null,
+): [string, string] | null {
+  if (!isValidTimetableDate(startDate) || !isValidTimetableDate(endDate)
+    || startDate > endDate) return null;
+  return [startDate, endDate];
+}
 
-  const calendarRangesForService = (serviceId: string | null): {
-    days: number[];
-    dateRange: [string | null, string | null];
-  }[] => {
-    if (!serviceId) return [];
-    const rows = feed.indexes.calendarByServiceId.get(serviceId);
-    if (!rows?.length) return [];
-    return rows.map((row) => ({
-      days: [
-      row.fields.monday === 1 ? 1 : null,
-      row.fields.tuesday === 1 ? 2 : null,
-      row.fields.wednesday === 1 ? 3 : null,
-      row.fields.thursday === 1 ? 4 : null,
-      row.fields.friday === 1 ? 5 : null,
-      row.fields.saturday === 1 ? 6 : null,
-      row.fields.sunday === 1 ? 7 : null,
-      ].filter((day): day is number => day !== null),
-      dateRange: [row.fields.start_date, row.fields.end_date],
-    }));
-  };
-
-  const calendarRanges: {
-    days: number[];
-    dateRange: [string | null, string | null];
-  }[] = [];
-  const calendarKeys = new Set<string>();
-  for (const trip of variant.trips) {
-    for (const range of calendarRangesForService(trip.fields.service_id)) {
-      const key = `${range.days.join(",")}|${range.dateRange[0]}|${range.dateRange[1]}`;
-      if (!calendarKeys.has(key)) {
-        calendarKeys.add(key);
-        calendarRanges.push(range);
-      }
+export function collectTimetableCalendarData(
+  feed: GtfsFeed,
+  variant: RouteVariant,
+): TimetableCalendarData {
+  const serviceIds = new Set(variant.trips.flatMap((trip) =>
+    trip.fields.service_id ? [trip.fields.service_id] : []));
+  const calendarItems: TimetableCalendarItem[] = [];
+  for (const serviceId of serviceIds) {
+    for (const row of feed.indexes.calendarByServiceId.get(serviceId) ?? []) {
+      const dateRange = validTimetableCalendarDateRange(
+        row.fields.start_date,
+        row.fields.end_date,
+      );
+      if (!dateRange) continue;
+      calendarItems.push({
+        serviceId,
+        dayMask: timetableDaysToMask([
+          row.fields.monday === 1 ? 1 : null,
+          row.fields.tuesday === 1 ? 2 : null,
+          row.fields.wednesday === 1 ? 3 : null,
+          row.fields.thursday === 1 ? 4 : null,
+          row.fields.friday === 1 ? 5 : null,
+          row.fields.saturday === 1 ? 6 : null,
+          row.fields.sunday === 1 ? 7 : null,
+        ].filter((day): day is number => day !== null)),
+        dateRange,
+      });
     }
   }
+  return { calendarItems };
+}
+
+export function getVariantCalendarExceptionDates(
+  feed: GtfsFeed,
+  variant: RouteVariant,
+): string[] {
   const serviceIds = new Set(variant.trips.flatMap((trip) =>
     trip.fields.service_id ? [trip.fields.service_id] : []));
   const exceptionDates = [...new Set(
@@ -521,60 +543,201 @@ export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): Vari
       .map((row) => row.fields.date)
       .filter((date): date is string => date !== null))]
     .sort();
+  return exceptionDates;
+}
 
-  const buildTimetable = (
-    targetRange: { days: number[]; dateRange: [string | null, string | null] } | null,
-  ): VariantTimetable => {
-    const targetDays = targetRange?.days ?? null;
-    const grouped = new Map<number, Map<number, Map<string, number>>>();
-    for (const trip of variant.trips) {
-      const tripId = trip.fields.trip_id;
-      if (!tripId || !tripIds.has(tripId)) continue;
-      const ranges = calendarRangesForService(trip.fields.service_id);
-      if (targetRange && !ranges.some((range) =>
-        range.days.join(",") === targetRange.days.join(",")
-        && range.dateRange[0] === targetRange.dateRange[0]
-        && range.dateRange[1] === targetRange.dateRange[1])) continue;
-      const rows = feed.indexes.stopTimesByTripId.get(tripId)?.filter((row) =>
-        firstStop !== null && row.fields.stop_id === firstStop) ?? [];
-      for (const row of rows) {
-        const time = row.fields.departure_time || row.fields.arrival_time;
-        if (!time) continue;
-        const match = /^(\d+):(\d{2})(:\d{2})?$/.exec(time);
-        if (!match) continue;
-        const hour = Number(match[1]);
-        const minute = Number(match[2]);
-        if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
-        let minutes = grouped.get(hour);
-        if (!minutes) {
-          minutes = new Map();
-          grouped.set(hour, minutes);
-        }
-        let dayCounts = minutes.get(minute);
-        if (!dayCounts) {
-          dayCounts = new Map();
-          minutes.set(minute, dayCounts);
-        }
-        const dayKey = targetDays?.join(",") ?? "";
-        dayCounts.set(dayKey, (dayCounts.get(dayKey) ?? 0) + 1);
+function shiftTimetableDate(date: string, days: number): string {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(4, 6)) - 1;
+  const day = Number(date.slice(6, 8));
+  const shifted = new Date(Date.UTC(year, month, day + days));
+  return `${shifted.getUTCFullYear()}${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`
+    + String(shifted.getUTCDate()).padStart(2, "0");
+}
+
+function isValidTimetableDate(date: string | null): date is string {
+  return Boolean(date && /^\d{8}$/.test(date) && shiftTimetableDate(date, 0) === date);
+}
+
+function isValidTimetableDateRange(dateRange: TimetableDateRange): boolean {
+  const [startDate, endDate] = dateRange;
+  return (!(startDate && !isValidTimetableDate(startDate))
+    && !(endDate && !isValidTimetableDate(endDate)))
+    && !(startDate && endDate && startDate > endDate);
+}
+
+function timetableDateRangesOverlap(
+  first: TimetableDateRange,
+  second: TimetableDateRange,
+): boolean {
+  return (!first[1] || !second[0] || first[1] >= second[0])
+    && (!second[1] || !first[0] || second[1] >= first[0]);
+}
+
+function timetableDaysToMask(days: readonly number[]): number {
+  return days.reduce((mask, day) =>
+    Number.isInteger(day) && day >= 1 && day <= 7 ? mask | (1 << (day - 1)) : mask, 0);
+}
+
+function timetableDayMaskToDays(mask: number): number[] {
+  const days: number[] = [];
+  for (let day = 1; day <= 7; day++) {
+    if (mask & (1 << (day - 1))) days.push(day);
+  }
+  return days;
+}
+
+export function splitTimetableCalendarRanges(
+  dateRanges: readonly TimetableDateRange[],
+): TimetableDateRange[] {
+  const validRanges = dateRanges.filter(isValidTimetableDateRange);
+  if (validRanges.length === 0) return [];
+  const events = new Map<string, number>();
+  let activeRangeCount = 0;
+  const addEvent = (date: string, change: number): void => {
+    events.set(date, (events.get(date) ?? 0) + change);
+  };
+  for (const [startDate, endDate] of validRanges) {
+    if (startDate) addEvent(startDate, 1);
+    else activeRangeCount++;
+    if (endDate) addEvent(shiftTimetableDate(endDate, 1), -1);
+  }
+  const sortedEventDates = [...events.keys()].sort();
+  const splitRanges: TimetableDateRange[] = [];
+  let startDate: string | null = null;
+  for (const eventDate of sortedEventDates) {
+    if (activeRangeCount > 0) {
+      splitRanges.push([startDate, shiftTimetableDate(eventDate, -1)]);
+    }
+    activeRangeCount += events.get(eventDate) ?? 0;
+    startDate = eventDate;
+  }
+  if (activeRangeCount > 0) splitRanges.push([startDate, null]);
+  return splitRanges;
+}
+
+export function collectTimetableServiceDateRanges(
+  calendarItems: readonly TimetableCalendarItem[],
+  dateRanges: readonly TimetableDateRange[],
+): TimetableServiceDateRange[] {
+  const serviceDaySetsByRange: TimetableServiceDateRange[] = dateRanges.flatMap((dateRange) => {
+    const overlappingItems = calendarItems.filter((item) =>
+      isValidTimetableDateRange(item.dateRange)
+      && timetableDateRangesOverlap(item.dateRange, dateRange));
+    const serviceDays = new Map<string, number>();
+    for (const item of overlappingItems) {
+      serviceDays.set(item.serviceId, (serviceDays.get(item.serviceId) ?? 0) | item.dayMask);
+    }
+    if (serviceDays.size === 0) return [];
+    return [{ dateRange, serviceDays }];
+  });
+  return serviceDaySetsByRange.reduce<TimetableServiceDateRange[]>((result, current) => {
+    const previous = result[result.length - 1];
+    const signature = JSON.stringify([...current.serviceDays]);
+    const previousSignature = previous ? JSON.stringify([...previous.serviceDays]) : null;
+    if (previous && signature === previousSignature
+      && previous.dateRange[1] !== null && current.dateRange[0] !== null
+      && shiftTimetableDate(previous.dateRange[1], 1) === current.dateRange[0]) {
+      previous.dateRange[1] = current.dateRange[1];
+    } else {
+      result.push(current);
+    }
+    return result;
+  }, []);
+}
+
+export function getPopularTimetableDayMasks(serviceMasks: readonly number[]): number[] {
+  const masks = serviceMasks.map((mask) => mask & 0x7f).filter((mask) => mask !== 0);
+  const combinedMask = masks.reduce((combined, mask) => combined | mask, 0);
+  const candidates = [...new Set(masks)];
+  const counts = new Map(candidates.map((mask) => [mask, 0]));
+  for (const serviceMask of masks) {
+    for (const candidateMask of candidates) {
+      if ((candidateMask & serviceMask) === candidateMask) {
+        counts.set(candidateMask, (counts.get(candidateMask) ?? 0) + 1);
       }
     }
-    const rows: VariantTimetableRow[] = [...grouped.entries()]
-      .sort(([left], [right]) => left - right)
-      .map(([hour, minuteMap]) => ({
-        hour,
-        departures: [...minuteMap.entries()].sort(([left], [right]) => left - right).flatMap(([minute]) => [{
-          minute,
-          days: targetDays,
-        }]),
-      }));
-    const popularDays = targetDays ? [targetDays] : [[1, 2, 3, 4, 5, 6, 7]];
-    const dateRange = targetRange?.dateRange ?? [null, null];
-    return { popularDays, dateRange, exceptionDates, rows };
-  };
+  }
+  candidates.sort((leftMask, rightMask) => {
+    const countDifference = (counts.get(rightMask) ?? 0) - (counts.get(leftMask) ?? 0);
+    return countDifference || leftMask - rightMask;
+  });
+  const mostPopular = candidates[0];
+  if (!mostPopular) return [];
+  const secondPopular = combinedMask & ~mostPopular;
+  return secondPopular ? [mostPopular, secondPopular] : [mostPopular];
+}
 
-  if (calendarRanges.length === 0) return [buildTimetable(null)];
-  return calendarRanges.map((range) => buildTimetable(range));
+function buildVariantTimetable(
+  feed: GtfsFeed,
+  variant: RouteVariant,
+  targetRange: TimetableServiceDateRange | null,
+): VariantTimetable {
+  const firstStop = variant.stops[0];
+  const serviceDays = targetRange?.serviceDays ?? null;
+  const popularDayMasks = targetRange
+    ? getPopularTimetableDayMasks([...targetRange.serviceDays.values()])
+    : [];
+  const timetableDays = popularDayMasks.length > 0
+    ? popularDayMasks.map(timetableDayMaskToDays)
+    : [[1, 2, 3, 4, 5, 6, 7]];
+  const grouped = new Map<number, Map<number, Set<number | null>>>();
+  for (const trip of variant.trips) {
+    const tripId = trip.fields.trip_id;
+    if (!tripId) continue;
+    const tripDays = trip.fields.service_id
+      ? serviceDays?.get(trip.fields.service_id) ?? null
+      : null;
+    if (targetRange
+      && (!trip.fields.service_id || !serviceDays?.has(trip.fields.service_id))) continue;
+    const rows = feed.indexes.stopTimesByTripId.get(tripId)?.filter((row) =>
+      firstStop !== null && row.fields.stop_id === firstStop) ?? [];
+    for (const row of rows) {
+      const time = row.fields.departure_time || row.fields.arrival_time;
+      if (!time) continue;
+      const match = /^(\d+):(\d{2})(:\d{2})?$/.exec(time);
+      if (!match) continue;
+      const hour = Number(match[1]);
+      const minute = Number(match[2]);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
+      let minutes = grouped.get(hour);
+      if (!minutes) {
+        minutes = new Map();
+        grouped.set(hour, minutes);
+      }
+      let dayMasks = minutes.get(minute);
+      if (!dayMasks) {
+        dayMasks = new Set();
+        minutes.set(minute, dayMasks);
+      }
+      dayMasks.add(tripDays);
+    }
+  }
+  const rows: VariantTimetableRow[] = [...grouped.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([hour, minuteMap]) => ({
+      hour,
+      departures: [...minuteMap.entries()].sort(([left], [right]) => left - right)
+        .flatMap(([minute, dayMasks]) => [...dayMasks].map((dayMask) => ({
+          minute,
+          days: dayMask === null ? null : timetableDayMaskToDays(dayMask),
+        }))),
+    }));
+  return {
+    popularDays: timetableDays,
+    dateRange: targetRange?.dateRange ?? [null, null],
+    rows,
+  };
+}
+
+export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable[] {
+  const { calendarItems } = collectTimetableCalendarData(feed, variant);
+  const dateRanges = splitTimetableCalendarRanges(calendarItems.map((item) => item.dateRange));
+  const ranges = collectTimetableServiceDateRanges(calendarItems, dateRanges);
+  if (ranges.length === 0) {
+    return [buildVariantTimetable(feed, variant, null)];
+  }
+  return ranges.map((range) => buildVariantTimetable(feed, variant, range));
 }
 
 export function getVariantTableRows(
@@ -898,6 +1061,19 @@ function parseTable(name: string, columns: string[], records: string[][], collec
     record: string[], column: string, index: number | undefined, rowIndex: number,
   ): string | number | null => {
     const value = index === undefined ? null : record[index] ?? null;
+    if (kind === "calendar.txt" && (column === "start_date" || column === "end_date")) {
+      const date = value?.trim() || null;
+      if (!isValidTimetableDate(date)) {
+        collector?.add({
+          type: "invalid_values",
+          parameters: { file: name, row: rowIndex + 2, column, value },
+          relatedObjectIds: [],
+          csvRowNumber: rowIndex + 2,
+        });
+        return null;
+      }
+      return date;
+    }
     if (value === null) return null;
     if (fieldNames.has(column)) {
       const normalized = value.trim();

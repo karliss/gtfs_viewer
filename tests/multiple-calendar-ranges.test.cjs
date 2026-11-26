@@ -5,6 +5,7 @@ const path = require("node:path");
 const { strToU8, zipSync } = require("fflate");
 const {
   getRouteVariants,
+  getVariantCalendarExceptionDates,
   getVariantTimetable,
   isServiceActiveOnDate,
   loadGtfs,
@@ -48,7 +49,8 @@ test("single service ID supports separate calendar ranges and weekday masks", ()
     [["20260101", "20260331"], ["20260601", "20260831"]],
   );
   assert.deepEqual(
-    timetables.map((timetable) => timetable.exceptionDates),
-    [["20260106", "20260407", "20260608"], ["20260106", "20260407", "20260608"]],
+    getVariantCalendarExceptionDates(feed, variant),
+    ["20260106", "20260407", "20260608"],
   );
+  assert.ok(timetables.every((timetable) => !("exceptionDates" in timetable)));
 });

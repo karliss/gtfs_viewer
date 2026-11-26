@@ -1,6 +1,7 @@
 import {
   decodeRouteType, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows, summarizeTripField,
-  getVariantTimetable, formatTimetableDayRange, getDateSchedule, getTripFares, isServiceActiveOnDate,
+  getVariantTimetable, getVariantCalendarExceptionDates, formatTimetableDayRange,
+  getDateSchedule, getTripFares, isServiceActiveOnDate,
   gtfsDateToIso, isoDateToGtfs, decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
   mergeRouteVariants, mergeRouteVariantsInFeed,
   WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
@@ -2045,6 +2046,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
       if (!timetableDetails.open || timetableLoaded) return;
       timetableLoaded = true;
       const timetables = getVariantTimetable(activeFeed, variant);
+      const exceptionDates = getVariantCalendarExceptionDates(activeFeed, variant);
       if (timetables.every((timetable) => timetable.rows.length === 0)) {
         const message = document.createElement("p");
         message.textContent = "No timetable times found for this variant.";
@@ -2085,10 +2087,15 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
             column.className = "timetable-column";
             if (timetable.popularDays.length === 2) column.classList.add("timetable-day-column");
             for (const departure of row.departures) {
-              if (departure.days && !departure.days.some((day) => popularDays.includes(day))) continue;
+              const serviceDays = new Set(departure.days ?? [1, 2, 3, 4, 5, 6, 7]);
+              const matchingDays = popularDays.filter((day) => serviceDays.has(day));
+              if (matchingDays.length === 0) continue;
               const minute = document.createElement("span");
               minute.className = "timetable-minute";
-              minute.textContent = String(departure.minute).padStart(2, "0");
+              const dayClarification = matchingDays.length === popularDays.length
+                ? ""
+                : ` (${formatTimetableDayRange(matchingDays)})`;
+              minute.textContent = `${String(departure.minute).padStart(2, "0")}${dayClarification}`;
               column.append(minute, " ");
             }
             line.append(column);
@@ -2097,11 +2104,11 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
         }
         timetableDetails.append(table);
       }
-      if (timetables[0]?.exceptionDates.length) {
+      if (exceptionDates.length) {
         const exceptions = document.createElement("p");
         exceptions.className = "timetable-exception-dates";
         exceptions.append("Exceptions: ");
-        for (const [index, date] of timetables[0].exceptionDates.entries()) {
+        for (const [index, date] of exceptionDates.entries()) {
           if (index) exceptions.append(", ");
           const iso = gtfsDateToIso(date);
           const button = document.createElement("button");
