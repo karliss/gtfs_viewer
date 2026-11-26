@@ -762,10 +762,10 @@ export class MapView {
   }
 
   private fit(): void {
-    const points = [
-      ...this.stops.flatMap((stop) => stop.coordinate ? [stop.coordinate] : []),
-      ...this.lines.flatMap((line) => line.coordinates),
-    ];
+    const linePoints = this.lines.flatMap((line) => line.coordinates);
+    const points = linePoints.length
+      ? linePoints
+      : this.stops.flatMap((stop) => stop.coordinate ? [stop.coordinate] : []);
     this.fitPoints(points);
   }
 

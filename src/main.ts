@@ -3342,7 +3342,7 @@ routeMapButton.addEventListener("click", () => {
 mapRoute.addEventListener("change", () => {
   setMapSettingsOpen(false);
   populateMapVariants();
-  renderRouteMap();
+  renderRouteMap(false);
   pushViewState();
 });
 mapRouteReset.addEventListener("click", () => {
