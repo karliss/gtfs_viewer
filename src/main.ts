@@ -2560,12 +2560,12 @@ mapSettingsButton.addEventListener("click", () => {
 mapSettings.addEventListener("pointerdown", (event) => event.stopPropagation());
 mapSettings.addEventListener("click", (event) => event.stopPropagation());
 
-function configureShapeMapSettings(): void {
+function configureShapeMapSettings(preserveMapView = false): void {
   mapVariantControls.hidden = false;
   mapRouteControl.hidden = true;
   mapVariantControl.hidden = true;
   mapView?.setStopsVisible(Boolean(mapAllStops.checked) || !shapeStopsHidden);
-  mapView?.setStopOrderVariant(null);
+  if (!preserveMapView) mapView?.setStopOrderVariant(null);
 }
 
 function showShapeMap(shapeId: string): void {
@@ -2605,6 +2605,7 @@ function showShapeComparison(
   routeVariant?: RouteVariant,
   routeId?: string,
   variantIndex?: number,
+  preserveMapView = false,
 ): boolean {
   if (!feed || !feed.indexes.shapesById.has(firstShapeId) || !feed.indexes.shapesById.has(secondShapeId)) {
     return false;
@@ -2622,10 +2623,15 @@ function showShapeComparison(
   const first = shapeMapPoints(feed.indexes.shapesById, firstShapeId);
   const second = shapeMapPoints(feed.indexes.shapesById, secondShapeId);
   const comparison = compareShapePoints(first.points, second.points);
-  openMap(`Shape comparison: ${firstShapeId} and ${secondShapeId}`);
+  if (preserveMapView) {
+    mapHeading.textContent = `Shape comparison: ${firstShapeId} and ${secondShapeId}`;
+  } else {
+    openMap(`Shape comparison: ${firstShapeId} and ${secondShapeId}`);
+  }
+  if (preserveMapView) mapSidebar.replaceChildren();
   mapSidebar.hidden = false;
   mapSidebar.setAttribute("aria-label", "Shape comparison ranges");
-  configureShapeMapSettings();
+  configureShapeMapSettings(preserveMapView);
   mapClearFilter.hidden = true;
   if (routeVariant) appendShapeStopToggle(mapSidebar);
 
@@ -2662,6 +2668,7 @@ function showShapeComparison(
             context.routeVariant,
             context.routeId,
             context.variantIndex,
+            true,
           );
         }
       });
@@ -2676,6 +2683,7 @@ function showShapeComparison(
             context.routeVariant,
             context.routeId,
             context.variantIndex,
+            true,
           );
         }
       });
@@ -2825,7 +2833,7 @@ function showShapeComparison(
       color: "#1565c0",
       stopIds: routeVariant?.stops.flatMap((stopId) => stopId ? [stopId] : []) ?? [],
     },
-  ]);
+  ], !preserveMapView);
   mapView?.setComparisonRangeColors(
     commonRangeLines,
     differingRangeLines,
