@@ -220,9 +220,9 @@ app.innerHTML = `
       <div class="map-layout">
         <div id="map-canvas-container">
           <div id="map-canvas" aria-label="Map of transit stops and routes"></div>
-          <details id="map-settings" class="map-settings maplibregl-ctrl maplibregl-ctrl-group">
-            <summary class="maplibregl-ctrl-icon" title="View options" aria-label="View options">⚙</summary>
-            <div class="map-settings-menu">
+          <div id="map-settings" class="map-settings">
+            <button id="map-settings-button" class="maplibregl-ctrl-icon" type="button" title="View options" aria-label="View options" aria-expanded="false">⚙</button>
+            <div id="map-settings-menu" class="map-settings-menu" hidden>
               <label class="map-option" for="map-base-layer">
                 <span>Background map</span>
                 <select id="map-base-layer"></select>
@@ -256,7 +256,7 @@ app.innerHTML = `
                 Disable automatic refocus
               </label>
             </div>
-          </details>
+          </div>
         </div>
         <aside id="map-sidebar" aria-label="Route stops" hidden></aside>
       </div>
@@ -396,7 +396,9 @@ const mapReducedStops = element<HTMLInputElement>("#map-reduced-stops");
 const mapStopOrder = element<HTMLInputElement>("#map-stop-order");
 const mapAutoRefocus = element<HTMLInputElement>("#map-auto-refocus");
 const mapClearFilter = element<HTMLButtonElement>("#map-clear-filter");
-const mapSettings = element<HTMLDetailsElement>("#map-settings");
+const mapSettings = element<HTMLElement>("#map-settings");
+const mapSettingsButton = element<HTMLButtonElement>("#map-settings-button");
+const mapSettingsMenu = element<HTMLElement>("#map-settings-menu");
 const agencyDialog = element<HTMLDialogElement>("#agency-dialog");
 const agencyDialogContent = element<HTMLElement>("#agency-dialog-content");
 const fareDialog = element<HTMLDialogElement>("#fare-dialog");
@@ -2537,18 +2539,26 @@ function appendShapeStopToggle(container: HTMLElement): void {
   checkbox.checked = shapeStopsHidden;
   checkbox.addEventListener("change", () => {
     shapeStopsHidden = checkbox.checked;
-    mapView?.setStopsVisible(mapAllStops.checked || !shapeStopsHidden);
+    mapView?.setStopsVisible(Boolean(mapAllStops.checked) || !shapeStopsHidden);
   });
   label.append(checkbox, " Hide stops");
   container.append(label);
 }
 
+function setMapSettingsOpen(open: boolean): void {
+  mapSettingsMenu.hidden = !open;
+  mapSettingsButton.setAttribute("aria-expanded", String(open));
+}
+
+mapSettingsButton.addEventListener("click", () => {
+  setMapSettingsOpen(mapSettingsMenu.hidden === true);
+});
+
 function configureShapeMapSettings(): void {
   mapVariantControls.hidden = false;
   mapRouteControl.hidden = true;
   mapVariantControl.hidden = true;
-  mapSettings.open = false;
-  mapView?.setStopsVisible(mapAllStops.checked || !shapeStopsHidden);
+  mapView?.setStopsVisible(Boolean(mapAllStops.checked) || !shapeStopsHidden);
   mapView?.setStopOrderVariant(null);
 }
 
@@ -3022,7 +3032,7 @@ function renderRouteMap(preserveMapView = false): void {
     variantButton.addEventListener("focus", () => mapView?.hoverVariant(index));
     variantButton.addEventListener("blur", () => mapView?.hoverVariant(null));
     variantButton.addEventListener("click", () => {
-      mapSettings.open = false;
+      setMapSettingsOpen(false);
       pinnedVariant = pinnedVariant === index ? null : index;
       clearHighlight.hidden = pinnedVariant === null;
       for (const button of mapSidebar.querySelectorAll<HTMLButtonElement>(".map-variant-label")) {
@@ -3310,20 +3320,20 @@ routeMapButton.addEventListener("click", () => {
   if (currentRoute) showRouteMap(currentRoute);
 });
 mapRoute.addEventListener("change", () => {
-  mapSettings.open = false;
+  setMapSettingsOpen(false);
   populateMapVariants();
   renderRouteMap();
   pushViewState();
 });
 mapRouteReset.addEventListener("click", () => {
-  mapSettings.open = false;
+  setMapSettingsOpen(false);
   mapRoute.value = "all";
   populateMapVariants();
   renderRouteMap();
 });
 mapVariant.addEventListener("change", () => {
   renderRouteMap();
-  mapSettings.open = false;
+  setMapSettingsOpen(false);
   if (mapVariant.value !== "all") {
     const section = [...mapSidebar.querySelectorAll<HTMLElement>("section[data-variant-index]")]
       .find((candidate) => candidate.dataset.variantIndex === mapVariant.value);
@@ -3332,7 +3342,7 @@ mapVariant.addEventListener("change", () => {
   pushViewState();
 });
 mapVariantReset.addEventListener("click", () => {
-  mapSettings.open = false;
+  setMapSettingsOpen(false);
   mapVariant.value = "all";
   renderRouteMap();
 });
@@ -3375,7 +3385,7 @@ mapRasterBlackAndWhite.addEventListener("change", () => {
   mapView?.setRasterBlackAndWhite(mapRasterBlackAndWhite.checked);
 });
 mapCanvas.addEventListener("pointerdown", () => {
-  mapSettings.open = false;
+  setMapSettingsOpen(false);
 });
 mapClearFilter.addEventListener("click", () => {
   tableSearch.value = "";
