@@ -1056,6 +1056,20 @@ test("timetable range and popular-day stages can be tested independently", () =>
     ["20260115", "20260131"],
     ["20260201", "20260215"],
   ]);
+  assert.deepEqual(splitTimetableCalendarRanges([
+    ["20260301", "20260310"],
+    ["20260320", "20260331"],
+  ]), [
+    ["20260301", "20260310"],
+    ["20260320", "20260331"],
+  ]);
+  assert.deepEqual(splitTimetableCalendarRanges([
+    ["20260401", "20260410"],
+    ["20260411", "20260420"],
+  ]), [
+    ["20260401", "20260410"],
+    ["20260411", "20260420"],
+  ]);
   const ranges = collectTimetableServiceDateRanges(calendarItems, dateRanges);
   assert.deepEqual(ranges.map(({ dateRange, serviceDays }) => ({
     dateRange,
