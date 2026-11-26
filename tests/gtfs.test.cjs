@@ -2,7 +2,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
-  collectTimetableCalendarData, decodeRouteType, formatTimetableDayRange, getMatchingRows, getPopularTimetableDays,
+  collectTimetableCalendarData, collectTimetableServiceDateRanges, decodeRouteType, formatTimetableDayRange,
+  getMatchingRows, getPopularTimetableDays,
   getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, loadGtfsFiles, summarizeTripField,
   decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
@@ -1003,10 +1004,17 @@ test("splits overlapping calendar ranges and classifies service days into both c
 });
 
 test("timetable range and popular-day stages can be tested independently", () => {
-  const ranges = splitTimetableCalendarRanges([
+  const calendarItems = [
     { serviceId: "s12", days: [1, 2], dateRange: ["20260101", "20260131"] },
     { serviceId: "s23", days: [2, 3], dateRange: ["20260115", "20260215"] },
+  ];
+  const dateRanges = splitTimetableCalendarRanges(calendarItems.map(({ dateRange }) => dateRange));
+  assert.deepEqual(dateRanges, [
+    ["20260101", "20260114"],
+    ["20260115", "20260131"],
+    ["20260201", "20260215"],
   ]);
+  const ranges = collectTimetableServiceDateRanges(calendarItems, dateRanges);
   assert.deepEqual(ranges.map(({ dateRange, serviceDays }) => ({
     dateRange,
     services: [...serviceDays],
@@ -1020,10 +1028,22 @@ test("timetable range and popular-day stages can be tested independently", () =>
     [[2], [1, 3]],
   );
 
-  const repeatedServiceRanges = splitTimetableCalendarRanges([
+  const repeatedServiceCalendarItems = [
     { serviceId: "weekday", days: [1], dateRange: ["20260101", "20260131"] },
     { serviceId: "weekday", days: [2], dateRange: ["20260115", "20260215"] },
+  ];
+  const repeatedDateRanges = splitTimetableCalendarRanges(
+    repeatedServiceCalendarItems.map(({ dateRange }) => dateRange),
+  );
+  assert.deepEqual(repeatedDateRanges, [
+    ["20260101", "20260114"],
+    ["20260115", "20260131"],
+    ["20260201", "20260215"],
   ]);
+  const repeatedServiceRanges = collectTimetableServiceDateRanges(
+    repeatedServiceCalendarItems,
+    repeatedDateRanges,
+  );
   assert.deepEqual(repeatedServiceRanges.map(({ dateRange, serviceDays }) => ({
     dateRange,
     services: [...serviceDays],

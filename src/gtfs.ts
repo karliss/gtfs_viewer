@@ -538,15 +538,28 @@ function isValidTimetableDate(date: string | null): date is string {
   return Boolean(date && /^\d{8}$/.test(date) && shiftTimetableDate(date, 0) === date);
 }
 
+function isValidTimetableDateRange(dateRange: TimetableDateRange): boolean {
+  const [startDate, endDate] = dateRange;
+  return (!(startDate && !isValidTimetableDate(startDate))
+    && !(endDate && !isValidTimetableDate(endDate)))
+    && !(startDate && endDate && startDate > endDate);
+}
+
+function timetableDateRangesOverlap(
+  first: TimetableDateRange,
+  second: TimetableDateRange,
+): boolean {
+  return (!first[1] || !second[0] || first[1] >= second[0])
+    && (!second[1] || !first[0] || second[1] >= first[0]);
+}
+
 export function splitTimetableCalendarRanges(
-  calendarItems: readonly TimetableCalendarItem[],
-): TimetableServiceDateRange[] {
+  dateRanges: readonly TimetableDateRange[],
+): TimetableDateRange[] {
+  const validRanges = dateRanges.filter(isValidTimetableDateRange);
+  if (validRanges.length === 0) return [];
   const boundaries = new Set<string>();
-  for (const item of calendarItems) {
-    const [startDate, endDate] = item.dateRange;
-    if ((startDate && !isValidTimetableDate(startDate))
-      || (endDate && !isValidTimetableDate(endDate))) continue;
-    if (startDate && endDate && startDate > endDate) continue;
+  for (const [startDate, endDate] of validRanges) {
     if (startDate) boundaries.add(startDate);
     if (endDate) boundaries.add(shiftTimetableDate(endDate, 1));
   }
@@ -562,16 +575,18 @@ export function splitTimetableCalendarRanges(
     }
     candidateRanges.push([startDate, null]);
   }
-  const serviceDaySetsByRange: TimetableServiceDateRange[] = candidateRanges.flatMap((dateRange) => {
-    const [startDate, endDate] = dateRange;
-    const overlappingItems = calendarItems.filter((item) => {
-      const [rangeStart, rangeEnd] = item.dateRange;
-      if ((rangeStart && !isValidTimetableDate(rangeStart))
-        || (rangeEnd && !isValidTimetableDate(rangeEnd))) return false;
-      if (rangeStart && rangeEnd && rangeStart > rangeEnd) return false;
-      return (!rangeEnd || !startDate || rangeEnd >= startDate)
-        && (!endDate || !rangeStart || rangeStart <= endDate);
-    });
+  return candidateRanges.filter((candidate) =>
+    validRanges.some((range) => timetableDateRangesOverlap(range, candidate)));
+}
+
+export function collectTimetableServiceDateRanges(
+  calendarItems: readonly TimetableCalendarItem[],
+  dateRanges: readonly TimetableDateRange[],
+): TimetableServiceDateRange[] {
+  const serviceDaySetsByRange: TimetableServiceDateRange[] = dateRanges.flatMap((dateRange) => {
+    const overlappingItems = calendarItems.filter((item) =>
+      isValidTimetableDateRange(item.dateRange)
+      && timetableDateRangesOverlap(item.dateRange, dateRange));
     const serviceDays = new Map<string, Set<number>>();
     for (const item of overlappingItems) {
       const days = serviceDays.get(item.serviceId) ?? new Set<number>();
@@ -695,7 +710,8 @@ function buildVariantTimetable(
 
 export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable[] {
   const { calendarItems, exceptionDates } = collectTimetableCalendarData(feed, variant);
-  const ranges = splitTimetableCalendarRanges(calendarItems);
+  const dateRanges = splitTimetableCalendarRanges(calendarItems.map((item) => item.dateRange));
+  const ranges = collectTimetableServiceDateRanges(calendarItems, dateRanges);
   if (ranges.length === 0) {
     return [buildVariantTimetable(feed, variant, null, exceptionDates)];
   }
