@@ -1500,25 +1500,31 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
       row.append(document.createElement("span"));
     }
     row.append(stopLink, time);
-    const fare = document.createElement("button");
-    fare.type = "button";
-    fare.className = "trip-inline-fare";
+    const fareControl = document.createElement("div");
+    fareControl.className = "trip-inline-fare";
+    const fareOrigin = document.createElement("button");
+    fareOrigin.type = "button";
+    fareOrigin.className = "trip-fare-origin";
+    const fareValue = document.createElement("button");
+    fareValue.type = "button";
+    fareValue.className = "trip-fare-value";
     if (stopId) {
       const destinations = stopRows.slice(index + 1).map((row) => row.fields.stop_id);
       const originFares = getTripFares(feed, trip, stopId, destinations);
       if (originFares.some((result) => result.fareId !== null || result.price !== null || result.productName !== null)) {
-        fare.dataset.available = "true";
-        fare.textContent = "💰";
+        fareOrigin.dataset.available = "true";
+        fareOrigin.textContent = "💰";
         const firstFare = originFares.find((result) => result.price !== null);
         if (firstFare?.price !== null && firstFare?.price !== undefined) {
-          fare.dataset.amount = `${firstFare.price}${firstFare.currency ? ` ${firstFare.currency}` : ""}`;
+          fareOrigin.dataset.amount = `${firstFare.price}${firstFare.currency ? ` ${firstFare.currency}` : ""}`;
         }
       }
     }
-    fare.title = "Calculate fares from this stop";
-    fare.setAttribute("aria-label", "Calculate fares from this stop");
-    fare.addEventListener("click", () => selectTripStop(trip, stopRows, index, time));
-    row.append(fare);
+    fareOrigin.title = "Calculate fares from this stop";
+    fareOrigin.setAttribute("aria-label", "Calculate fares from this stop");
+    fareOrigin.addEventListener("click", () => selectTripStop(trip, stopRows, index, time));
+    fareControl.append(fareOrigin, fareValue);
+    row.append(fareControl);
     item.append(row);
     tripStopList.append(item);
   }
@@ -1637,8 +1643,17 @@ function selectTripStop(
   if (!feed) return;
   tripStopList.querySelectorAll<HTMLButtonElement>(".trip-stop-time")
     .forEach((button) => button.setAttribute("aria-selected", String(button === selectedButton)));
-  tripStopList.querySelectorAll<HTMLButtonElement>(".trip-inline-fare")
-    .forEach((fare) => { fare.textContent = fare.dataset.available === "true" ? "💰" : ""; });
+  tripStopList.querySelectorAll<HTMLButtonElement>(".trip-fare-origin")
+    .forEach((fareOrigin) => {
+      fareOrigin.textContent = fareOrigin.dataset.available === "true" ? "💰" : "";
+    });
+  tripStopList.querySelectorAll<HTMLButtonElement>(".trip-fare-value")
+    .forEach((fareValue) => {
+      fareValue.textContent = "";
+      fareValue.onclick = null;
+      fareValue.title = "";
+      fareValue.removeAttribute("aria-label");
+    });
   const originId = stopRows[selectedIndex]?.fields.stop_id;
   if (!originId) {
     tripFares.textContent = "This stop has no stop_id, so fares cannot be calculated.";
@@ -1652,19 +1667,16 @@ function selectTripStop(
   }
   tripFares.textContent = "";
   for (const [fareIndex, fare] of fares.entries()) {
-    const fareLabel = tripStopList.querySelector<HTMLButtonElement>(
-      `.trip-stop-item[data-stop-index="${selectedIndex + fareIndex + 1}"] .trip-inline-fare`,
+    const fareValue = tripStopList.querySelector<HTMLButtonElement>(
+      `.trip-stop-item[data-stop-index="${selectedIndex + fareIndex + 1}"] .trip-fare-value`,
     );
-    if (!fareLabel) continue;
-    if (fare.price === null) {
-      fareLabel.textContent = "";
-      fareLabel.onclick = null;
-    } else {
+    if (!fareValue) continue;
+    if (fare.price !== null) {
       const amount = `${fare.price}${fare.currency ? ` ${fare.currency}` : ""}`;
-      fareLabel.textContent = `💰 ${amount}`;
-      fareLabel.title = "Show fare rules";
-      fareLabel.setAttribute("aria-label", `Show fare rules for ${amount}`);
-      fareLabel.onclick = () => showFareExplanation(fare);
+      fareValue.textContent = amount;
+      fareValue.title = "Show fare rules";
+      fareValue.setAttribute("aria-label", `Show fare rules for ${amount}`);
+      fareValue.onclick = () => showFareExplanation(fare);
     }
   }
 }

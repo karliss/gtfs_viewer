@@ -583,10 +583,22 @@ input[type="file"] {
 }
 
 .trip-inline-fare {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   color: #52617a;
   font-size: 0.9rem;
   overflow-wrap: anywhere;
+}
+
+.trip-fare-origin,
+.trip-fare-value {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
 #trip-fares table,
