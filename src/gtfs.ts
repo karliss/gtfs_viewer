@@ -259,7 +259,7 @@ export type TimetableDateRange = [string | null, string | null];
 export interface TimetableCalendarItem {
   serviceId: string;
   days: number[];
-  dateRange: TimetableDateRange;
+  dateRange: [string, string];
 }
 
 export interface TimetableCalendarData {
@@ -493,6 +493,15 @@ export function formatTimetableDayRange(days: readonly number[]): string {
   return ranges.join(", ");
 }
 
+function validTimetableCalendarDateRange(
+  startDate: string | null,
+  endDate: string | null,
+): [string, string] | null {
+  if (!isValidTimetableDate(startDate) || !isValidTimetableDate(endDate)
+    || startDate > endDate) return null;
+  return [startDate, endDate];
+}
+
 export function collectTimetableCalendarData(
   feed: GtfsFeed,
   variant: RouteVariant,
@@ -502,6 +511,11 @@ export function collectTimetableCalendarData(
   const calendarItems: TimetableCalendarItem[] = [];
   for (const serviceId of serviceIds) {
     for (const row of feed.indexes.calendarByServiceId.get(serviceId) ?? []) {
+      const dateRange = validTimetableCalendarDateRange(
+        row.fields.start_date,
+        row.fields.end_date,
+      );
+      if (!dateRange) continue;
       calendarItems.push({
         serviceId,
         days: [
@@ -513,7 +527,7 @@ export function collectTimetableCalendarData(
           row.fields.saturday === 1 ? 6 : null,
           row.fields.sunday === 1 ? 7 : null,
         ].filter((day): day is number => day !== null),
-        dateRange: [row.fields.start_date, row.fields.end_date],
+        dateRange,
       });
     }
   }

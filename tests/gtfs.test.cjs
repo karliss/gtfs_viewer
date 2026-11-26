@@ -965,6 +965,32 @@ test("supports multiple calendar rows for one service ID", () => {
   );
 });
 
+test("ignores calendar rows with missing or invalid date bounds", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,route_short_name\nr,5\n",
+    "trips.txt": "route_id,trip_id,service_id,shape_id\nr,t,weekday,s\n",
+    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\nt,08:05:00,a,1\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "weekday,1,0,0,0,0,0,0,20260101,20260131\n"
+      + "weekday,0,1,0,0,0,0,0,,20260228\n"
+      + "weekday,0,0,1,0,0,0,0,20260301,\n"
+      + "weekday,0,0,0,1,0,0,0,2026-04-01,20260430\n"
+      + "weekday,0,0,0,0,1,0,0,20260230,20260531\n"
+      + "weekday,0,0,0,0,0,1,0,20260731,20260701\n",
+  }));
+  const variant = getRouteVariants(feed, "r").variants[0];
+  const { calendarItems } = collectTimetableCalendarData(feed, variant);
+
+  assert.deepEqual(calendarItems.map(({ serviceId, days, dateRange }) =>
+    ({ serviceId, days, dateRange })), [
+    { serviceId: "weekday", days: [1], dateRange: ["20260101", "20260131"] },
+  ]);
+  assert.deepEqual(
+    getVariantTimetable(feed, variant).map(({ dateRange }) => dateRange),
+    [["20260101", "20260131"]],
+  );
+});
+
 test("splits overlapping calendar ranges and classifies service days into both columns", () => {
   const feed = loadGtfs(archive({
     "routes.txt": "route_id,route_short_name\nr,5\n",
