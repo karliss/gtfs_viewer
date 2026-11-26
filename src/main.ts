@@ -445,7 +445,15 @@ const viewHistory = new ViewHistory();
 let viewHistoryRestoring = false;
 let mapMode: "stops" | "routes" | "route" | "shape" | "shape-comparison" = "routes";
 let activeShapeMapId: string | undefined;
-let activeShapeComparison: { firstShapeId: string; secondShapeId: string; warningIndex?: number } | undefined;
+let activeShapeComparison: {
+  firstShapeId: string;
+  secondShapeId: string;
+  warningIndex?: number;
+  routeVariant?: RouteVariant;
+  routeId?: string;
+  variantIndex?: number;
+} | undefined;
+let shapeStopsHidden = false;
 let selectedWarningTypes = new Set<WarningType>(WARNING_TYPES);
 let selectedWarningTables = new Set<string>();
 let warningTablesInitialized = false;
@@ -507,7 +515,14 @@ function captureViewState(): ViewState {
   }
   if (mapPanel && !mapPanel.hidden) {
     if (mapMode === "shape-comparison" && activeShapeComparison) {
-      return { type: "shape-comparison", ...activeShapeComparison };
+      return {
+        type: "shape-comparison",
+        firstShapeId: activeShapeComparison.firstShapeId,
+        secondShapeId: activeShapeComparison.secondShapeId,
+        warningIndex: activeShapeComparison.warningIndex,
+        routeId: activeShapeComparison.routeId,
+        variantIndex: activeShapeComparison.variantIndex,
+      };
     }
     if (mapMode === "shape" && activeShapeMapId) {
       return { type: "map", mode: "shape", shapeId: activeShapeMapId };
@@ -638,7 +653,18 @@ function restoreViewState(state: ViewState): void {
         else showAllRoutesMap();
       }
     } else if (state.type === "shape-comparison") {
-      showShapeComparison(state.firstShapeId, state.secondShapeId, state.warningIndex);
+      let routeVariant: RouteVariant | undefined;
+      if (feed && state.routeId && state.variantIndex !== undefined) {
+        routeVariant = getRouteVariants(feed, state.routeId).variants[state.variantIndex];
+      }
+      showShapeComparison(
+        state.firstShapeId,
+        state.secondShapeId,
+        state.warningIndex,
+        routeVariant,
+        state.routeId,
+        state.variantIndex,
+      );
     }
   } finally {
     viewHistoryRestoring = false;
@@ -1909,7 +1935,7 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
         warningButton.title = warningText;
         warningButton.setAttribute("aria-label", warningText);
         warningButton.addEventListener("click", () => {
-          showShapeComparison(pair.firstShapeId, pair.secondShapeId);
+          showShapeComparison(pair.firstShapeId, pair.secondShapeId, undefined, variant, route.fields.route_id ?? undefined, index);
         });
         heading.append(" ", warningButton);
       }
@@ -2457,10 +2483,36 @@ function showTripVariantOnMap(trip: GtfsRow<"trips.txt">): void {
   showRouteMap(route, index < 0 ? "all" : index);
 }
 
-function stopsForShapeIds(shapeIds: readonly string[]): MapStop[] {
+function routeVariantForWarning(warning: GtfsWarning): {
+  routeVariant?: RouteVariant;
+  routeId?: string;
+  variantIndex?: number;
+} {
+  if (!feed || typeof warning.parameters.routeId !== "string") return {};
+  const firstShapeId = warning.parameters.firstShapeId;
+  const secondShapeId = warning.parameters.secondShapeId;
+  if (typeof firstShapeId !== "string" || typeof secondShapeId !== "string") return {};
+  const routeId = warning.parameters.routeId;
+  const variants = getRouteVariants(feed, routeId).variants;
+  const variantIndex = variants.findIndex((variant) =>
+    variant.shapeIds.includes(firstShapeId)
+    && variant.shapeIds.includes(secondShapeId));
+  return variantIndex >= 0
+    ? { routeVariant: variants[variantIndex], routeId, variantIndex }
+    : { routeId };
+}
+
+function stopsForShapeIds(shapeIds: readonly string[], routeVariant?: RouteVariant): MapStop[] {
   if (!feed) return [];
   if (mapAllStops.checked) {
     return (feed.tables.find((table) => table.kind === "stops.txt")?.rows ?? []).map(mapStop);
+  }
+  if (routeVariant) {
+    return routeVariant.stops.flatMap((stopId) => {
+      if (!stopId) return [];
+      const stop = stopsById.get(stopId);
+      return stop ? [mapStop(stop)] : [];
+    });
   }
   const stopIds = new Set<string>();
   for (const trip of feed.indexes.tripsById.values()) {
@@ -2482,8 +2534,11 @@ function appendShapeStopToggle(container: HTMLElement): void {
   label.className = "map-option";
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
-  checkbox.checked = false;
-  checkbox.addEventListener("change", () => mapView?.setStopsVisible(!checkbox.checked));
+  checkbox.checked = shapeStopsHidden;
+  checkbox.addEventListener("change", () => {
+    shapeStopsHidden = checkbox.checked;
+    mapView?.setStopsVisible(!shapeStopsHidden);
+  });
   label.append(checkbox, " Hide stop overlay");
   container.append(label);
 }
@@ -2493,9 +2548,7 @@ function configureShapeMapSettings(): void {
   mapRouteControl.hidden = true;
   mapVariantControl.hidden = true;
   mapSettings.open = false;
-  mapAllStops.checked = false;
-  mapView?.setAllStopsEnabled(false);
-  mapView?.setStopsVisible(true);
+  mapView?.setStopsVisible(!shapeStopsHidden);
   mapView?.setStopOrderVariant(null);
 }
 
@@ -2528,12 +2581,26 @@ function showShapeMap(shapeId: string): void {
   pushViewState();
 }
 
-function showShapeComparison(firstShapeId: string, secondShapeId: string, warningIndex?: number): boolean {
+function showShapeComparison(
+  firstShapeId: string,
+  secondShapeId: string,
+  warningIndex?: number,
+  routeVariant?: RouteVariant,
+  routeId?: string,
+  variantIndex?: number,
+): boolean {
   if (!feed || !feed.indexes.shapesById.has(firstShapeId) || !feed.indexes.shapesById.has(secondShapeId)) {
     return false;
   }
   activeShapeMapId = undefined;
-  activeShapeComparison = { firstShapeId, secondShapeId, warningIndex };
+  activeShapeComparison = {
+    firstShapeId,
+    secondShapeId,
+    warningIndex,
+    routeVariant,
+    routeId,
+    variantIndex,
+  };
   mapMode = "shape-comparison";
   const first = shapeMapPoints(feed.indexes.shapesById, firstShapeId);
   const second = shapeMapPoints(feed.indexes.shapesById, secondShapeId);
@@ -2570,20 +2637,28 @@ function showShapeComparison(firstShapeId: string, secondShapeId: string, warnin
       previousWarning.addEventListener("click", () => {
         if (position > 0) {
           const target = comparableWarnings[position - 1];
+          const context = routeVariantForWarning(target.warning);
           showShapeComparison(
             String(target.warning.parameters.firstShapeId),
             String(target.warning.parameters.secondShapeId),
             target.index,
+            context.routeVariant,
+            context.routeId,
+            context.variantIndex,
           );
         }
       });
       nextWarning.addEventListener("click", () => {
         if (position >= 0 && position < comparableWarnings.length - 1) {
           const target = comparableWarnings[position + 1];
+          const context = routeVariantForWarning(target.warning);
           showShapeComparison(
             String(target.warning.parameters.firstShapeId),
             String(target.warning.parameters.secondShapeId),
             target.index,
+            context.routeVariant,
+            context.routeId,
+            context.variantIndex,
           );
         }
       });
@@ -2714,7 +2789,7 @@ function showShapeComparison(firstShapeId: string, secondShapeId: string, warnin
   }
   mapSidebar.append(differingSection);
   mapSummary.textContent = summary.textContent;
-  mapView?.update(stopsForShapeIds([firstShapeId, secondShapeId]), [
+  mapView?.update(stopsForShapeIds([firstShapeId, secondShapeId], routeVariant), [
     {
       coordinates: first.points.map((point) => point.coordinate),
       approximate: false,
@@ -3270,6 +3345,9 @@ mapAllStops.addEventListener("change", () => {
       activeShapeComparison.firstShapeId,
       activeShapeComparison.secondShapeId,
       activeShapeComparison.warningIndex,
+      activeShapeComparison.routeVariant,
+      activeShapeComparison.routeId,
+      activeShapeComparison.variantIndex,
     );
   } else if (mapMode === "shape" && activeShapeMapId) {
     showShapeMap(activeShapeMapId);
@@ -3550,7 +3628,16 @@ function renderWarningTable(): void {
       compareButton.className = "route-link warning-shape-compare";
       compareButton.textContent = "Compare shapes";
       compareButton.addEventListener("click", () => {
-        showShapeComparison(firstShapeId, secondShapeId, warningCollector.all.indexOf(warning));
+        const warningIndex = warningCollector.all.indexOf(warning);
+        const context = routeVariantForWarning(warning);
+        showShapeComparison(
+          firstShapeId,
+          secondShapeId,
+          warningIndex,
+          context.routeVariant,
+          context.routeId,
+          context.variantIndex,
+        );
       });
       message.append(document.createTextNode(" "), compareButton);
     }
