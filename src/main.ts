@@ -8,7 +8,8 @@ import {
 } from "./gtfs";
 import workerSource from "../dist/gtfs-worker.txt";
 import type { WorkerResponse } from "./gtfs-worker";
-import { mapStop, variantLabel, variantMapData, type MapStop } from "./map-data";
+import { mapStop, shapeMapPoints, variantLabel, variantMapData, type Coordinate, type MapStop } from "./map-data";
+import { compareShapePoints, type ShapePointRange } from "./shape-comparison";
 import {
   defaultMapBaseLayer,
   MAP_BASE_LAYERS,
@@ -61,6 +62,7 @@ app.innerHTML = `
       <button id="history-routes" type="button">Routes</button>
       <button id="history-stops" type="button">Stops</button>
       <button id="history-warnings" type="button" title="No warnings" aria-label="No warnings">Warnings (0)</button>
+      <button id="history-compare-shapes" type="button">Compare shapes</button>
     </div>
     <section id="viewer" class="panel viewer" hidden>
       <div class="table-selection-row">
@@ -267,6 +269,23 @@ app.innerHTML = `
       <div id="fare-dialog-content"></div>
       <button id="fare-dialog-close" type="button">Close</button>
     </dialog>
+    <dialog id="shape-comparison-dialog" aria-labelledby="shape-comparison-dialog-heading">
+      <h2 id="shape-comparison-dialog-heading">Compare shapes</h2>
+      <form id="shape-comparison-form">
+        <label for="shape-comparison-first">First shape ID</label>
+        <input id="shape-comparison-first" name="firstShapeId" list="shape-id-options" required />
+        <span id="shape-comparison-first-status" class="shape-id-status" aria-live="polite"></span>
+        <label for="shape-comparison-second">Second shape ID</label>
+        <input id="shape-comparison-second" name="secondShapeId" list="shape-id-options" required />
+        <span id="shape-comparison-second-status" class="shape-id-status" aria-live="polite"></span>
+        <datalist id="shape-id-options"></datalist>
+        <p id="shape-comparison-error" role="alert"></p>
+        <div class="form-controls">
+          <button id="shape-comparison-cancel" type="button">Cancel</button>
+          <button type="submit">Compare</button>
+        </div>
+      </form>
+    </dialog>
   </main>
 `;
 
@@ -301,6 +320,7 @@ const historyForward = element<HTMLButtonElement>("#history-forward");
 const historyRoutes = element<HTMLButtonElement>("#history-routes");
 const historyStops = element<HTMLButtonElement>("#history-stops");
 const historyWarnings = element<HTMLButtonElement>("#history-warnings");
+const historyCompareShapes = element<HTMLButtonElement>("#history-compare-shapes");
 const historySelect = element<HTMLButtonElement>("#history-select");
 const historyMenu = element<HTMLElement>("#history-menu");
 const historyControls = element<HTMLElement>(".history-controls");
@@ -369,6 +389,14 @@ const agencyDialog = element<HTMLDialogElement>("#agency-dialog");
 const agencyDialogContent = element<HTMLElement>("#agency-dialog-content");
 const fareDialog = element<HTMLDialogElement>("#fare-dialog");
 const fareDialogContent = element<HTMLElement>("#fare-dialog-content");
+const shapeComparisonDialog = element<HTMLDialogElement>("#shape-comparison-dialog");
+const shapeComparisonForm = element<HTMLFormElement>("#shape-comparison-form");
+const shapeComparisonFirst = element<HTMLInputElement>("#shape-comparison-first");
+const shapeComparisonSecond = element<HTMLInputElement>("#shape-comparison-second");
+const shapeComparisonFirstStatus = element<HTMLSpanElement>("#shape-comparison-first-status");
+const shapeComparisonSecondStatus = element<HTMLSpanElement>("#shape-comparison-second-status");
+const shapeIdOptions = element<HTMLDataListElement>("#shape-id-options");
+const shapeComparisonError = element<HTMLParagraphElement>("#shape-comparison-error");
 const warningsView = element<HTMLElement>("#warnings-view");
 const warningTypes = element<HTMLElement>("#warning-types");
 const warningTables = element<HTMLElement>("#warning-tables");
@@ -413,7 +441,9 @@ const stopListItems = new Map<string, HTMLElement[]>();
 let highlightedStopItems: HTMLElement[] = [];
 const viewHistory = new ViewHistory();
 let viewHistoryRestoring = false;
-let mapMode: "stops" | "routes" | "route" = "routes";
+let mapMode: "stops" | "routes" | "route" | "shape" | "shape-comparison" = "routes";
+let activeShapeMapId: string | undefined;
+let activeShapeComparison: { firstShapeId: string; secondShapeId: string } | undefined;
 let selectedWarningTypes = new Set<WarningType>(WARNING_TYPES);
 let selectedWarningTables = new Set<string>();
 let warningTablesInitialized = false;
@@ -474,6 +504,12 @@ function captureViewState(): ViewState {
     return { type: "stop", stopId };
   }
   if (mapPanel && !mapPanel.hidden) {
+    if (mapMode === "shape-comparison" && activeShapeComparison) {
+      return { type: "shape-comparison", ...activeShapeComparison };
+    }
+    if (mapMode === "shape" && activeShapeMapId) {
+      return { type: "map", mode: "shape", shapeId: activeShapeMapId };
+    }
     if (mapMode === "route") {
       const routeId = mapRoute.value === "all"
         ? undefined
@@ -481,7 +517,7 @@ function captureViewState(): ViewState {
       const variant = mapVariant.value === "all" ? "all" as const : Number(mapVariant.value);
       return { type: "map", mode: "route", routeId, variantIndex: variant };
     }
-    return { type: "map", mode: mapMode };
+    return { type: "map", mode: mapMode === "stops" ? "stops" : "routes" };
   }
   const filterKey = tableFilterKey();
   if (filterKey && filteredTable) filteredTableStates.set(filterKey, filteredTable);
@@ -502,7 +538,11 @@ function stateLabel(state: ViewState): string {
   if (state.type === "stop") return `Stop: ${stopsById.get(state.stopId)?.fields.stop_name || state.stopId || "details"}`;
   if (state.type === "trip") return `Trip: ${feed?.indexes.tripsById.get(state.tripId)?.fields.trip_headsign || state.tripId}`;
   if (state.type === "date-schedule") return `Schedule: ${routesById.get(state.routeId)?.fields.route_short_name || state.routeId} · ${state.date}`;
-  if (state.type === "map") return state.mode === "stops" ? "Map: stops" : state.mode === "routes" ? "Map: routes" : "Map: route";
+  if (state.type === "shape-comparison") return `Compare shapes: ${state.firstShapeId} ↔ ${state.secondShapeId}`;
+  if (state.type === "map") return state.mode === "stops" ? "Map: stops"
+    : state.mode === "routes" ? "Map: routes"
+      : state.mode === "shape" ? `Map: shape ${state.shapeId ?? ""}`
+        : "Map: route";
   return "Table";
 }
 
@@ -511,6 +551,7 @@ function updateHistoryUi(): void {
   historyForward.disabled = !viewHistory.canGoForward;
   historyRoutes.disabled = !feed?.tables.some((table) => table.kind === "routes.txt");
   historyStops.disabled = !feed?.tables.some((table) => table.kind === "stops.txt");
+  historyCompareShapes.disabled = !feed?.indexes.shapesById.size;
   historyMenu.replaceChildren();
   viewHistory.states.forEach((state, index) => {
     const option = document.createElement("button");
@@ -586,11 +627,16 @@ function restoreViewState(state: ViewState): void {
     } else if (state.type === "map") {
       if (state.mode === "stops") showStopsMap();
       else if (state.mode === "routes") showAllRoutesMap();
-      else {
+      else if (state.mode === "shape") {
+        if (state.shapeId) showShapeMap(state.shapeId);
+        else restoreTableState(DEFAULT_VIEW_STATE as Extract<ViewState, { type: "table" }>);
+      } else {
         const route = state.routeId ? routesById.get(state.routeId) : undefined;
         if (route) showRouteMap(route, state.variantIndex ?? "all");
         else showAllRoutesMap();
       }
+    } else if (state.type === "shape-comparison") {
+      showShapeComparison(state.firstShapeId, state.secondShapeId);
     }
   } finally {
     viewHistoryRestoring = false;
@@ -1160,9 +1206,9 @@ function showTrip(trip: GtfsRow<"trips.txt">): void {
         mapButton.type = "button";
         mapButton.className = "route-map-icon";
         mapButton.textContent = "🗺️";
-        mapButton.title = "Open the current trip variant on map";
-        mapButton.setAttribute("aria-label", "Open the current trip variant on map");
-        mapButton.addEventListener("click", () => showTripVariantOnMap(trip));
+        mapButton.title = "Open this shape on map";
+        mapButton.setAttribute("aria-label", "Open this shape on map");
+        mapButton.addEventListener("click", () => showShapeMap(String(value)));
         description.append(" ", mapButton);
       } else {
         description.textContent = String(value);
@@ -2128,6 +2174,16 @@ function renderTable(table: GtfsTable): void {
         button.addEventListener("click", () => showZoneStops(String(value)));
         cell.append(button);
         row.append(cell);
+      } else if (column === "shape_id" && value && feed?.indexes.shapesById.has(String(value))) {
+        const cell = document.createElement("td");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "route-link";
+        button.textContent = String(value);
+        button.setAttribute("aria-label", `Open shape ${value} on map`);
+        button.addEventListener("click", () => showShapeMap(String(value)));
+        cell.append(button);
+        row.append(cell);
       } else if (referencedRoute) {
         const cell = document.createElement("td");
         const button = document.createElement("button");
@@ -2154,32 +2210,6 @@ function renderTable(table: GtfsTable): void {
         button.textContent = String(value);
         button.addEventListener("click", () => showTrip(feed!.indexes.tripsById.get(String(value))!));
         cell.append(button);
-        row.append(cell);
-      } else if (table.kind === "trips.txt" && column === "shape_id" && value) {
-        const cell = document.createElement("td");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "route-link";
-        button.textContent = String(value);
-        const shapeTable = feed?.tables.find((candidate) => candidate.kind === "shapes.txt");
-        button.addEventListener("click", () => {
-          if (shapeTable?.kind === "shapes.txt") {
-            showFilteredTable(
-              { ...shapeTable, rows: shapeTable.rows.filter((row) => row.fields.shape_id === String(value)) },
-              `Showing rows for shape ${value}.`,
-            );
-          }
-        });
-        cell.append(button);
-        const trip = values as GtfsRow<"trips.txt">;
-        const mapButton = document.createElement("button");
-        mapButton.type = "button";
-        mapButton.className = "route-map-icon";
-        mapButton.textContent = "🗺️";
-        mapButton.title = "Open the trip variant on map";
-        mapButton.setAttribute("aria-label", "Open the trip variant on map");
-        mapButton.addEventListener("click", () => showTripVariantOnMap(trip));
-        cell.append(" ", mapButton);
         row.append(cell);
       } else if (column === "stop_id" && value && feed?.indexes.stopsById.get(String(value))) {
         const cell = document.createElement("td");
@@ -2316,6 +2346,17 @@ function openMap(title: string): void {
       false,
       false,
       () => {
+        if (mapMode === "shape-comparison" && activeShapeComparison && feed) {
+          const first = shapeMapPoints(feed.indexes.shapesById, activeShapeComparison.firstShapeId).points;
+          const second = shapeMapPoints(feed.indexes.shapesById, activeShapeComparison.secondShapeId).points;
+          mapView?.focusPoints([...first, ...second].map((point) => point.coordinate));
+          return;
+        }
+        if (mapMode === "shape" && activeShapeMapId && feed) {
+          const points = shapeMapPoints(feed.indexes.shapesById, activeShapeMapId).points;
+          mapView?.focusPoints(points.map((point) => point.coordinate));
+          return;
+        }
         if (mapMode !== "route") {
           mapView?.focusSelection(null, null);
           return;
@@ -2351,6 +2392,8 @@ function showStopsMap(): void {
   if (!feed.tables.some((table) => table.kind === "stops.txt")) return;
   mapSidebar.hidden = true;
   mapVariantControls.hidden = true;
+  activeShapeMapId = undefined;
+  activeShapeComparison = undefined;
   mapMode = "stops";
   openMap("Stops map");
   if (filteredTable?.kind === "stops.txt" || feed.tables[tableSelect.selectedIndex]?.kind === "stops.txt") {
@@ -2393,6 +2436,183 @@ function showTripVariantOnMap(trip: GtfsRow<"trips.txt">): void {
   showRouteMap(route, index < 0 ? "all" : index);
 }
 
+function showShapeMap(shapeId: string): void {
+  if (!feed || !feed.indexes.shapesById.has(shapeId)) return;
+  activeShapeMapId = shapeId;
+  activeShapeComparison = undefined;
+  mapMode = "shape";
+  const { points, invalidShapePoints } = shapeMapPoints(feed.indexes.shapesById, shapeId);
+  openMap(`Shape map: ${shapeId}`);
+  mapSidebar.hidden = false;
+  mapSidebar.setAttribute("aria-label", `Shape ${shapeId} details`);
+  mapVariantControls.hidden = true;
+  mapClearFilter.hidden = true;
+  const heading = document.createElement("h3");
+  heading.textContent = shapeId;
+  const details = document.createElement("p");
+  details.textContent = `${points.length} valid shape points`
+    + (invalidShapePoints ? `; ${invalidShapePoints} invalid points omitted.` : ".");
+  mapSidebar.append(heading, details);
+  mapSummary.textContent = details.textContent;
+  mapView?.update([], [{
+    coordinates: points.map((point) => point.coordinate),
+    approximate: false,
+    variantIndex: 0,
+    label: `Shape ${shapeId}`,
+    color: "#1565c0",
+  }]);
+  pushViewState();
+}
+
+function showShapeComparison(firstShapeId: string, secondShapeId: string): boolean {
+  if (!feed || !feed.indexes.shapesById.has(firstShapeId) || !feed.indexes.shapesById.has(secondShapeId)) {
+    return false;
+  }
+  activeShapeMapId = undefined;
+  activeShapeComparison = { firstShapeId, secondShapeId };
+  mapMode = "shape-comparison";
+  const first = shapeMapPoints(feed.indexes.shapesById, firstShapeId);
+  const second = shapeMapPoints(feed.indexes.shapesById, secondShapeId);
+  const comparison = compareShapePoints(first.points, second.points);
+  openMap(`Shape comparison: ${firstShapeId} and ${secondShapeId}`);
+  mapSidebar.hidden = false;
+  mapSidebar.setAttribute("aria-label", "Shape comparison ranges");
+  mapVariantControls.hidden = true;
+  mapClearFilter.hidden = true;
+
+  const colorLegend = document.createElement("p");
+  colorLegend.className = "shape-comparison-legend";
+  colorLegend.append(
+    shapeLegendItem(firstShapeId, "#d32f2f"),
+    document.createTextNode(" "),
+    shapeLegendItem(secondShapeId, "#1565c0"),
+  );
+  const rangeColorLabel = document.createElement("label");
+  rangeColorLabel.className = "shape-range-color-toggle";
+  const rangeColorToggle = document.createElement("input");
+  rangeColorToggle.type = "checkbox";
+  rangeColorLabel.append(rangeColorToggle, " Color common ranges green and differing ranges red");
+  const summary = document.createElement("p");
+  summary.textContent = `${comparison.matches.length} common points; `
+    + `${comparison.differingFirstRanges.reduce((count, range) => count + range.endIndex - range.startIndex + 1, 0)} `
+    + `differing in ${firstShapeId}; `
+    + `${comparison.differingSecondRanges.reduce((count, range) => count + range.endIndex - range.startIndex + 1, 0)} `
+    + `differing in ${secondShapeId}.`
+    + (first.invalidShapePoints || second.invalidShapePoints
+      ? ` Invalid points omitted: ${firstShapeId} ${first.invalidShapePoints}, ${secondShapeId} ${second.invalidShapePoints}.`
+      : "");
+  const rangeCoordinates = (points: typeof first.points, range: ShapePointRange): Coordinate[] =>
+    points.slice(range.startIndex, range.endIndex + 1).map((point) => point.coordinate);
+  const commonRangeLines = comparison.commonRanges.flatMap((range) => [
+    rangeCoordinates(first.points, range.first),
+    rangeCoordinates(second.points, range.second),
+  ]);
+  const differingRangeLines = [
+    ...comparison.differingFirstRanges.map((range) => rangeCoordinates(first.points, range)),
+    ...comparison.differingSecondRanges.map((range) => rangeCoordinates(second.points, range)),
+  ];
+  rangeColorToggle.addEventListener("change", () => {
+    mapView?.setComparisonRangeColors(commonRangeLines, differingRangeLines, rangeColorToggle.checked);
+  });
+  mapSidebar.append(rangeColorLabel, colorLegend, summary);
+
+  const rangeLabel = (points: typeof first.points, range: ShapePointRange): string => {
+    const start = points[range.startIndex]?.sequence;
+    const end = points[range.endIndex]?.sequence;
+    return start === end ? String(start) : `${start}–${end}`;
+  };
+  const appendRangeButton = (container: HTMLElement, label: string, paths: Coordinate[][]): void => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "shape-range";
+    button.textContent = label;
+    const usablePaths = paths.filter((path) => path.length > 0);
+    button.addEventListener("mouseenter", () => mapView?.highlightLines(usablePaths));
+    button.addEventListener("mouseleave", () => mapView?.highlightLines(null));
+    button.addEventListener("focus", () => mapView?.highlightLines(usablePaths));
+    button.addEventListener("blur", () => mapView?.highlightLines(null));
+    button.addEventListener("click", () => mapView?.focusPoints(usablePaths.flat()));
+    container.append(button);
+  };
+
+  const commonSection = document.createElement("section");
+  const commonHeading = document.createElement("h3");
+  commonHeading.textContent = `Common ranges (${comparison.matches.length} points)`;
+  commonSection.append(commonHeading);
+  if (comparison.commonRanges.length) {
+    for (const range of comparison.commonRanges) {
+      const count = range.first.endIndex - range.first.startIndex + 1;
+      appendRangeButton(
+        commonSection,
+        `${firstShapeId} ${rangeLabel(first.points, range.first)} ↔ `
+          + `${secondShapeId} ${rangeLabel(second.points, range.second)} (${count} points)`,
+        [rangeCoordinates(first.points, range.first), rangeCoordinates(second.points, range.second)],
+      );
+    }
+  } else {
+    const message = document.createElement("p");
+    message.textContent = "No common points.";
+    commonSection.append(message);
+  }
+  mapSidebar.append(commonSection);
+
+  const differingSection = document.createElement("section");
+  const differingHeading = document.createElement("h3");
+  differingHeading.textContent = "Differing ranges";
+  differingSection.append(differingHeading);
+  for (const [shapeId, points, ranges, color] of [
+    [firstShapeId, first.points, comparison.differingFirstRanges, "#d32f2f"],
+    [secondShapeId, second.points, comparison.differingSecondRanges, "#1565c0"],
+  ] as const) {
+    const shapeHeading = document.createElement("h4");
+    shapeHeading.textContent = shapeId;
+    shapeHeading.style.color = color;
+    differingSection.append(shapeHeading);
+    if (!ranges.length) {
+      const message = document.createElement("p");
+      message.textContent = "No differing points.";
+      differingSection.append(message);
+      continue;
+    }
+    for (const range of ranges) {
+      const count = range.endIndex - range.startIndex + 1;
+      appendRangeButton(
+        differingSection,
+        `${shapeId} ${rangeLabel(points, range)} (${count} points)`,
+        [rangeCoordinates(points, range)],
+      );
+    }
+  }
+  mapSidebar.append(differingSection);
+  mapSummary.textContent = summary.textContent;
+  mapView?.update([], [
+    {
+      coordinates: first.points.map((point) => point.coordinate),
+      approximate: false,
+      variantIndex: 0,
+      label: firstShapeId,
+      color: "#d32f2f",
+    },
+    {
+      coordinates: second.points.map((point) => point.coordinate),
+      approximate: false,
+      variantIndex: 1,
+      label: secondShapeId,
+      color: "#1565c0",
+    },
+  ]);
+  pushViewState();
+  return true;
+}
+
+function shapeLegendItem(label: string, color: string): HTMLElement {
+  const item = document.createElement("span");
+  item.className = "shape-comparison-legend-item";
+  item.style.setProperty("--shape-color", color);
+  item.textContent = label;
+  return item;
+}
+
 function showTripStopOnMap(trip: GtfsRow<"trips.txt">, stop: GtfsRow<"stops.txt">): void {
   if (!feed) return;
   showTripVariantOnMap(trip);
@@ -2402,6 +2622,8 @@ function showTripStopOnMap(trip: GtfsRow<"trips.txt">, stop: GtfsRow<"stops.txt"
 
 function showRouteMap(route: GtfsRow<"routes.txt">, variantIndex: number | "all" = 0): void {
   if (!feed) return;
+  activeShapeMapId = undefined;
+  activeShapeComparison = undefined;
   const title = route.fields.route_short_name || route.fields.route_long_name || route.fields.route_id;
   const routes = feed.tables.find((table) => table.kind === "routes.txt")?.rows ?? [];
   prepareRouteMap(routes);
@@ -2420,6 +2642,8 @@ function showRouteMap(route: GtfsRow<"routes.txt">, variantIndex: number | "all"
 
 function showAllRoutesMap(): void {
   if (!feed) return;
+  activeShapeMapId = undefined;
+  activeShapeComparison = undefined;
   const table = filteredTable?.kind === "routes.txt"
     ? filteredTable
     : feed.tables.find((candidate) => candidate.kind === "routes.txt");
@@ -2480,6 +2704,7 @@ function prepareRouteMap(routes: GtfsRow<"routes.txt">[]): void {
     }
   }
   mapSidebar.hidden = false;
+  mapSidebar.setAttribute("aria-label", "Route variants and stops");
   mapVariantControls.hidden = false;
   mapClearFilter.hidden = true;
   mapRoute.replaceChildren();
@@ -2776,6 +3001,9 @@ form.addEventListener("submit", async (event) => {
   updateWarningNavigation(0);
   mapView?.remove();
   mapView = undefined;
+  activeShapeMapId = undefined;
+  activeShapeComparison = undefined;
+  mapMode = "routes";
   viewHistory.clear();
   warningTablesInitialized = false;
   resetTableFilter();
@@ -2820,6 +3048,44 @@ form.addEventListener("submit", async (event) => {
 
 element<HTMLButtonElement>("#agency-dialog-close").addEventListener("click", () => agencyDialog.close());
 element<HTMLButtonElement>("#fare-dialog-close").addEventListener("click", () => fareDialog.close());
+element<HTMLButtonElement>("#shape-comparison-cancel").addEventListener("click", () => shapeComparisonDialog.close());
+historyCompareShapes.addEventListener("click", () => openShapeComparisonDialog());
+function updateShapeIdVerification(): void {
+  const compareButton = shapeComparisonForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+  for (const [input, status] of [
+    [shapeComparisonFirst, shapeComparisonFirstStatus],
+    [shapeComparisonSecond, shapeComparisonSecondStatus],
+  ] as const) {
+    const shapeId = input.value.trim();
+    const valid = Boolean(shapeId && feed?.indexes.shapesById.has(shapeId));
+    input.classList.toggle("shape-id-invalid", !valid);
+    input.setAttribute("aria-invalid", String(!valid));
+    status.textContent = valid ? "✔️" : "❌";
+  }
+  if (compareButton) {
+    compareButton.disabled = !shapeComparisonFirst.value.trim()
+      || !shapeComparisonSecond.value.trim()
+      || !feed?.indexes.shapesById.has(shapeComparisonFirst.value.trim())
+      || !feed?.indexes.shapesById.has(shapeComparisonSecond.value.trim());
+  }
+  shapeComparisonError.textContent = "";
+}
+shapeComparisonFirst.addEventListener("input", updateShapeIdVerification);
+shapeComparisonSecond.addEventListener("input", updateShapeIdVerification);
+shapeComparisonForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const firstShapeId = shapeComparisonFirst.value.trim();
+  const secondShapeId = shapeComparisonSecond.value.trim();
+  if (!firstShapeId || !secondShapeId) {
+    shapeComparisonError.textContent = "Enter two shape IDs.";
+    return;
+  }
+  if (!showShapeComparison(firstShapeId, secondShapeId)) {
+    shapeComparisonError.textContent = "Both shape IDs must exist in the loaded feed.";
+    return;
+  }
+  shapeComparisonDialog.close();
+});
 ultrawideToggle.addEventListener("click", () => {
   const enabled = pageElement.classList.toggle("ultrawide");
   ultrawideToggle.setAttribute("aria-pressed", String(enabled));
@@ -3131,6 +3397,17 @@ function renderWarningTable(): void {
       break;
     }
     if (!warning.relatedObjectIds.length) message.textContent = text;
+    const firstShapeId = warning.parameters.firstShapeId;
+    const secondShapeId = warning.parameters.secondShapeId;
+    if (typeof firstShapeId === "string" && typeof secondShapeId === "string"
+      && feed?.indexes.shapesById.has(firstShapeId) && feed.indexes.shapesById.has(secondShapeId)) {
+      const compareButton = document.createElement("button");
+      compareButton.type = "button";
+      compareButton.className = "route-link warning-shape-compare";
+      compareButton.textContent = "Compare shapes";
+      compareButton.addEventListener("click", () => showShapeComparison(firstShapeId, secondShapeId));
+      message.append(document.createTextNode(" "), compareButton);
+    }
 
     row.append(severity, type, rowNumber, message);
     fragment.append(row);
@@ -3197,6 +3474,21 @@ warningPageSize.addEventListener("change", () => {
 function closeHistoryMenu(): void {
   historyMenu.hidden = true;
   historySelect.setAttribute("aria-expanded", "false");
+}
+
+function openShapeComparisonDialog(firstShapeId = "", secondShapeId = ""): void {
+  if (!feed) return;
+  shapeIdOptions.replaceChildren(...[...feed.indexes.shapesById.keys()].sort().map((shapeId) => {
+    const option = document.createElement("option");
+    option.value = shapeId;
+    return option;
+  }));
+  shapeComparisonFirst.value = firstShapeId;
+  shapeComparisonSecond.value = secondShapeId;
+  shapeComparisonError.textContent = "";
+  updateShapeIdVerification();
+  shapeComparisonDialog.showModal();
+  shapeComparisonFirst.focus();
 }
 
 historySelect.addEventListener("click", () => {

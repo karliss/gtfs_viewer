@@ -10,6 +10,7 @@ Try [here](https://karliss.github.io/gtfs_viewer/)
 Features:
 * Browse GTFS tables
 * Map for inspecting routes and stop positions
+* Compare shapes on a map and inspect their common and differing point ranges
 * Cross reference tables with clickable links
 * Basic support for calendar.txt and calendar-dates.txt based schedules
 * Trip information

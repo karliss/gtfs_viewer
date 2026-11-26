@@ -5,7 +5,8 @@ export type ViewState =
   | { type: "trip"; tripId: string }
   | { type: "date-schedule"; routeId: string; date: string }
   | { type: "warnings"; itemIndex: number }
-  | { type: "map"; mode: "stops" | "routes" | "route"; routeId?: string; variantIndex?: number | "all" };
+  | { type: "map"; mode: "stops" | "routes" | "route" | "shape"; routeId?: string; variantIndex?: number | "all"; shapeId?: string }
+  | { type: "shape-comparison"; firstShapeId: string; secondShapeId: string };
 
 export const DEFAULT_VIEW_STATE: ViewState = {
   type: "table",
