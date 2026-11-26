@@ -2,7 +2,9 @@
 
 **This is slop.** Provided as is, use at your own risk. Don't expect any support.
 
-Simple [GTFS](https://gtfs.org/) (General Transit Feed Specification) viewer. All the processing happens locally.
+Simple [GTFS](https://gtfs.org/) (General Transit Feed Specification) viewer with focus on exploring the technical technical details and GTFS file structure.
+
+All the processing happens locally, can be run by simply opening HTML file and no server.
 
 Try [here](https://karliss.github.io/gtfs_viewer/)
 
@@ -18,6 +20,7 @@ Features:
 ## Limitations
 
 * map background layers don't work when running a local copy (abuse prevention system by the free OSM tile providers)
+* not designed to be a user friendly public transport route planer
 * GTFS spec lists more than 30 different tables, this currently handles (not necessarily fully or correctly)
    - agency.txt
    - routes.txt
