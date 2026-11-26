@@ -22,6 +22,33 @@ export interface ShapeComparison {
   differingSecondRanges: ShapePointRange[];
 }
 
+export function rangeSegmentCoordinates(
+  points: readonly ShapePoint[],
+  range: ShapePointRange,
+): Coordinate[][] {
+  if (points.length < 2 || range.startIndex > range.endIndex) return [];
+  const segments: Coordinate[][] = [];
+  if (range.startIndex > 0) {
+    segments.push([
+      points[range.startIndex - 1].coordinate,
+      points[range.startIndex].coordinate,
+    ]);
+  }
+  for (let index = range.startIndex; index < range.endIndex; index++) {
+    segments.push([
+      points[index].coordinate,
+      points[index + 1].coordinate,
+    ]);
+  }
+  if (range.endIndex < points.length - 1) {
+    segments.push([
+      points[range.endIndex].coordinate,
+      points[range.endIndex + 1].coordinate,
+    ]);
+  }
+  return segments;
+}
+
 function pointKey(point: ShapePoint): string {
   return `${point.coordinate[0]},${point.coordinate[1]}`;
 }

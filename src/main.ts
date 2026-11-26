@@ -9,7 +9,11 @@ import {
 import workerSource from "../dist/gtfs-worker.txt";
 import type { WorkerResponse } from "./gtfs-worker";
 import { mapStop, shapeMapPoints, variantLabel, variantMapData, type Coordinate, type MapStop } from "./map-data";
-import { compareShapePoints, type ShapePointRange } from "./shape-comparison";
+import {
+  compareShapePoints,
+  rangeSegmentCoordinates,
+  type ShapePointRange,
+} from "./shape-comparison";
 import {
   defaultMapBaseLayer,
   MAP_BASE_LAYERS,
@@ -2726,8 +2730,8 @@ function showShapeComparison(
     rangeCoordinates(second.points, range.second),
   ]);
   const differingRangeLines = [
-    ...comparison.differingFirstRanges.map((range) => rangeCoordinates(first.points, range)),
-    ...comparison.differingSecondRanges.map((range) => rangeCoordinates(second.points, range)),
+    ...comparison.differingFirstRanges.flatMap((range) => rangeSegmentCoordinates(first.points, range)),
+    ...comparison.differingSecondRanges.flatMap((range) => rangeSegmentCoordinates(second.points, range)),
   ];
   rangeColorToggle.addEventListener("change", () => {
     shapeComparisonRangeColors = rangeColorToggle.checked;
@@ -2798,7 +2802,7 @@ function showShapeComparison(
       appendRangeButton(
         differingSection,
         `${shapeId} ${rangeLabel(points, range)} (${count} points)`,
-        [rangeCoordinates(points, range)],
+        rangeSegmentCoordinates(points, range),
       );
     }
   }
@@ -2811,6 +2815,7 @@ function showShapeComparison(
       variantIndex: 0,
       label: firstShapeId,
       color: "#d32f2f",
+      stopIds: routeVariant?.stops.flatMap((stopId) => stopId ? [stopId] : []) ?? [],
     },
     {
       coordinates: second.points.map((point) => point.coordinate),
@@ -2818,6 +2823,7 @@ function showShapeComparison(
       variantIndex: 1,
       label: secondShapeId,
       color: "#1565c0",
+      stopIds: routeVariant?.stops.flatMap((stopId) => stopId ? [stopId] : []) ?? [],
     },
   ]);
   mapView?.setComparisonRangeColors(
@@ -2825,6 +2831,10 @@ function showShapeComparison(
     differingRangeLines,
     shapeComparisonRangeColors,
   );
+  mapView?.setStopOrderVariant(routeVariant
+    && mapStopOrder.checked
+    ? 0
+    : null);
   pushViewState();
   return true;
 }
@@ -3361,22 +3371,50 @@ mapRandomColors.addEventListener("change", () => {
 mapAllStops.addEventListener("change", () => {
   mapView?.setAllStopsEnabled(mapAllStops.checked);
   if (mapMode === "shape-comparison" && activeShapeComparison) {
-    showShapeComparison(
-      activeShapeComparison.firstShapeId,
-      activeShapeComparison.secondShapeId,
-      activeShapeComparison.warningIndex,
-      activeShapeComparison.routeVariant,
-      activeShapeComparison.routeId,
-      activeShapeComparison.variantIndex,
-    );
+    const first = shapeMapPoints(feed?.indexes.shapesById ?? new Map(), activeShapeComparison.firstShapeId);
+    const second = shapeMapPoints(feed?.indexes.shapesById ?? new Map(), activeShapeComparison.secondShapeId);
+    mapView?.update(stopsForShapeComparison(activeShapeComparison.routeVariant), [
+      {
+        coordinates: first.points.map((point) => point.coordinate),
+        approximate: false,
+        variantIndex: 0,
+        label: activeShapeComparison.firstShapeId,
+        color: "#d32f2f",
+        stopIds: activeShapeComparison.routeVariant?.stops.flatMap((stopId) => stopId ? [stopId] : []) ?? [],
+      },
+      {
+        coordinates: second.points.map((point) => point.coordinate),
+        approximate: false,
+        variantIndex: 1,
+        label: activeShapeComparison.secondShapeId,
+        color: "#1565c0",
+        stopIds: activeShapeComparison.routeVariant?.stops.flatMap((stopId) => stopId ? [stopId] : []) ?? [],
+      },
+    ], false);
+    mapView?.setStopOrderVariant(activeShapeComparison.routeVariant && mapStopOrder.checked ? 0 : null);
   } else if (mapMode === "shape" && activeShapeMapId) {
-    showShapeMap(activeShapeMapId);
+    const shapeId = activeShapeMapId;
+    const points = shapeMapPoints(feed?.indexes.shapesById ?? new Map(), shapeId).points;
+    mapView?.update(mapAllStops.checked
+      ? (feed?.tables.find((table) => table.kind === "stops.txt")?.rows ?? []).map(mapStop)
+      : [], [{
+      coordinates: points.map((point) => point.coordinate),
+      approximate: false,
+      variantIndex: 0,
+      label: `Shape ${shapeId}`,
+      color: "#1565c0",
+    }], false);
   } else {
     renderRouteMap(true);
   }
 });
 mapReducedStops.addEventListener("change", () => mapView?.setStopSizeReduced(mapReducedStops.checked));
-mapStopOrder.addEventListener("change", () => mapView?.setStopOrderEnabled(mapStopOrder.checked));
+mapStopOrder.addEventListener("change", () => {
+  mapView?.setStopOrderEnabled(mapStopOrder.checked);
+  if (mapMode === "shape-comparison" && activeShapeComparison?.routeVariant) {
+    mapView?.setStopOrderVariant(mapStopOrder.checked ? 0 : null);
+  }
+});
 mapAutoRefocus.addEventListener("change", () => {
   mapView?.setAutoRefocusEnabled(!mapAutoRefocus.checked);
 });
