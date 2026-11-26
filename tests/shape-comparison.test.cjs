@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { compareShapePoints } = require("../dist/shape-comparison.cjs");
+const { compareShapePoints, rangeSegmentCoordinates } = require("../dist/shape-comparison.cjs");
 
 function points(...coordinates) {
   return coordinates.map(([lon, lat], index) => ({
@@ -48,4 +48,18 @@ test("returns every point as differing when there are no common coordinates", ()
   assert.deepEqual(comparison.commonRanges, []);
   assert.deepEqual(comparison.differingFirstRanges, [{ startIndex: 0, endIndex: 1 }]);
   assert.deepEqual(comparison.differingSecondRanges, [{ startIndex: 0, endIndex: 0 }]);
+});
+
+test("covering a differing point range includes its neighboring segments", () => {
+  const shape = points([0, 0], [1, 1], [2, 2], [3, 3]);
+  assert.deepEqual(rangeSegmentCoordinates(shape, { startIndex: 1, endIndex: 1 }), [
+    [[0, 0], [1, 1]],
+    [[1, 1], [2, 2]],
+  ]);
+  assert.deepEqual(rangeSegmentCoordinates(shape, { startIndex: 0, endIndex: 0 }), [
+    [[0, 0], [1, 1]],
+  ]);
+  assert.deepEqual(rangeSegmentCoordinates(shape, { startIndex: 3, endIndex: 3 }), [
+    [[2, 2], [3, 3]],
+  ]);
 });
