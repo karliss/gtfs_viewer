@@ -5,7 +5,9 @@ export type WarningType =
   | "missing_or_duplicate_ids"
   | "unrecognized_files"
   | "invalid_values"
-  | "variant_merge";
+  | "variant_merge_different_short_names"
+  | "variant_merge_different_shapes"
+  | "variant_merge_identical_shapes";
 
 export type WarningSeverity = "error" | "warning" | "info";
 export type WarningScope = "archive" | "table" | "element";
@@ -61,12 +63,26 @@ export const WARNING_DESCRIPTIONS: Readonly<Record<WarningType, WarningDescripti
     scope: "element",
     parameters: ["file", "row", "column", "value"],
   },
-  variant_merge: {
-    id: "variant_merge",
-    messageTemplate: "Route {routeId}: variants merged despite different {field} (trip_id/shape_id samples: {firstTripId}/{firstShapeId} and {secondTripId}/{secondShapeId})",
+  variant_merge_different_short_names: {
+    id: "variant_merge_different_short_names",
+    messageTemplate: "Route {routeId}: variants merged despite different trip short names (trip_id/shape_id samples: {firstTripId}/{firstShapeId} and {secondTripId}/{secondShapeId})",
     severity: "warning",
     scope: "element",
-    parameters: ["routeId", "field", "first", "second", "firstTripId", "firstShapeId", "secondTripId", "secondShapeId"],
+    parameters: ["routeId", "first", "second", "firstTripId", "firstShapeId", "secondTripId", "secondShapeId"],
+  },
+  variant_merge_different_shapes: {
+    id: "variant_merge_different_shapes",
+    messageTemplate: "Route {routeId}: variants merged despite different shapes {firstShapeId} and {secondShapeId} (trips {firstTripId} and {secondTripId})",
+    severity: "warning",
+    scope: "element",
+    parameters: ["routeId", "firstTripId", "firstShapeId", "secondTripId", "secondShapeId"],
+  },
+  variant_merge_identical_shapes: {
+    id: "variant_merge_identical_shapes",
+    messageTemplate: "Route {routeId}: variants merged with identical shapes {firstShapeId} and {secondShapeId} (trips {firstTripId} and {secondTripId})",
+    severity: "info",
+    scope: "element",
+    parameters: ["routeId", "firstTripId", "firstShapeId", "secondTripId", "secondShapeId"],
   },
 };
 
@@ -85,7 +101,9 @@ export const WARNING_TYPES: readonly WarningType[] = [
   "missing_or_duplicate_ids",
   "unrecognized_files",
   "invalid_values",
-  "variant_merge",
+  "variant_merge_different_short_names",
+  "variant_merge_different_shapes",
+  "variant_merge_identical_shapes",
 ];
 
 export const WARNING_LABELS: Readonly<Record<WarningType, string>> = {
@@ -95,7 +113,9 @@ export const WARNING_LABELS: Readonly<Record<WarningType, string>> = {
   missing_or_duplicate_ids: "Missing or duplicate IDs",
   unrecognized_files: "Unrecognized files",
   invalid_values: "Invalid field values",
-  variant_merge: "Variant merge warnings",
+  variant_merge_different_short_names: "Merged variants with different trip short names",
+  variant_merge_different_shapes: "Merged variants with different shapes",
+  variant_merge_identical_shapes: "Merged variants with identical shapes",
 };
 
 export class WarningCollector {

@@ -8,6 +8,11 @@ export interface MapStop {
   hoverLabel?: string;
 }
 
+export interface ShapeMapPoint {
+  sequence: number;
+  coordinate: Coordinate;
+}
+
 export function coordinate(lon: number | null, lat: number | null): Coordinate | null {
   if (lon === null || lat === null) return null;
   const x = lon;
@@ -43,18 +48,26 @@ export function variantMapData(
   invalidShapePoints: number;
 } {
   const variantStops = variant.stops.map((id) => id && stops.get(id) || { id, name: null, coordinate: null });
-  const rows = variant.shapeId ? shapes.get(variant.shapeId) ?? [] : [];
-  const points = rows.flatMap((row) => {
-    const sequence = row.fields.shape_pt_sequence;
-    const position = coordinate(row.fields.shape_pt_lon, row.fields.shape_pt_lat);
-    return sequence !== null && position ? [{ sequence, position }] : [];
-  }).sort((a, b) => a.sequence - b.sequence);
+  const { points, invalidShapePoints } = shapeMapPoints(shapes, variant.shapeId);
   const approximate = points.length < 2;
   return {
     stops: variantStops,
     line: approximate ? variantStops.flatMap((stop) => stop.coordinate ? [stop.coordinate] : [])
-      : points.map((point) => point.position),
+      : points.map((point) => point.coordinate),
     approximate,
-    invalidShapePoints: rows.length - points.length,
+    invalidShapePoints,
   };
+}
+
+export function shapeMapPoints(
+  shapes: ReadonlyMap<string, GtfsRow<"shapes.txt">[]>,
+  shapeId: string | null,
+): { points: ShapeMapPoint[]; invalidShapePoints: number } {
+  const rows = shapeId ? shapes.get(shapeId) ?? [] : [];
+  const points = rows.flatMap((row) => {
+    const sequence = row.fields.shape_pt_sequence;
+    const position = coordinate(row.fields.shape_pt_lon, row.fields.shape_pt_lat);
+    return sequence !== null && position ? [{ sequence, coordinate: position }] : [];
+  }).sort((a, b) => a.sequence - b.sequence);
+  return { points, invalidShapePoints: rows.length - points.length };
 }

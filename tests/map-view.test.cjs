@@ -254,6 +254,22 @@ test("route colors are used by default and can be disabled", () => {
   assert.deepEqual(map.paint["route-lines:line-color"], ["get", "color"]);
 });
 
+test("shape colors remain distinct and range highlighting can zoom to selected points", () => {
+  const view = new MapView({}, () => {}, () => {});
+  view.update([], [
+    { coordinates: [[1, 2], [3, 4]], approximate: false, variantIndex: 0, label: "Shape A", color: "#cc0000" },
+    { coordinates: [[1, 2], [5, 6]], approximate: false, variantIndex: 1, label: "Shape B", color: "#0055cc" },
+  ]);
+  map.events.load();
+  assert.deepEqual(map.paint["route-lines:line-color"], ["get", "color"]);
+  assert.deepEqual(map.sources["route-lines"].data.features.map((feature) => feature.properties.color), ["#cc0000", "#0055cc"]);
+  view.highlightLines([[[1, 2], [3, 4]], [[5, 6]]]);
+  assert.equal(map.sources["range-highlight-lines"].data.features.length, 1);
+  assert.equal(map.sources["range-highlight-points"].data.features.length, 1);
+  view.focusPoints([[1, 2], [5, 6]]);
+  assert.equal(map.fitBoundsCount, 2);
+});
+
 test("clicking a route line opens compact route details", () => {
   const content = {};
   const view = new MapView({}, () => {}, () => {}, undefined, (id, index) => id === "r" && index === 4 ? content : null);

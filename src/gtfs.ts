@@ -638,10 +638,9 @@ function variantMergeWarnings(
   const secondTripId = second.trips[0]?.fields.trip_id ?? null;
   if (first.tripShortName !== second.tripShortName) {
     warnings.push({
-      type: "variant_merge",
+      type: "variant_merge_different_short_names",
       parameters: {
         routeId,
-        field: "trip short names",
         first: first.tripShortName,
         second: second.tripShortName,
         firstTripId,
@@ -657,27 +656,23 @@ function variantMergeWarnings(
   if (first.shapeId && second.shapeId) {
     const firstPoints = feed.indexes.shapePointsById.get(first.shapeId);
     const secondPoints = feed.indexes.shapePointsById.get(second.shapeId);
-    if (!firstPoints || !secondPoints
-      || firstPoints.some(([lat, lon]) => lat === null || lon === null)
-      || secondPoints.some(([lat, lon]) => lat === null || lon === null)
-      || !shapePointsEqual(firstPoints, secondPoints)) {
-      warnings.push({
-        type: "variant_merge",
-        parameters: {
-          routeId,
-          field: "shapes",
-          first: first.shapeId,
-          second: second.shapeId,
-          firstTripId,
-          firstShapeId: first.shapeId,
-          secondTripId,
-          secondShapeId: second.shapeId,
-        },
-        relatedObjectIds: [routeId, firstTripId, first.shapeId, secondTripId, second.shapeId].filter(
-          (id): id is string => id !== null,
-        ),
-      });
-    }
+    const identicalShapes = Boolean(firstPoints && secondPoints
+      && !firstPoints.some(([lat, lon]) => lat === null || lon === null)
+      && !secondPoints.some(([lat, lon]) => lat === null || lon === null)
+      && shapePointsEqual(firstPoints, secondPoints));
+    warnings.push({
+      type: identicalShapes ? "variant_merge_identical_shapes" : "variant_merge_different_shapes",
+      parameters: {
+        routeId,
+        firstTripId,
+        firstShapeId: first.shapeId,
+        secondTripId,
+        secondShapeId: second.shapeId,
+      },
+      relatedObjectIds: [routeId, firstTripId, first.shapeId, secondTripId, second.shapeId].filter(
+        (id): id is string => id !== null,
+      ),
+    });
   }
   return warnings;
 }
