@@ -2,11 +2,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
-  decodeRouteType, formatTimetableDayRange, getMatchingRows, getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
+  collectTimetableCalendarData, decodeRouteType, formatTimetableDayRange, getMatchingRows, getPopularTimetableDays,
+  getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, loadGtfsFiles, summarizeTripField,
   decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
   canMergeRouteVariants, mergeRouteVariantPair, mergeRouteVariants, mergeRouteVariantsInFeed,
-  WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES, PICKUP_TYPES, DROP_OFF_TYPES,
+  splitTimetableCalendarRanges, WHEELCHAIR_ACCESSIBLE_VALUES, BIKES_ALLOWED_VALUES, CARS_ALLOWED_VALUES,
+  PICKUP_TYPES, DROP_OFF_TYPES,
 } = require("../dist/gtfs.cjs");
 const {
   WarningCollector, WARNING_DESCRIPTIONS, WARNING_TYPES,
@@ -959,6 +961,63 @@ test("supports multiple calendar rows for one service ID", () => {
   assert.deepEqual(
     timetables.map((timetable) => timetable.dateRange),
     [["20260101", "20260331"], ["20260601", "20260831"]],
+  );
+});
+
+test("splits overlapping calendar ranges and classifies service days into both columns", () => {
+  const feed = loadGtfs(archive({
+    "routes.txt": "route_id,route_short_name\nr,5\n",
+    "trips.txt": "route_id,trip_id,service_id,shape_id\nr,t12,s12,s\nr,t23,s23,s\n",
+    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\n"
+      + "t12,07:10:00,a,1\nt23,07:20:00,a,1\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "s12,1,1,0,0,0,0,0,20260101,20260131\n"
+      + "s23,0,1,1,0,0,0,0,20260115,20260215\n",
+  }));
+  const variant = getRouteVariants(feed, "r").variants[0];
+  assert.deepEqual(
+    collectTimetableCalendarData(feed, variant).calendarItems.map(({ serviceId, days, dateRange }) =>
+      ({ serviceId, days, dateRange })),
+    [
+      { serviceId: "s12", days: [1, 2], dateRange: ["20260101", "20260131"] },
+      { serviceId: "s23", days: [2, 3], dateRange: ["20260115", "20260215"] },
+    ],
+  );
+  const timetables = getVariantTimetable(feed, variant);
+
+  assert.deepEqual(timetables.map(({ dateRange }) => dateRange), [
+    ["20260101", "20260114"],
+    ["20260115", "20260131"],
+    ["20260201", "20260215"],
+  ]);
+  assert.deepEqual(timetables.map(({ popularDays }) => popularDays), [
+    [[1, 2]],
+    [[1, 2], [3]],
+    [[2, 3]],
+  ]);
+  assert.deepEqual(timetables[1].rows.map(({ departures }) =>
+    departures.map(({ minute, days }) => ({ minute, days }))), [[
+    { minute: 10, days: [1, 2] },
+    { minute: 20, days: [2, 3] },
+  ]]);
+});
+
+test("timetable range and popular-day stages can be tested independently", () => {
+  const ranges = splitTimetableCalendarRanges([
+    { serviceId: "s12", days: [1, 2], dateRange: ["20260101", "20260131"] },
+    { serviceId: "s23", days: [2, 3], dateRange: ["20260115", "20260215"] },
+  ]);
+  assert.deepEqual(ranges.map(({ dateRange, serviceDays }) => ({
+    dateRange,
+    services: [...serviceDays],
+  })), [
+    { dateRange: ["20260101", "20260114"], services: [["s12", [1, 2]]] },
+    { dateRange: ["20260115", "20260131"], services: [["s12", [1, 2]], ["s23", [2, 3]]] },
+    { dateRange: ["20260201", "20260215"], services: [["s23", [2, 3]]] },
+  ]);
+  assert.deepEqual(
+    getPopularTimetableDays([[1, 2], [1, 2], [2, 3], [2]]),
+    [[2], [1, 3]],
   );
 });
 

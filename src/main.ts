@@ -2085,10 +2085,15 @@ function showRoute(route: GtfsRow<"routes.txt">): void {
             column.className = "timetable-column";
             if (timetable.popularDays.length === 2) column.classList.add("timetable-day-column");
             for (const departure of row.departures) {
-              if (departure.days && !departure.days.some((day) => popularDays.includes(day))) continue;
+              const serviceDays = new Set(departure.days ?? [1, 2, 3, 4, 5, 6, 7]);
+              const matchingDays = popularDays.filter((day) => serviceDays.has(day));
+              if (matchingDays.length === 0) continue;
               const minute = document.createElement("span");
               minute.className = "timetable-minute";
-              minute.textContent = String(departure.minute).padStart(2, "0");
+              const dayClarification = matchingDays.length === popularDays.length
+                ? ""
+                : ` (${formatTimetableDayRange(matchingDays)})`;
+              minute.textContent = `${String(departure.minute).padStart(2, "0")}${dayClarification}`;
               column.append(minute, " ");
             }
             line.append(column);
