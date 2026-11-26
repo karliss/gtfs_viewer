@@ -250,7 +250,6 @@ export interface VariantTimetableRow {
 export interface VariantTimetable {
   popularDays: number[][];
   dateRange: [string | null, string | null];
-  exceptionDates: string[];
   rows: VariantTimetableRow[];
 }
 
@@ -264,7 +263,6 @@ export interface TimetableCalendarItem {
 
 export interface TimetableCalendarData {
   calendarItems: TimetableCalendarItem[];
-  exceptionDates: string[];
 }
 
 export interface TimetableServiceDateRange {
@@ -531,12 +529,21 @@ export function collectTimetableCalendarData(
       });
     }
   }
+  return { calendarItems };
+}
+
+export function getVariantCalendarExceptionDates(
+  feed: GtfsFeed,
+  variant: RouteVariant,
+): string[] {
+  const serviceIds = new Set(variant.trips.flatMap((trip) =>
+    trip.fields.service_id ? [trip.fields.service_id] : []));
   const exceptionDates = [...new Set(
     [...serviceIds].flatMap((serviceId) => feed.indexes.calendarDatesByServiceId.get(serviceId) ?? [])
       .map((row) => row.fields.date)
       .filter((date): date is string => date !== null))]
     .sort();
-  return { calendarItems, exceptionDates };
+  return exceptionDates;
 }
 
 function shiftTimetableDate(date: string, days: number): string {
@@ -665,7 +672,6 @@ function buildVariantTimetable(
   feed: GtfsFeed,
   variant: RouteVariant,
   targetRange: TimetableServiceDateRange | null,
-  exceptionDates: string[],
 ): VariantTimetable {
   const firstStop = variant.stops[0];
   const serviceDays = targetRange?.serviceDays ?? null;
@@ -720,19 +726,18 @@ function buildVariantTimetable(
   return {
     popularDays: timetableDays,
     dateRange: targetRange?.dateRange ?? [null, null],
-    exceptionDates,
     rows,
   };
 }
 
 export function getVariantTimetable(feed: GtfsFeed, variant: RouteVariant): VariantTimetable[] {
-  const { calendarItems, exceptionDates } = collectTimetableCalendarData(feed, variant);
+  const { calendarItems } = collectTimetableCalendarData(feed, variant);
   const dateRanges = splitTimetableCalendarRanges(calendarItems.map((item) => item.dateRange));
   const ranges = collectTimetableServiceDateRanges(calendarItems, dateRanges);
   if (ranges.length === 0) {
-    return [buildVariantTimetable(feed, variant, null, exceptionDates)];
+    return [buildVariantTimetable(feed, variant, null)];
   }
-  return ranges.map((range) => buildVariantTimetable(feed, variant, range, exceptionDates));
+  return ranges.map((range) => buildVariantTimetable(feed, variant, range));
 }
 
 export function getVariantTableRows(
