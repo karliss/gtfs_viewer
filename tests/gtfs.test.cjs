@@ -21,6 +21,15 @@ function archive(files) {
   ));
 }
 
+function dayMaskFromDays(days) {
+  return days.reduce((mask, day) => mask | (1 << (day - 1)), 0);
+}
+
+function daysFromDayMask(mask) {
+  return Array.from({ length: 7 }, (_, index) => index + 1)
+    .filter((day) => mask & (1 << (day - 1)));
+}
+
 test("warning collector supports counts, filtering, clearing and replacement", () => {
   const collector = new WarningCollector();
   const warning = {
@@ -983,8 +992,8 @@ test("ignores calendar rows with missing or invalid date bounds", () => {
   const { calendarItems } = collectTimetableCalendarData(feed, variant);
 
   assert.deepEqual(calendarItems.map(({ serviceId, dayMask, dateRange }) =>
-    ({ serviceId, dayMask, dateRange })), [
-    { serviceId: "weekday", dayMask: 1, dateRange: ["20260101", "20260131"] },
+    ({ serviceId, days: daysFromDayMask(dayMask), dateRange })), [
+    { serviceId: "weekday", days: [1], dateRange: ["20260101", "20260131"] },
   ]);
   assert.deepEqual(
     collector.all
@@ -1020,10 +1029,10 @@ test("splits overlapping calendar ranges and classifies service days into both c
   const variant = getRouteVariants(feed, "r").variants[0];
   assert.deepEqual(
     collectTimetableCalendarData(feed, variant).calendarItems.map(({ serviceId, dayMask, dateRange }) =>
-      ({ serviceId, dayMask, dateRange })),
+      ({ serviceId, days: daysFromDayMask(dayMask), dateRange })),
     [
-      { serviceId: "s12", dayMask: 3, dateRange: ["20260101", "20260131"] },
-      { serviceId: "s23", dayMask: 6, dateRange: ["20260115", "20260215"] },
+      { serviceId: "s12", days: [1, 2], dateRange: ["20260101", "20260131"] },
+      { serviceId: "s23", days: [2, 3], dateRange: ["20260115", "20260215"] },
     ],
   );
   const timetables = getVariantTimetable(feed, variant);
@@ -1047,8 +1056,8 @@ test("splits overlapping calendar ranges and classifies service days into both c
 
 test("timetable range and popular-day stages can be tested independently", () => {
   const calendarItems = [
-    { serviceId: "s12", dayMask: 3, dateRange: ["20260101", "20260131"] },
-    { serviceId: "s23", dayMask: 6, dateRange: ["20260115", "20260215"] },
+    { serviceId: "s12", dayMask: dayMaskFromDays([1, 2]), dateRange: ["20260101", "20260131"] },
+    { serviceId: "s23", dayMask: dayMaskFromDays([2, 3]), dateRange: ["20260115", "20260215"] },
   ];
   const dateRanges = splitTimetableCalendarRanges(calendarItems.map(({ dateRange }) => dateRange));
   assert.deepEqual(dateRanges, [
@@ -1073,22 +1082,34 @@ test("timetable range and popular-day stages can be tested independently", () =>
   const ranges = collectTimetableServiceDateRanges(calendarItems, dateRanges);
   assert.deepEqual(ranges.map(({ dateRange, serviceDays }) => ({
     dateRange,
-    services: [...serviceDays],
+    services: [...serviceDays].map(([serviceId, mask]) => [serviceId, daysFromDayMask(mask)]),
   })), [
-    { dateRange: ["20260101", "20260114"], services: [["s12", 3]] },
-    { dateRange: ["20260115", "20260131"], services: [["s12", 3], ["s23", 6]] },
-    { dateRange: ["20260201", "20260215"], services: [["s23", 6]] },
+    { dateRange: ["20260101", "20260114"], services: [["s12", [1, 2]]] },
+    { dateRange: ["20260115", "20260131"], services: [["s12", [1, 2]], ["s23", [2, 3]]] },
+    { dateRange: ["20260201", "20260215"], services: [["s23", [2, 3]]] },
   ]);
   assert.deepEqual(
-    getPopularTimetableDayMasks([3, 3, 6, 2]),
-    [2, 5],
+    getPopularTimetableDayMasks([
+      dayMaskFromDays([1, 2]),
+      dayMaskFromDays([1, 2]),
+      dayMaskFromDays([2, 3]),
+      dayMaskFromDays([2]),
+    ]).map(daysFromDayMask),
+    [[2], [1, 3]],
   );
-  assert.deepEqual(getPopularTimetableDayMasks([127, 3, 3]), [3, 124]);
+  assert.deepEqual(
+    getPopularTimetableDayMasks([
+      dayMaskFromDays([1, 2, 3, 4, 5, 6, 7]),
+      dayMaskFromDays([1, 2]),
+      dayMaskFromDays([1, 2]),
+    ]).map(daysFromDayMask),
+    [[1, 2], [3, 4, 5, 6, 7]],
+  );
   assert.deepEqual(getPopularTimetableDayMasks([0]), []);
 
   const repeatedServiceCalendarItems = [
-    { serviceId: "weekday", dayMask: 1, dateRange: ["20260101", "20260131"] },
-    { serviceId: "weekday", dayMask: 2, dateRange: ["20260115", "20260215"] },
+    { serviceId: "weekday", dayMask: dayMaskFromDays([1]), dateRange: ["20260101", "20260131"] },
+    { serviceId: "weekday", dayMask: dayMaskFromDays([2]), dateRange: ["20260115", "20260215"] },
   ];
   const repeatedDateRanges = splitTimetableCalendarRanges(
     repeatedServiceCalendarItems.map(({ dateRange }) => dateRange),
@@ -1104,11 +1125,11 @@ test("timetable range and popular-day stages can be tested independently", () =>
   );
   assert.deepEqual(repeatedServiceRanges.map(({ dateRange, serviceDays }) => ({
     dateRange,
-    services: [...serviceDays],
+    services: [...serviceDays].map(([serviceId, mask]) => [serviceId, daysFromDayMask(mask)]),
   })), [
-    { dateRange: ["20260101", "20260114"], services: [["weekday", 1]] },
-    { dateRange: ["20260115", "20260131"], services: [["weekday", 3]] },
-    { dateRange: ["20260201", "20260215"], services: [["weekday", 2]] },
+    { dateRange: ["20260101", "20260114"], services: [["weekday", [1]]] },
+    { dateRange: ["20260115", "20260131"], services: [["weekday", [1, 2]]] },
+    { dateRange: ["20260201", "20260215"], services: [["weekday", [2]]] },
   ]);
 });
 
