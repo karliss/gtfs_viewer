@@ -1019,6 +1019,19 @@ test("timetable range and popular-day stages can be tested independently", () =>
     getPopularTimetableDays([[1, 2], [1, 2], [2, 3], [2]]),
     [[2], [1, 3]],
   );
+
+  const repeatedServiceRanges = splitTimetableCalendarRanges([
+    { serviceId: "weekday", days: [1], dateRange: ["20260101", "20260131"] },
+    { serviceId: "weekday", days: [2], dateRange: ["20260115", "20260215"] },
+  ]);
+  assert.deepEqual(repeatedServiceRanges.map(({ dateRange, serviceDays }) => ({
+    dateRange,
+    services: [...serviceDays],
+  })), [
+    { dateRange: ["20260101", "20260114"], services: [["weekday", [1]]] },
+    { dateRange: ["20260115", "20260131"], services: [["weekday", [1, 2]]] },
+    { dateRange: ["20260201", "20260215"], services: [["weekday", [2]]] },
+  ]);
 });
 
 test("calculates legacy fares from a selected stop to following stops", () => {
