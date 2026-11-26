@@ -258,7 +258,7 @@ export type TimetableDateRange = [string | null, string | null];
 
 export interface TimetableCalendarItem {
   serviceId: string;
-  days: number[];
+  dayMask: number;
   dateRange: [string, string];
 }
 
@@ -269,7 +269,7 @@ export interface TimetableCalendarData {
 
 export interface TimetableServiceDateRange {
   dateRange: TimetableDateRange;
-  serviceDays: Map<string, number[]>;
+  serviceDays: Map<string, number>;
 }
 
 export function gtfsDateToIso(date: string | null): string | null {
@@ -518,7 +518,7 @@ export function collectTimetableCalendarData(
       if (!dateRange) continue;
       calendarItems.push({
         serviceId,
-        days: [
+        dayMask: timetableDaysToMask([
           row.fields.monday === 1 ? 1 : null,
           row.fields.tuesday === 1 ? 2 : null,
           row.fields.wednesday === 1 ? 3 : null,
@@ -526,7 +526,7 @@ export function collectTimetableCalendarData(
           row.fields.friday === 1 ? 5 : null,
           row.fields.saturday === 1 ? 6 : null,
           row.fields.sunday === 1 ? 7 : null,
-        ].filter((day): day is number => day !== null),
+        ].filter((day): day is number => day !== null)),
         dateRange,
       });
     }
@@ -567,6 +567,19 @@ function timetableDateRangesOverlap(
     && (!second[1] || !first[0] || second[1] >= first[0]);
 }
 
+function timetableDaysToMask(days: readonly number[]): number {
+  return days.reduce((mask, day) =>
+    Number.isInteger(day) && day >= 1 && day <= 7 ? mask | (1 << (day - 1)) : mask, 0);
+}
+
+function timetableDayMaskToDays(mask: number): number[] {
+  const days: number[] = [];
+  for (let day = 1; day <= 7; day++) {
+    if (mask & (1 << (day - 1))) days.push(day);
+  }
+  return days;
+}
+
 export function splitTimetableCalendarRanges(
   dateRanges: readonly TimetableDateRange[],
 ): TimetableDateRange[] {
@@ -604,18 +617,12 @@ export function collectTimetableServiceDateRanges(
     const overlappingItems = calendarItems.filter((item) =>
       isValidTimetableDateRange(item.dateRange)
       && timetableDateRangesOverlap(item.dateRange, dateRange));
-    const serviceDays = new Map<string, Set<number>>();
+    const serviceDays = new Map<string, number>();
     for (const item of overlappingItems) {
-      const days = serviceDays.get(item.serviceId) ?? new Set<number>();
-      for (const day of item.days) days.add(day);
-      serviceDays.set(item.serviceId, days);
+      serviceDays.set(item.serviceId, (serviceDays.get(item.serviceId) ?? 0) | item.dayMask);
     }
     if (serviceDays.size === 0) return [];
-    return [{
-      dateRange,
-      serviceDays: new Map([...serviceDays].map(([serviceId, days]) =>
-        [serviceId, [...days].sort((left, right) => left - right)])),
-    }];
+    return [{ dateRange, serviceDays }];
   });
   return serviceDaySetsByRange.reduce<TimetableServiceDateRange[]>((result, current) => {
     const previous = result[result.length - 1];
@@ -632,25 +639,23 @@ export function collectTimetableServiceDateRanges(
   }, []);
 }
 
-export function getPopularTimetableDays(serviceMasks: readonly (readonly number[])[]): number[][] {
-  const masks = serviceMasks
-    .map((days) => [...new Set(days)].filter((day) => day >= 1 && day <= 7).sort((a, b) => a - b))
-    .filter((days) => days.length > 0);
-  const combinedDays = [...new Set(masks.flat())].sort((left, right) => left - right);
-  const candidates = [...new Map(masks.map((days) => [days.join(","), days])).values()];
-  const counts = new Map(candidates.map((days) => [days.join(","), 0]));
-  for (const days of masks) {
-    const serviceDays = new Set(days);
-    for (const candidate of candidates) {
-      if (candidate.every((day) => serviceDays.has(day))) {
-        const key = candidate.join(",");
-        counts.set(key, (counts.get(key) ?? 0) + 1);
+export function getPopularTimetableDayMasks(serviceMasks: readonly number[]): number[] {
+  const masks = serviceMasks.map((mask) => mask & 0x7f).filter((mask) => mask !== 0);
+  const combinedMask = masks.reduce((combined, mask) => combined | mask, 0);
+  const candidates = [...new Set(masks)];
+  const counts = new Map(candidates.map((mask) => [mask, 0]));
+  for (const serviceMask of masks) {
+    for (const candidateMask of candidates) {
+      if ((candidateMask & serviceMask) === candidateMask) {
+        counts.set(candidateMask, (counts.get(candidateMask) ?? 0) + 1);
       }
     }
   }
-  candidates.sort((left, right) => {
-    const countDifference = (counts.get(right.join(",")) ?? 0) - (counts.get(left.join(",")) ?? 0);
+  candidates.sort((leftMask, rightMask) => {
+    const countDifference = (counts.get(rightMask) ?? 0) - (counts.get(leftMask) ?? 0);
     if (countDifference !== 0) return countDifference;
+    const left = timetableDayMaskToDays(leftMask);
+    const right = timetableDayMaskToDays(rightMask);
     for (let index = 0; index < Math.min(left.length, right.length); index++) {
       if (left[index] !== right[index]) return left[index] - right[index];
     }
@@ -658,8 +663,8 @@ export function getPopularTimetableDays(serviceMasks: readonly (readonly number[
   });
   const mostPopular = candidates[0];
   if (!mostPopular) return [];
-  const secondPopular = combinedDays.filter((day) => !mostPopular.includes(day));
-  return secondPopular.length ? [mostPopular, secondPopular] : [mostPopular];
+  const secondPopular = combinedMask & ~mostPopular;
+  return secondPopular ? [mostPopular, secondPopular] : [mostPopular];
 }
 
 function buildVariantTimetable(
@@ -670,20 +675,21 @@ function buildVariantTimetable(
 ): VariantTimetable {
   const firstStop = variant.stops[0];
   const serviceDays = targetRange?.serviceDays ?? null;
-  const popularDays = targetRange
-    ? getPopularTimetableDays([...targetRange.serviceDays.values()])
+  const popularDayMasks = targetRange
+    ? getPopularTimetableDayMasks([...targetRange.serviceDays.values()])
     : [];
-  const timetableDays = popularDays.length > 0
-    ? popularDays
+  const timetableDays = popularDayMasks.length > 0
+    ? popularDayMasks.map(timetableDayMaskToDays)
     : [[1, 2, 3, 4, 5, 6, 7]];
-  const grouped = new Map<number, Map<number, Set<string>>>();
+  const grouped = new Map<number, Map<number, Set<number | null>>>();
   for (const trip of variant.trips) {
     const tripId = trip.fields.trip_id;
     if (!tripId) continue;
     const tripDays = trip.fields.service_id
       ? serviceDays?.get(trip.fields.service_id) ?? null
       : null;
-    if (targetRange && !tripDays) continue;
+    if (targetRange
+      && (!trip.fields.service_id || !serviceDays?.has(trip.fields.service_id))) continue;
     const rows = feed.indexes.stopTimesByTripId.get(tripId)?.filter((row) =>
       firstStop !== null && row.fields.stop_id === firstStop) ?? [];
     for (const row of rows) {
@@ -704,7 +710,7 @@ function buildVariantTimetable(
         dayMasks = new Set();
         minutes.set(minute, dayMasks);
       }
-      dayMasks.add(tripDays === null ? "*" : tripDays.join(","));
+      dayMasks.add(tripDays);
     }
   }
   const rows: VariantTimetableRow[] = [...grouped.entries()]
@@ -714,7 +720,7 @@ function buildVariantTimetable(
       departures: [...minuteMap.entries()].sort(([left], [right]) => left - right)
         .flatMap(([minute, dayMasks]) => [...dayMasks].map((dayMask) => ({
           minute,
-          days: dayMask === "*" ? null : dayMask ? dayMask.split(",").map(Number) : [],
+          days: dayMask === null ? null : timetableDayMaskToDays(dayMask),
         }))),
     }));
   return {

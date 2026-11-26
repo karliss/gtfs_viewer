@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { strToU8, zipSync } = require("fflate");
 const {
   collectTimetableCalendarData, collectTimetableServiceDateRanges, decodeRouteType, formatTimetableDayRange,
-  getMatchingRows, getPopularTimetableDays,
+  getMatchingRows, getPopularTimetableDayMasks,
   getReferencedRoute, getRouteVariants, getTableColumns, getVariantTableRows,
   getVariantTimetable, getDateSchedule, getTripFares, isServiceActiveOnDate, loadGtfs, loadGtfsFiles, summarizeTripField,
   decodeTripFieldValue, decodePickupType, decodeDropOffType, processGtfsColor,
@@ -982,9 +982,9 @@ test("ignores calendar rows with missing or invalid date bounds", () => {
   const variant = getRouteVariants(feed, "r").variants[0];
   const { calendarItems } = collectTimetableCalendarData(feed, variant);
 
-  assert.deepEqual(calendarItems.map(({ serviceId, days, dateRange }) =>
-    ({ serviceId, days, dateRange })), [
-    { serviceId: "weekday", days: [1], dateRange: ["20260101", "20260131"] },
+  assert.deepEqual(calendarItems.map(({ serviceId, dayMask, dateRange }) =>
+    ({ serviceId, dayMask, dateRange })), [
+    { serviceId: "weekday", dayMask: 1, dateRange: ["20260101", "20260131"] },
   ]);
   assert.deepEqual(
     collector.all
@@ -1019,11 +1019,11 @@ test("splits overlapping calendar ranges and classifies service days into both c
   }));
   const variant = getRouteVariants(feed, "r").variants[0];
   assert.deepEqual(
-    collectTimetableCalendarData(feed, variant).calendarItems.map(({ serviceId, days, dateRange }) =>
-      ({ serviceId, days, dateRange })),
+    collectTimetableCalendarData(feed, variant).calendarItems.map(({ serviceId, dayMask, dateRange }) =>
+      ({ serviceId, dayMask, dateRange })),
     [
-      { serviceId: "s12", days: [1, 2], dateRange: ["20260101", "20260131"] },
-      { serviceId: "s23", days: [2, 3], dateRange: ["20260115", "20260215"] },
+      { serviceId: "s12", dayMask: 3, dateRange: ["20260101", "20260131"] },
+      { serviceId: "s23", dayMask: 6, dateRange: ["20260115", "20260215"] },
     ],
   );
   const timetables = getVariantTimetable(feed, variant);
@@ -1047,8 +1047,8 @@ test("splits overlapping calendar ranges and classifies service days into both c
 
 test("timetable range and popular-day stages can be tested independently", () => {
   const calendarItems = [
-    { serviceId: "s12", days: [1, 2], dateRange: ["20260101", "20260131"] },
-    { serviceId: "s23", days: [2, 3], dateRange: ["20260115", "20260215"] },
+    { serviceId: "s12", dayMask: 3, dateRange: ["20260101", "20260131"] },
+    { serviceId: "s23", dayMask: 6, dateRange: ["20260115", "20260215"] },
   ];
   const dateRanges = splitTimetableCalendarRanges(calendarItems.map(({ dateRange }) => dateRange));
   assert.deepEqual(dateRanges, [
@@ -1075,18 +1075,20 @@ test("timetable range and popular-day stages can be tested independently", () =>
     dateRange,
     services: [...serviceDays],
   })), [
-    { dateRange: ["20260101", "20260114"], services: [["s12", [1, 2]]] },
-    { dateRange: ["20260115", "20260131"], services: [["s12", [1, 2]], ["s23", [2, 3]]] },
-    { dateRange: ["20260201", "20260215"], services: [["s23", [2, 3]]] },
+    { dateRange: ["20260101", "20260114"], services: [["s12", 3]] },
+    { dateRange: ["20260115", "20260131"], services: [["s12", 3], ["s23", 6]] },
+    { dateRange: ["20260201", "20260215"], services: [["s23", 6]] },
   ]);
   assert.deepEqual(
-    getPopularTimetableDays([[1, 2], [1, 2], [2, 3], [2]]),
-    [[2], [1, 3]],
+    getPopularTimetableDayMasks([3, 3, 6, 2]),
+    [2, 5],
   );
+  assert.deepEqual(getPopularTimetableDayMasks([127, 3, 3]), [3, 124]);
+  assert.deepEqual(getPopularTimetableDayMasks([0]), []);
 
   const repeatedServiceCalendarItems = [
-    { serviceId: "weekday", days: [1], dateRange: ["20260101", "20260131"] },
-    { serviceId: "weekday", days: [2], dateRange: ["20260115", "20260215"] },
+    { serviceId: "weekday", dayMask: 1, dateRange: ["20260101", "20260131"] },
+    { serviceId: "weekday", dayMask: 2, dateRange: ["20260115", "20260215"] },
   ];
   const repeatedDateRanges = splitTimetableCalendarRanges(
     repeatedServiceCalendarItems.map(({ dateRange }) => dateRange),
@@ -1104,9 +1106,9 @@ test("timetable range and popular-day stages can be tested independently", () =>
     dateRange,
     services: [...serviceDays],
   })), [
-    { dateRange: ["20260101", "20260114"], services: [["weekday", [1]]] },
-    { dateRange: ["20260115", "20260131"], services: [["weekday", [1, 2]]] },
-    { dateRange: ["20260201", "20260215"], services: [["weekday", [2]]] },
+    { dateRange: ["20260101", "20260114"], services: [["weekday", 1]] },
+    { dateRange: ["20260115", "20260131"], services: [["weekday", 3]] },
+    { dateRange: ["20260201", "20260215"], services: [["weekday", 2]] },
   ]);
 });
 
