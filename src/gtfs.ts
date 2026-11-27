@@ -664,7 +664,8 @@ export function getPopularTimetableDayMasks(serviceMasks: readonly number[]): nu
   const mostPopular = candidates[0];
   if (!mostPopular) return [];
   const secondPopular = combinedMask & ~mostPopular;
-  return secondPopular ? [mostPopular, secondPopular] : [mostPopular];
+  const dayMasks = secondPopular ? [mostPopular, secondPopular] : [mostPopular];
+  return dayMasks.sort((left, right) => (left & -left) - (right & -right));
 }
 
 function buildVariantTimetable(
@@ -679,7 +680,6 @@ function buildVariantTimetable(
   const timetableDays = popularDayMasks.length > 0
     ? popularDayMasks.map(timetableDayMaskToDays)
     : [[1, 2, 3, 4, 5, 6, 7]];
-  timetableDays.sort((left, right) => left[0] - right[0]);
   const grouped = new Map<number, Map<number, Set<number | null>>>();
   for (const trip of variant.trips) {
     const tripId = trip.fields.trip_id;

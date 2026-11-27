@@ -1172,7 +1172,7 @@ test("timetable range and popular-day stages can be tested independently", () =>
       dayMaskFromDays([2, 3]),
       dayMaskFromDays([2]),
     ]).map(daysFromDayMask),
-    [[2], [1, 3]],
+    [[1, 3], [2]],
   );
   assert.deepEqual(
     getPopularTimetableDayMasks([
@@ -1187,7 +1187,7 @@ test("timetable range and popular-day stages can be tested independently", () =>
       dayMaskFromDays([3]),
       dayMaskFromDays([1, 3]),
     ]).map(daysFromDayMask),
-    [[3], [1]],
+    [[1], [3]],
   );
   assert.deepEqual(getPopularTimetableDayMasks([0]), []);
 
