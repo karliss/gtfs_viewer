@@ -5,6 +5,7 @@ export type WarningType =
   | "missing_or_duplicate_ids"
   | "unrecognized_files"
   | "invalid_values"
+  | "invalid_stop_sequence"
   | "variant_merge_different_short_names"
   | "variant_merge_different_shapes"
   | "variant_merge_identical_shapes";
@@ -63,6 +64,13 @@ export const WARNING_DESCRIPTIONS: Readonly<Record<WarningType, WarningDescripti
     scope: "element",
     parameters: ["file", "row", "column", "value"],
   },
+  invalid_stop_sequence: {
+    id: "invalid_stop_sequence",
+    messageTemplate: "{file}: trip {tripId} has stop_sequence {value} at position {position}; expected {expectedSequence}",
+    severity: "warning",
+    scope: "element",
+    parameters: ["file", "tripId", "value", "position", "expectedSequence"],
+  },
   variant_merge_different_short_names: {
     id: "variant_merge_different_short_names",
     messageTemplate: "Route {routeId}: variants merged despite different trip short names (trip_id/shape_id samples: {firstTripId}/{firstShapeId} and {secondTripId}/{secondShapeId})",
@@ -101,6 +109,7 @@ export const WARNING_TYPES: readonly WarningType[] = [
   "missing_or_duplicate_ids",
   "unrecognized_files",
   "invalid_values",
+  "invalid_stop_sequence",
   "variant_merge_different_short_names",
   "variant_merge_different_shapes",
   "variant_merge_identical_shapes",
@@ -113,6 +122,7 @@ export const WARNING_LABELS: Readonly<Record<WarningType, string>> = {
   missing_or_duplicate_ids: "Missing or duplicate IDs",
   unrecognized_files: "Unrecognized files",
   invalid_values: "Invalid field values",
+  invalid_stop_sequence: "Invalid stop sequence",
   variant_merge_different_short_names: "Merged variants with different trip short names",
   variant_merge_different_shapes: "Merged variants with different shapes",
   variant_merge_identical_shapes: "Merged variants with identical shapes",

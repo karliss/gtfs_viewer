@@ -349,33 +349,32 @@ export interface FareResult {
 export function getDateSchedule(feed: GtfsFeed, variant: RouteVariant, date: string): DateScheduleVariant {
   const grouped = new Map<number, Map<number, DateScheduleDeparture[]>>();
   let tripCount = 0;
-  const firstStop = variant.stops[0];
   for (const trip of variant.trips) {
     if (!isServiceActiveOnDate(feed, trip.fields.service_id, date)) continue;
     tripCount++;
     const tripId = trip.fields.trip_id;
     if (!tripId) continue;
-    for (const stopTime of feed.indexes.stopTimesByTripId.get(tripId) ?? []) {
-      if (firstStop !== null && stopTime.fields.stop_id !== firstStop) continue;
-      const time = stopTime.fields.departure_time || stopTime.fields.arrival_time;
-      const match = time ? /^(\d+):(\d{2})(:\d{2})?$/.exec(time) : null;
-      if (!match) continue;
-      const hour = Number(match[1]);
-      const minute = Number(match[2]);
-      if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
-      const minutes = grouped.get(hour) ?? new Map<number, DateScheduleDeparture[]>();
-      const departures = minutes.get(minute) ?? [];
-      departures.push({
-        tripId,
-        time: match[0],
-        hour,
-        minute,
-        headsign: trip.fields.trip_headsign,
-        shortName: trip.fields.trip_short_name,
-      });
-      minutes.set(minute, departures);
-      grouped.set(hour, minutes);
-    }
+    if (variant.stops.length === 0 || variant.stops[0] === null) continue;
+    const stopTime = feed.indexes.stopTimesByTripId.get(tripId)?.[0];
+    if (!stopTime) continue;
+    const time = stopTime.fields.departure_time || stopTime.fields.arrival_time;
+    const match = time ? /^(\d+):(\d{2})(:\d{2})?$/.exec(time) : null;
+    if (!match) continue;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
+    const minutes = grouped.get(hour) ?? new Map<number, DateScheduleDeparture[]>();
+    const departures = minutes.get(minute) ?? [];
+    departures.push({
+      tripId,
+      time: match[0],
+      hour,
+      minute,
+      headsign: trip.fields.trip_headsign,
+      shortName: trip.fields.trip_short_name,
+    });
+    minutes.set(minute, departures);
+    grouped.set(hour, minutes);
   }
   const rows = [...grouped.entries()].sort(([a], [b]) => a - b).map(([hour, minutes]) => ({
     hour,
@@ -665,7 +664,8 @@ export function getPopularTimetableDayMasks(serviceMasks: readonly number[]): nu
   const mostPopular = candidates[0];
   if (!mostPopular) return [];
   const secondPopular = combinedMask & ~mostPopular;
-  return secondPopular ? [mostPopular, secondPopular] : [mostPopular];
+  const dayMasks = secondPopular ? [mostPopular, secondPopular] : [mostPopular];
+  return dayMasks.sort((left, right) => (left & -left) - (right & -right));
 }
 
 function buildVariantTimetable(
@@ -673,7 +673,6 @@ function buildVariantTimetable(
   variant: RouteVariant,
   targetRange: TimetableServiceDateRange | null,
 ): VariantTimetable {
-  const firstStop = variant.stops[0];
   const serviceDays = targetRange?.serviceDays ?? null;
   const popularDayMasks = targetRange
     ? getPopularTimetableDayMasks([...targetRange.serviceDays.values()])
@@ -690,28 +689,27 @@ function buildVariantTimetable(
       : null;
     if (targetRange
       && (!trip.fields.service_id || !serviceDays?.has(trip.fields.service_id))) continue;
-    const rows = feed.indexes.stopTimesByTripId.get(tripId)?.filter((row) =>
-      firstStop !== null && row.fields.stop_id === firstStop) ?? [];
-    for (const row of rows) {
-      const time = row.fields.departure_time || row.fields.arrival_time;
-      if (!time) continue;
-      const match = /^(\d+):(\d{2})(:\d{2})?$/.exec(time);
-      if (!match) continue;
-      const hour = Number(match[1]);
-      const minute = Number(match[2]);
-      if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
-      let minutes = grouped.get(hour);
-      if (!minutes) {
-        minutes = new Map();
-        grouped.set(hour, minutes);
-      }
-      let dayMasks = minutes.get(minute);
-      if (!dayMasks) {
-        dayMasks = new Set();
-        minutes.set(minute, dayMasks);
-      }
-      dayMasks.add(tripDays);
+    if (variant.stops.length === 0 || variant.stops[0] === null) continue;
+    const row = feed.indexes.stopTimesByTripId.get(tripId)?.[0];
+    if (!row) continue;
+    const time = row.fields.departure_time || row.fields.arrival_time;
+    if (!time) continue;
+    const match = /^(\d+):(\d{2})(:\d{2})?$/.exec(time);
+    if (!match) continue;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
+    let minutes = grouped.get(hour);
+    if (!minutes) {
+      minutes = new Map();
+      grouped.set(hour, minutes);
     }
+    let dayMasks = minutes.get(minute);
+    if (!dayMasks) {
+      dayMasks = new Set();
+      minutes.set(minute, dayMasks);
+    }
+    dayMasks.add(tripDays);
   }
   const rows: VariantTimetableRow[] = [...grouped.entries()]
     .sort(([left], [right]) => left - right)
@@ -981,13 +979,11 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
     ...stops.map((stop) => variantKeyPart(stop)),
   ].join("|");
 
-  const sequence = (value: number | null): number => value ?? Infinity;
   const stopsByTrip = new Map<string, (string | null)[]>();
   for (const trip of routeTrips) {
     const tripId = trip.fields.trip_id;
     if (!tripId) continue;
-    const times = [...(feed.indexes.stopTimesByTripId.get(tripId) ?? [])];
-    times.sort((a, b) => sequence(a.fields.stop_sequence) - sequence(b.fields.stop_sequence));
+    const times = feed.indexes.stopTimesByTripId.get(tripId) ?? [];
     stopsByTrip.set(tripId, times.map(({ fields }) => fields.stop_id));
   }
 
@@ -1183,7 +1179,10 @@ export interface GtfsLoadProgress {
   fileName?: string;
 }
 
-export function reinitializeFeedIndexes(feed: GtfsFeed): void {
+export function reinitializeFeedIndexes(
+  feed: GtfsFeed,
+  warningCollector?: WarningCollector,
+): void {
   const getRows = <Name extends GtfsTableName>(kind: Name): GtfsRow<Name>[] =>
     (feed.tables.find((table) => table.kind === kind)?.rows as GtfsRow<Name>[] | undefined) ?? [];
   const routeVariantsByRouteId = new Map<string, RouteVariant[]>();
@@ -1248,6 +1247,7 @@ export function reinitializeFeedIndexes(feed: GtfsFeed): void {
 
   const stopTimesByTripId = new Map<string, GtfsRow<"stop_times.txt">[]>();
   const stopTimesByStopId = new Map<string, GtfsRow<"stop_times.txt">[]>();
+  const stopSequence = (value: number | null): number => value ?? Infinity;
   for (const row of getRows("stop_times.txt")) {
     const tripId = row.fields.trip_id;
     if (tripId) {
@@ -1260,6 +1260,24 @@ export function reinitializeFeedIndexes(feed: GtfsFeed): void {
       const rows = stopTimesByStopId.get(stopId) ?? [];
       rows.push(row);
       stopTimesByStopId.set(stopId, rows);
+    }
+  }
+  for (const [tripId, rows] of stopTimesByTripId) {
+    rows.sort((left, right) =>
+      stopSequence(left.fields.stop_sequence) - stopSequence(right.fields.stop_sequence));
+    const invalidIndex = rows.findIndex((row, index) => row.fields.stop_sequence !== index + 1);
+    if (invalidIndex !== -1) {
+      warningCollector?.add({
+        type: "invalid_stop_sequence",
+        parameters: {
+          file: "stop_times.txt",
+          tripId,
+          value: rows[invalidIndex].fields.stop_sequence ?? "missing",
+          position: invalidIndex + 1,
+          expectedSequence: invalidIndex + 1,
+        },
+        relatedObjectIds: [tripId],
+      });
     }
   }
 
@@ -1489,7 +1507,8 @@ export function loadGtfsFiles(
     warnings: collector ? [...collector.all] : undefined,
   } as GtfsFeed;
   onProgress?.({ phase: "indexing", completed: 0, total: 1 });
-  reinitializeFeedIndexes(feed);
+  reinitializeFeedIndexes(feed, collector);
+  if (collector) feed.warnings = [...collector.all];
   onProgress?.({ phase: "indexing", completed: 1, total: 1 });
   return feed;
 }
