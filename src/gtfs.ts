@@ -1173,28 +1173,18 @@ function parseTable(name: string, columns: string[], records: string[][], collec
 }
 
 function warnForInvalidStopSequences(
+  stopTimesByTripId: ReadonlyMap<string, GtfsRow<"stop_times.txt">[]>,
   rows: readonly GtfsRow<"stop_times.txt">[],
-  collector?: WarningCollector,
+  collector: WarningCollector | undefined,
 ): void {
   if (!collector) return;
-  const rowsByTripId = new Map<string, { row: GtfsRow<"stop_times.txt">; csvRowNumber: number }[]>();
-  for (const [index, row] of rows.entries()) {
-    const tripId = row.fields.trip_id;
-    if (!tripId) continue;
-    const tripRows = rowsByTripId.get(tripId) ?? [];
-    tripRows.push({ row, csvRowNumber: index + 2 });
-    rowsByTripId.set(tripId, tripRows);
-  }
-
-  for (const [tripId, tripRows] of rowsByTripId) {
-    const seenSequences = new Set<number>();
-    for (const { row, csvRowNumber } of tripRows) {
+  const csvRowNumbers = new Map(rows.map((row, index) => [row, index + 2]));
+  for (const [tripId, tripRows] of stopTimesByTripId) {
+    for (const [index, row] of tripRows.entries()) {
       const sequence = row.fields.stop_sequence;
-      if (sequence !== null && sequence >= 1 && sequence <= tripRows.length
-        && !seenSequences.has(sequence)) {
-        seenSequences.add(sequence);
-        continue;
-      }
+      if (sequence === index + 1) continue;
+      const csvRowNumber = csvRowNumbers.get(row);
+      if (csvRowNumber === undefined) continue;
       const alreadyReported = collector.all.some((warning) =>
         warning.type === "invalid_values"
         && warning.parameters.file === "stop_times.txt"
@@ -1527,11 +1517,6 @@ export function loadGtfsFiles(
     throw new Error("The selected files do not contain any GTFS .txt files.");
   }
 
-  const stopTimesTable = tables.find((table) => table.kind === "stop_times.txt");
-  if (stopTimesTable?.kind === "stop_times.txt") {
-    warnForInvalidStopSequences(stopTimesTable.rows, collector);
-  }
-
   tables.sort((a, b) => a.name.localeCompare(b.name));
   unrecognizedFiles.sort();
   const feed = {
@@ -1541,6 +1526,11 @@ export function loadGtfsFiles(
   } as GtfsFeed;
   onProgress?.({ phase: "indexing", completed: 0, total: 1 });
   reinitializeFeedIndexes(feed);
+  const stopTimesTable = tables.find((table) => table.kind === "stop_times.txt");
+  if (stopTimesTable?.kind === "stop_times.txt") {
+    warnForInvalidStopSequences(feed.indexes.stopTimesByTripId, stopTimesTable.rows, collector);
+  }
+  if (collector) feed.warnings = [...collector.all];
   onProgress?.({ phase: "indexing", completed: 1, total: 1 });
   return feed;
 }
