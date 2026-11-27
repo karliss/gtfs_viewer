@@ -66,10 +66,10 @@ export const WARNING_DESCRIPTIONS: Readonly<Record<WarningType, WarningDescripti
   },
   invalid_stop_sequence: {
     id: "invalid_stop_sequence",
-    messageTemplate: "{file}: trip {tripId} has stop_sequence values [{sequences}], which must be unique and form the range 1 to {stopCount}",
+    messageTemplate: "{file}: trip {tripId} has stop_sequence {value} at position {position}; expected {expectedSequence}",
     severity: "warning",
     scope: "element",
-    parameters: ["file", "tripId", "sequences", "stopCount"],
+    parameters: ["file", "tripId", "value", "position", "expectedSequence"],
   },
   variant_merge_different_short_names: {
     id: "variant_merge_different_short_names",

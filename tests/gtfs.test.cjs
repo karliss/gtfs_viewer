@@ -615,7 +615,7 @@ test("sorts stop times by sequence and warns when sequences aren't 1 through tri
   const feed = loadGtfs(archive({
     "trips.txt": "route_id,trip_id,shape_id\nr,valid,s\nr,gap,s\n",
     "stop_times.txt": "trip_id,stop_id,stop_sequence\n"
-      + "valid,b,2\ngap,a,1\nvalid,a,1\ngap,b,3\n",
+      + "valid,b,2\ngap,a,1\nvalid,a,1\ngap,b,3\ngap,c,4\n",
   }), collector);
 
   assert.deepEqual(
@@ -624,21 +624,23 @@ test("sorts stop times by sequence and warns when sequences aren't 1 through tri
   );
   assert.deepEqual(
     feed.indexes.stopTimesByTripId.get("gap").map(({ fields }) => fields.stop_sequence),
-    [1, 3],
+    [1, 3, 4],
   );
   assert.deepEqual(
     collector.all
       .filter(({ type }) => type === "invalid_stop_sequence")
       .map(({ parameters, relatedObjectIds }) => ({
         tripId: parameters.tripId,
-        sequences: parameters.sequences,
-        stopCount: parameters.stopCount,
+        value: parameters.value,
+        position: parameters.position,
+        expectedSequence: parameters.expectedSequence,
         relatedObjectIds,
       })),
     [{
       tripId: "gap",
-      sequences: "1, 3",
-      stopCount: 2,
+      value: 3,
+      position: 2,
+      expectedSequence: 2,
       relatedObjectIds: ["gap"],
     }],
   );

@@ -1265,14 +1265,16 @@ export function reinitializeFeedIndexes(
   for (const [tripId, rows] of stopTimesByTripId) {
     rows.sort((left, right) =>
       stopSequence(left.fields.stop_sequence) - stopSequence(right.fields.stop_sequence));
-    if (rows.some((row, index) => row.fields.stop_sequence !== index + 1)) {
+    const invalidIndex = rows.findIndex((row, index) => row.fields.stop_sequence !== index + 1);
+    if (invalidIndex !== -1) {
       warningCollector?.add({
         type: "invalid_stop_sequence",
         parameters: {
           file: "stop_times.txt",
           tripId,
-          sequences: rows.map(({ fields }) => fields.stop_sequence ?? "missing").join(", "),
-          stopCount: rows.length,
+          value: rows[invalidIndex].fields.stop_sequence ?? "missing",
+          position: invalidIndex + 1,
+          expectedSequence: invalidIndex + 1,
         },
         relatedObjectIds: [tripId],
       });
