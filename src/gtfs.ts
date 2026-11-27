@@ -1172,41 +1172,6 @@ function parseTable(name: string, columns: string[], records: string[][], collec
   return { name, kind, columns, rows, hasExtraValues: rows.some((row) => row.extraValues.length > 0) } as GtfsTable;
 }
 
-function warnForInvalidStopSequences(
-  stopTimesByTripId: ReadonlyMap<string, GtfsRow<"stop_times.txt">[]>,
-  rows: readonly GtfsRow<"stop_times.txt">[],
-  collector: WarningCollector | undefined,
-): void {
-  if (!collector) return;
-  const csvRowNumbers = new Map(rows.map((row, index) => [row, index + 2]));
-  for (const [tripId, tripRows] of stopTimesByTripId) {
-    for (const [index, row] of tripRows.entries()) {
-      const sequence = row.fields.stop_sequence;
-      if (sequence === index + 1) continue;
-      const csvRowNumber = csvRowNumbers.get(row);
-      if (csvRowNumber === undefined) continue;
-      const alreadyReported = collector.all.some((warning) =>
-        warning.type === "invalid_values"
-        && warning.parameters.file === "stop_times.txt"
-        && warning.parameters.row === csvRowNumber
-        && warning.parameters.column === "stop_sequence");
-      if (alreadyReported) continue;
-      collector.add({
-        type: "invalid_stop_sequence",
-        parameters: {
-          file: "stop_times.txt",
-          row: csvRowNumber,
-          tripId,
-          value: sequence,
-          stopCount: tripRows.length,
-        },
-        relatedObjectIds: [tripId],
-        csvRowNumber,
-      });
-    }
-  }
-}
-
 export interface GtfsLoadProgress {
   phase: "extracting" | "parsing" | "indexing";
   completed: number;
@@ -1214,7 +1179,10 @@ export interface GtfsLoadProgress {
   fileName?: string;
 }
 
-export function reinitializeFeedIndexes(feed: GtfsFeed): void {
+export function reinitializeFeedIndexes(
+  feed: GtfsFeed,
+  warningCollector?: WarningCollector,
+): void {
   const getRows = <Name extends GtfsTableName>(kind: Name): GtfsRow<Name>[] =>
     (feed.tables.find((table) => table.kind === kind)?.rows as GtfsRow<Name>[] | undefined) ?? [];
   const routeVariantsByRouteId = new Map<string, RouteVariant[]>();
@@ -1294,9 +1262,21 @@ export function reinitializeFeedIndexes(feed: GtfsFeed): void {
       stopTimesByStopId.set(stopId, rows);
     }
   }
-  for (const rows of stopTimesByTripId.values()) {
+  for (const [tripId, rows] of stopTimesByTripId) {
     rows.sort((left, right) =>
       stopSequence(left.fields.stop_sequence) - stopSequence(right.fields.stop_sequence));
+    if (rows.some((row, index) => row.fields.stop_sequence !== index + 1)) {
+      warningCollector?.add({
+        type: "invalid_stop_sequence",
+        parameters: {
+          file: "stop_times.txt",
+          tripId,
+          sequences: rows.map(({ fields }) => fields.stop_sequence ?? "missing").join(", "),
+          stopCount: rows.length,
+        },
+        relatedObjectIds: [tripId],
+      });
+    }
   }
 
   const calendarByServiceId = new Map<string, GtfsRow<"calendar.txt">[]>();
@@ -1525,11 +1505,7 @@ export function loadGtfsFiles(
     warnings: collector ? [...collector.all] : undefined,
   } as GtfsFeed;
   onProgress?.({ phase: "indexing", completed: 0, total: 1 });
-  reinitializeFeedIndexes(feed);
-  const stopTimesTable = tables.find((table) => table.kind === "stop_times.txt");
-  if (stopTimesTable?.kind === "stop_times.txt") {
-    warnForInvalidStopSequences(feed.indexes.stopTimesByTripId, stopTimesTable.rows, collector);
-  }
+  reinitializeFeedIndexes(feed, collector);
   if (collector) feed.warnings = [...collector.all];
   onProgress?.({ phase: "indexing", completed: 1, total: 1 });
   return feed;

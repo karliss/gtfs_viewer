@@ -629,17 +629,15 @@ test("sorts stop times by sequence and warns when sequences aren't 1 through tri
   assert.deepEqual(
     collector.all
       .filter(({ type }) => type === "invalid_stop_sequence")
-      .map(({ csvRowNumber, parameters, relatedObjectIds }) => ({
-        csvRowNumber,
+      .map(({ parameters, relatedObjectIds }) => ({
         tripId: parameters.tripId,
-        value: parameters.value,
+        sequences: parameters.sequences,
         stopCount: parameters.stopCount,
         relatedObjectIds,
       })),
     [{
-      csvRowNumber: 5,
       tripId: "gap",
-      value: 3,
+      sequences: "1, 3",
       stopCount: 2,
       relatedObjectIds: ["gap"],
     }],
