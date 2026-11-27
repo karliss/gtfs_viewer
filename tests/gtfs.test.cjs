@@ -51,6 +51,7 @@ test("warning collector supports counts, filtering, clearing and replacement", (
 test("warning descriptions cover every warning type with severity and scope", () => {
   assert.deepEqual([...WARNING_TYPES].sort(), [
     "extra_values",
+    "invalid_stop_sequence",
     "invalid_values",
     "missing_or_duplicate_ids",
     "missing_values",
@@ -70,6 +71,7 @@ test("warning descriptions cover every warning type with severity and scope", ()
   const mergeTemplate = WARNING_DESCRIPTIONS.variant_merge_different_shapes.messageTemplate;
   assert.match(mergeTemplate, /\{firstTripId\}/);
   assert.match(mergeTemplate, /\{firstShapeId\}/);
+  assert.match(WARNING_DESCRIPTIONS.invalid_stop_sequence.messageTemplate, /stop_sequence/);
   assert.match(mergeTemplate, /\{secondTripId\}/);
   assert.match(mergeTemplate, /\{secondShapeId\}/);
 });
@@ -79,10 +81,11 @@ test("loadGtfs attaches all warning types to feed and collector", () => {
   const feed = loadGtfs(archive({
     "routes.txt": "route_id,custom,route_type\nR1,one,bad\nR1,two,3\n",
     "stops.txt": "stop_id,stop_name,stop_desc\nS1,Main\nS2,Second,Description,extra\n,Missing\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\ntrip,stop,2\n",
     "readme.md": "documentation",
   }), collector);
-  assert.equal(feed.warnings.length, 8);
-  assert.equal(collector.all.length, 8);
+  assert.equal(feed.warnings.length, 9);
+  assert.equal(collector.all.length, 9);
   for (const type of WARNING_TYPES.filter((warningType) => !warningType.startsWith("variant_merge_"))) {
     assert.ok(feed.warnings.some((warning) => warning.type === type));
   }
@@ -567,6 +570,80 @@ test("trims calendar IDs and values for single-trip timetables", () => {
   const timetables = getVariantTimetable(feed, variant);
   assert.deepEqual(timetables[0].popularDays, [[1, 2, 3, 4, 5]]);
   assert.equal(formatTimetableDayRange(timetables[0].popularDays[0]), "1-5");
+});
+
+test("sorts timetable day ranges by weekday", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,service_id,shape_id\n"
+      + "r,t12a,s12a,s\nr,t12b,s12b,s\nr,t23,s23,s\nr,t2,s2,s\n",
+    "stop_times.txt": "trip_id,departure_time,stop_id,stop_sequence\n"
+      + "t12a,07:10:00,a,1\nt12b,07:20:00,a,1\nt23,07:30:00,a,1\nt2,07:40:00,a,1\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "s12a,1,1,0,0,0,0,0,20260101,20261231\n"
+      + "s12b,1,1,0,0,0,0,0,20260101,20261231\n"
+      + "s23,0,1,1,0,0,0,0,20260101,20261231\n"
+      + "s2,0,1,0,0,0,0,0,20260101,20261231\n",
+  }));
+  const variant = getRouteVariants(feed, "r").variants[0];
+  assert.deepEqual(getVariantTimetable(feed, variant)[0].popularDays, [[1, 3], [2]]);
+});
+
+test("timetable includes only the first stop when a trip loops back to it", () => {
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,service_id,shape_id\nr,loop,service,s\n",
+    "stop_times.txt": "trip_id,arrival_time,departure_time,stop_id,stop_sequence\n"
+      + "loop,08:15:00,,a,2\nloop,,07:10:00,a,1\n",
+    "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+      + "service,1,1,1,1,1,0,0,20260101,20261231\n",
+  }));
+  const variant = getRouteVariants(feed, "r").variants[0];
+  const timetable = getVariantTimetable(feed, variant)[0];
+  assert.deepEqual(timetable.rows, [
+    { hour: 7, departures: [{ minute: 10, days: [1, 2, 3, 4, 5] }] },
+  ]);
+  const dateSchedule = getDateSchedule(feed, variant, "2026-01-05");
+  assert.deepEqual(dateSchedule.rows.map(({ hour, departures }) => ({
+    hour,
+    departures: departures.map(({ minute, time }) => ({ minute, time })),
+  })), [
+    { hour: 7, departures: [{ minute: 10, time: "07:10:00" }] },
+  ]);
+});
+
+test("sorts stop times by sequence and warns when sequences aren't 1 through trip length", () => {
+  const collector = new WarningCollector();
+  const feed = loadGtfs(archive({
+    "trips.txt": "route_id,trip_id,shape_id\nr,valid,s\nr,gap,s\n",
+    "stop_times.txt": "trip_id,stop_id,stop_sequence\n"
+      + "valid,b,2\ngap,a,1\nvalid,a,1\ngap,b,3\n",
+  }), collector);
+
+  assert.deepEqual(
+    feed.indexes.stopTimesByTripId.get("valid").map(({ fields }) => fields.stop_sequence),
+    [1, 2],
+  );
+  assert.deepEqual(
+    feed.indexes.stopTimesByTripId.get("gap").map(({ fields }) => fields.stop_sequence),
+    [1, 3],
+  );
+  assert.deepEqual(
+    collector.all
+      .filter(({ type }) => type === "invalid_stop_sequence")
+      .map(({ csvRowNumber, parameters, relatedObjectIds }) => ({
+        csvRowNumber,
+        tripId: parameters.tripId,
+        value: parameters.value,
+        stopCount: parameters.stopCount,
+        relatedObjectIds,
+      })),
+    [{
+      csvRowNumber: 5,
+      tripId: "gap",
+      value: 3,
+      stopCount: 2,
+      relatedObjectIds: ["gap"],
+    }],
+  );
 });
 
 test("groups trips by shape, headsign, short name, direction and ordered stops", () => {

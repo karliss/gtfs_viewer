@@ -349,33 +349,32 @@ export interface FareResult {
 export function getDateSchedule(feed: GtfsFeed, variant: RouteVariant, date: string): DateScheduleVariant {
   const grouped = new Map<number, Map<number, DateScheduleDeparture[]>>();
   let tripCount = 0;
-  const firstStop = variant.stops[0];
   for (const trip of variant.trips) {
     if (!isServiceActiveOnDate(feed, trip.fields.service_id, date)) continue;
     tripCount++;
     const tripId = trip.fields.trip_id;
     if (!tripId) continue;
-    for (const stopTime of feed.indexes.stopTimesByTripId.get(tripId) ?? []) {
-      if (firstStop !== null && stopTime.fields.stop_id !== firstStop) continue;
-      const time = stopTime.fields.departure_time || stopTime.fields.arrival_time;
-      const match = time ? /^(\d+):(\d{2})(:\d{2})?$/.exec(time) : null;
-      if (!match) continue;
-      const hour = Number(match[1]);
-      const minute = Number(match[2]);
-      if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
-      const minutes = grouped.get(hour) ?? new Map<number, DateScheduleDeparture[]>();
-      const departures = minutes.get(minute) ?? [];
-      departures.push({
-        tripId,
-        time: match[0],
-        hour,
-        minute,
-        headsign: trip.fields.trip_headsign,
-        shortName: trip.fields.trip_short_name,
-      });
-      minutes.set(minute, departures);
-      grouped.set(hour, minutes);
-    }
+    if (variant.stops.length === 0 || variant.stops[0] === null) continue;
+    const stopTime = feed.indexes.stopTimesByTripId.get(tripId)?.[0];
+    if (!stopTime) continue;
+    const time = stopTime.fields.departure_time || stopTime.fields.arrival_time;
+    const match = time ? /^(\d+):(\d{2})(:\d{2})?$/.exec(time) : null;
+    if (!match) continue;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
+    const minutes = grouped.get(hour) ?? new Map<number, DateScheduleDeparture[]>();
+    const departures = minutes.get(minute) ?? [];
+    departures.push({
+      tripId,
+      time: match[0],
+      hour,
+      minute,
+      headsign: trip.fields.trip_headsign,
+      shortName: trip.fields.trip_short_name,
+    });
+    minutes.set(minute, departures);
+    grouped.set(hour, minutes);
   }
   const rows = [...grouped.entries()].sort(([a], [b]) => a - b).map(([hour, minutes]) => ({
     hour,
@@ -673,7 +672,6 @@ function buildVariantTimetable(
   variant: RouteVariant,
   targetRange: TimetableServiceDateRange | null,
 ): VariantTimetable {
-  const firstStop = variant.stops[0];
   const serviceDays = targetRange?.serviceDays ?? null;
   const popularDayMasks = targetRange
     ? getPopularTimetableDayMasks([...targetRange.serviceDays.values()])
@@ -681,6 +679,7 @@ function buildVariantTimetable(
   const timetableDays = popularDayMasks.length > 0
     ? popularDayMasks.map(timetableDayMaskToDays)
     : [[1, 2, 3, 4, 5, 6, 7]];
+  timetableDays.sort((left, right) => left[0] - right[0]);
   const grouped = new Map<number, Map<number, Set<number | null>>>();
   for (const trip of variant.trips) {
     const tripId = trip.fields.trip_id;
@@ -690,28 +689,27 @@ function buildVariantTimetable(
       : null;
     if (targetRange
       && (!trip.fields.service_id || !serviceDays?.has(trip.fields.service_id))) continue;
-    const rows = feed.indexes.stopTimesByTripId.get(tripId)?.filter((row) =>
-      firstStop !== null && row.fields.stop_id === firstStop) ?? [];
-    for (const row of rows) {
-      const time = row.fields.departure_time || row.fields.arrival_time;
-      if (!time) continue;
-      const match = /^(\d+):(\d{2})(:\d{2})?$/.exec(time);
-      if (!match) continue;
-      const hour = Number(match[1]);
-      const minute = Number(match[2]);
-      if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
-      let minutes = grouped.get(hour);
-      if (!minutes) {
-        minutes = new Map();
-        grouped.set(hour, minutes);
-      }
-      let dayMasks = minutes.get(minute);
-      if (!dayMasks) {
-        dayMasks = new Set();
-        minutes.set(minute, dayMasks);
-      }
-      dayMasks.add(tripDays);
+    if (variant.stops.length === 0 || variant.stops[0] === null) continue;
+    const row = feed.indexes.stopTimesByTripId.get(tripId)?.[0];
+    if (!row) continue;
+    const time = row.fields.departure_time || row.fields.arrival_time;
+    if (!time) continue;
+    const match = /^(\d+):(\d{2})(:\d{2})?$/.exec(time);
+    if (!match) continue;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute > 59) continue;
+    let minutes = grouped.get(hour);
+    if (!minutes) {
+      minutes = new Map();
+      grouped.set(hour, minutes);
     }
+    let dayMasks = minutes.get(minute);
+    if (!dayMasks) {
+      dayMasks = new Set();
+      minutes.set(minute, dayMasks);
+    }
+    dayMasks.add(tripDays);
   }
   const rows: VariantTimetableRow[] = [...grouped.entries()]
     .sort(([left], [right]) => left - right)
@@ -981,13 +979,11 @@ export function getRouteVariants(feed: GtfsFeed, routeId: string): {
     ...stops.map((stop) => variantKeyPart(stop)),
   ].join("|");
 
-  const sequence = (value: number | null): number => value ?? Infinity;
   const stopsByTrip = new Map<string, (string | null)[]>();
   for (const trip of routeTrips) {
     const tripId = trip.fields.trip_id;
     if (!tripId) continue;
-    const times = [...(feed.indexes.stopTimesByTripId.get(tripId) ?? [])];
-    times.sort((a, b) => sequence(a.fields.stop_sequence) - sequence(b.fields.stop_sequence));
+    const times = feed.indexes.stopTimesByTripId.get(tripId) ?? [];
     stopsByTrip.set(tripId, times.map(({ fields }) => fields.stop_id));
   }
 
@@ -1176,6 +1172,51 @@ function parseTable(name: string, columns: string[], records: string[][], collec
   return { name, kind, columns, rows, hasExtraValues: rows.some((row) => row.extraValues.length > 0) } as GtfsTable;
 }
 
+function warnForInvalidStopSequences(
+  rows: readonly GtfsRow<"stop_times.txt">[],
+  collector?: WarningCollector,
+): void {
+  if (!collector) return;
+  const rowsByTripId = new Map<string, { row: GtfsRow<"stop_times.txt">; csvRowNumber: number }[]>();
+  for (const [index, row] of rows.entries()) {
+    const tripId = row.fields.trip_id;
+    if (!tripId) continue;
+    const tripRows = rowsByTripId.get(tripId) ?? [];
+    tripRows.push({ row, csvRowNumber: index + 2 });
+    rowsByTripId.set(tripId, tripRows);
+  }
+
+  for (const [tripId, tripRows] of rowsByTripId) {
+    const seenSequences = new Set<number>();
+    for (const { row, csvRowNumber } of tripRows) {
+      const sequence = row.fields.stop_sequence;
+      if (sequence !== null && sequence >= 1 && sequence <= tripRows.length
+        && !seenSequences.has(sequence)) {
+        seenSequences.add(sequence);
+        continue;
+      }
+      const alreadyReported = collector.all.some((warning) =>
+        warning.type === "invalid_values"
+        && warning.parameters.file === "stop_times.txt"
+        && warning.parameters.row === csvRowNumber
+        && warning.parameters.column === "stop_sequence");
+      if (alreadyReported) continue;
+      collector.add({
+        type: "invalid_stop_sequence",
+        parameters: {
+          file: "stop_times.txt",
+          row: csvRowNumber,
+          tripId,
+          value: sequence,
+          stopCount: tripRows.length,
+        },
+        relatedObjectIds: [tripId],
+        csvRowNumber,
+      });
+    }
+  }
+}
+
 export interface GtfsLoadProgress {
   phase: "extracting" | "parsing" | "indexing";
   completed: number;
@@ -1248,6 +1289,7 @@ export function reinitializeFeedIndexes(feed: GtfsFeed): void {
 
   const stopTimesByTripId = new Map<string, GtfsRow<"stop_times.txt">[]>();
   const stopTimesByStopId = new Map<string, GtfsRow<"stop_times.txt">[]>();
+  const stopSequence = (value: number | null): number => value ?? Infinity;
   for (const row of getRows("stop_times.txt")) {
     const tripId = row.fields.trip_id;
     if (tripId) {
@@ -1261,6 +1303,10 @@ export function reinitializeFeedIndexes(feed: GtfsFeed): void {
       rows.push(row);
       stopTimesByStopId.set(stopId, rows);
     }
+  }
+  for (const rows of stopTimesByTripId.values()) {
+    rows.sort((left, right) =>
+      stopSequence(left.fields.stop_sequence) - stopSequence(right.fields.stop_sequence));
   }
 
   const calendarByServiceId = new Map<string, GtfsRow<"calendar.txt">[]>();
@@ -1479,6 +1525,11 @@ export function loadGtfsFiles(
 
   if (tables.length === 0) {
     throw new Error("The selected files do not contain any GTFS .txt files.");
+  }
+
+  const stopTimesTable = tables.find((table) => table.kind === "stop_times.txt");
+  if (stopTimesTable?.kind === "stop_times.txt") {
+    warnForInvalidStopSequences(stopTimesTable.rows, collector);
   }
 
   tables.sort((a, b) => a.name.localeCompare(b.name));
